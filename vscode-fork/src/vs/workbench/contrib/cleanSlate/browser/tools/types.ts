@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { IModelService } from '../../../../../editor/common/services/model.js';
-import { ICodeEditorService } from '../../../../../editor/browser/services/codeEditorService.js';
 import { ITextFileService } from '../../../../services/textfile/common/textfiles.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { ICleanSlateIndexService, ICleanSlateConfigurationService, ICleanSlateContextService, ICleanSlateArtifactService, IMCPClientService, ICleanSlateMainService } from '../../../../services/cleanSlate/common/core/cleanSlateAI.js';
@@ -12,9 +11,10 @@ import { ICleanSlateCommandExecutionService } from '../core/cleanSlateCommandExe
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { ITerminalService } from '../../../terminal/browser/terminal.js';
 import { IMarkerService } from '../../../../../platform/markers/common/markers.js';
+import { ICodeEditorService } from '../../../../../editor/browser/services/codeEditorService.js';
+import { ICleanSlateBulkEditHost } from './cleanSlateHostTypes.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
-import { IBulkEditService } from '../../../../../editor/browser/services/bulkEditService.js';
 import { ISearchService } from '../../../../services/search/common/search.js';
 import { ILanguageFeaturesService } from '../../../../../editor/common/services/languageFeatures.js';
 import { IUndoRedoService } from '../../../../../platform/undoRedo/common/undoRedo.js';
@@ -60,7 +60,7 @@ export interface CleanSlateToolContext {
     editorService: IEditorService;
     commandExecutionService: ICleanSlateCommandExecutionService;
     browserAutomationService: ICleanSlateBrowserAutomationService;
-    bulkEditService?: IBulkEditService;
+    bulkEditService?: ICleanSlateBulkEditHost;
     searchService?: ISearchService;
     languageFeaturesService?: ILanguageFeaturesService;
     undoRedoService?: IUndoRedoService;
