@@ -5,7 +5,6 @@
 
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
 import { resolvePathToUri, isUriInIdeWorkspace } from './utils.js';
-import { InlineCleanSlateController } from '../../../../../editor/browser/cleanSlate/core/inlineCleanSlateController.js';
 import { CleanSlateFileHistory } from '../core/cleanSlateFileHistory.js';
 import { URI } from '../../../../../base/common/uri.js';
 
@@ -41,7 +40,7 @@ export const undoEditTool: CleanSlateTool = {
                     await context.codeEditorService.openCodeEditor({ resource: uri }, activeEditor);
                 }
 
-                const didUndo = InlineCleanSlateController.undoLastTrackedEdit(context.codeEditorService, uri);
+                const didUndo = context.editorDecorationHost?.undoLastTrackedEdit(uri) ?? false;
                 if (didUndo) {
                     await context.textFileService.save(uri);
                     return { success: true, message: `Successfully undid the last edit to ${input.path}.` };

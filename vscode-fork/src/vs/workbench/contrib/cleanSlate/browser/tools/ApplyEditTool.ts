@@ -10,7 +10,6 @@ import { URI } from '../../../../../base/common/uri.js';
 import { ITextModel } from '../../../../../editor/common/model.js';
 import { CleanSlateEditService, CleanSlatePlannedEdit, CleanSlateStructuredEdit } from '../core/cleanSlateEditService.js';
 import { CleanSlateDiffService } from '../core/cleanSlateDiffService.js';
-import { InlineCleanSlateController } from '../../../../../editor/browser/cleanSlate/core/inlineCleanSlateController.js';
 import { canonicalizeStructuredEdits } from './structuredEditCanonicalizer.js';
 import { CleanSlateFileHistory } from '../core/cleanSlateFileHistory.js';
 
@@ -218,15 +217,14 @@ export const applyEditTool: CleanSlateTool = {
             }
 
             // 7. Visual Decorations (Post-Apply Mode) — only when the file was revealed in the IDE.
-            const controller = editor ? InlineCleanSlateController.get(editor) : undefined;
-            if (controller) {
-                // Controller expects a specific shape for originalEdits to render the UI diff
+            if (editor && context.editorDecorationHost) {
+                // The host expects originalEdits shaped for the diff overlay.
                 const originalEditsForUI = appliedChanges.map(c => ({
                     range: c.range,
                     text: c.oldText,
                     originalStartLine: c.range.startLineNumber
                 }));
-                controller.showPostApply(plan.edits, originalEditsForUI, beforeContent);
+                context.editorDecorationHost.showPostApply(uri, plan.edits, originalEditsForUI, beforeContent);
             }
 
             // 8. Generate Granular Feedback for the Agent

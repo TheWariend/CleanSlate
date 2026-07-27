@@ -11,6 +11,7 @@ import { IInstantiationService } from '../../../../../platform/instantiation/com
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { Selection } from '../../../../../editor/common/core/selection.js';
 import { IBulkEditService } from '../../../../../editor/browser/services/bulkEditService.js';
+import { CleanSlateEditorDecorationHost } from '../tools/cleanSlateEditorDecorationHost.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { IEnvironmentService } from '../../../../../platform/environment/common/environment.js';
 import { ILanguageFeaturesService } from '../../../../../editor/common/services/languageFeatures.js';
@@ -93,6 +94,8 @@ export class CleanSlateAgent {
     private readonly dialogueContextService: CleanSlateDialogueContextService;
     private readonly codeGraphService: CleanSlateCodeGraphService;
     private readonly historyBuilder = new CleanSlateAgentHistoryBuilder();
+    /** Inline diff decorations, backed by the editor's inline controller. */
+    private readonly editorDecorationHost: CleanSlateEditorDecorationHost;
     private sessionId: string | undefined;
     private mcpToolsLoaded = false;
     private mcpToolsLoadPromise: Promise<void> | undefined;
@@ -129,6 +132,7 @@ export class CleanSlateAgent {
         @ICommandService private readonly commandService: ICommandService,
         @IWorkspaceTrustManagementService private readonly workspaceTrustManagementService: IWorkspaceTrustManagementService
     ) {
+        this.editorDecorationHost = new CleanSlateEditorDecorationHost(this.codeEditorService);
         this.toolContext = {
             surface: 'ide',
             modelService: this.modelService,
@@ -149,6 +153,7 @@ export class CleanSlateAgent {
             editorService: this.editorService,
             searchService: this.searchService,
             bulkEditService: this.bulkEditService,
+            editorDecorationHost: this.editorDecorationHost,
             languageFeaturesService: this.languageFeaturesService,
             commandExecutionService: this.commandExecutionService,
             browserAutomationService: this.browserAutomationService,

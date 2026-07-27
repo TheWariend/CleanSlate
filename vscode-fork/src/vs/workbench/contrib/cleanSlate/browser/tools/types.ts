@@ -12,7 +12,7 @@ import { IWorkspaceContextService } from '../../../../../platform/workspace/comm
 import { ITerminalService } from '../../../terminal/browser/terminal.js';
 import { IMarkerService } from '../../../../../platform/markers/common/markers.js';
 import { ICodeEditorService } from '../../../../../editor/browser/services/codeEditorService.js';
-import { ICleanSlateBulkEditHost } from './cleanSlateHostTypes.js';
+import { ICleanSlateBulkEditHost, ICleanSlateEditorDecorationHost } from './cleanSlateHostTypes.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { ISearchService } from '../../../../services/search/common/search.js';
@@ -61,6 +61,8 @@ export interface CleanSlateToolContext {
     commandExecutionService: ICleanSlateCommandExecutionService;
     browserAutomationService: ICleanSlateBrowserAutomationService;
     bulkEditService?: ICleanSlateBulkEditHost;
+    /** Inline diff decorations. Absent when nothing is on screen to decorate. */
+    editorDecorationHost?: ICleanSlateEditorDecorationHost;
     searchService?: ISearchService;
     languageFeaturesService?: ILanguageFeaturesService;
     undoRedoService?: IUndoRedoService;

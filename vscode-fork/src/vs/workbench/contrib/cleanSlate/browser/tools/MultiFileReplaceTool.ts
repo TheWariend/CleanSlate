@@ -7,7 +7,6 @@ import { ResourceTextEdit } from '../../../../../editor/browser/services/bulkEdi
 import { CleanSlateEditService, CleanSlatePlannedEdit } from '../core/cleanSlateEditService.js';
 import { resolvePathToUri, isUriInIdeWorkspace, resolveTextModelHeadless } from './utils.js';
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
-import { InlineCleanSlateController } from '../../../../../editor/browser/cleanSlate/core/inlineCleanSlateController.js';
 import { canonicalizeStructuredEdits } from './structuredEditCanonicalizer.js';
 import { CleanSlateFileHistory, CleanSlateFileHistoryEntry } from '../core/cleanSlateFileHistory.js';
 import { URI } from '../../../../../base/common/uri.js';
@@ -366,8 +365,7 @@ export const multiFileReplaceTool: CleanSlateTool = {
                 readAt: Date.now()
             });
             if (isUriInIdeWorkspace(context, file.uri)) {
-                InlineCleanSlateController.registerPostApplySession(
-                    context.codeEditorService,
+                context.editorDecorationHost?.registerPostApplySession(
                     file.uri,
                     file.edits.map(edit => ({ range: edit.range, text: edit.text })),
                     file.originalEdits,
