@@ -6,7 +6,6 @@
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
 import { resolvePathToUri, isUriInIdeWorkspace } from './utils.js';
 import { Range } from '../../../../../editor/common/core/range.js';
-import { InlineCleanSlateController } from '../../../../../editor/browser/cleanSlate/core/inlineCleanSlateController.js';
 import { CleanSlateFileHistory } from '../core/cleanSlateFileHistory.js';
 import { URI } from '../../../../../base/common/uri.js';
 
@@ -82,8 +81,7 @@ Input: { files: [{path: string, content: string}] }
                 // disk; it just must not leak into the other project's editor. Mirrors write_file.
                 if (content.length > 0 && isUriInIdeWorkspace(context, uri)) {
                     const range = new Range(1, 1, 1, 1);
-                    InlineCleanSlateController.registerPostApplySession(
-                        context.codeEditorService,
+                    context.editorDecorationHost?.registerPostApplySession(
                         uri,
                         [{ range, text: content }],
                         [{ range, text: '', originalStartLine: 1 }],

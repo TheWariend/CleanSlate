@@ -7,7 +7,6 @@ import { URI } from '../../../../../base/common/uri.js';
 import { Range } from '../../../../../editor/common/core/range.js';
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
 import { resolvePathToUri, isDocumentationFile, isUriInIdeWorkspace } from './utils.js';
-import { InlineCleanSlateController } from '../../../../../editor/browser/cleanSlate/core/inlineCleanSlateController.js';
 import { CleanSlateFileHistory } from '../core/cleanSlateFileHistory.js';
 import { applyEditTool } from './ApplyEditTool.js';
 
@@ -127,8 +126,7 @@ Input: { file_path: string, content: string, open?: boolean }`,
 
             if (revealInEditor && !isDoc && content.length > 0) {
                 const range = new Range(1, 1, 1, 1);
-                InlineCleanSlateController.registerPostApplySession(
-                    context.codeEditorService,
+                context.editorDecorationHost?.registerPostApplySession(
                     uri,
                     [{ range, text: content }],
                     [{ range, text: '', originalStartLine: 1 }],

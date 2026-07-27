@@ -33,7 +33,7 @@ export interface ICleanSlateHostCodeEditor {
 export interface ICleanSlateEditorRevealHost {
 	getActiveCodeEditor(): ICleanSlateHostCodeEditor | null;
 	openCodeEditor(
-		input: { resource: URI },
+		input: { resource: URI; options?: any },
 		source: ICleanSlateHostCodeEditor | null,
 		sideBySide?: boolean
 	): Promise<ICleanSlateHostCodeEditor | null>;

@@ -7,7 +7,6 @@ import type * as TreeSitter from '@vscode/tree-sitter-wasm';
 import { ITextModel } from '../../../../../editor/common/model.js';
 import { Range } from '../../../../../editor/common/core/range.js';
 import { CleanSlateDiffService } from './cleanSlateDiffService.js';
-import { ResourceTextEdit } from '../../../../../editor/browser/services/bulkEditService.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { IMarker, IMarkerService, MarkerSeverity } from '../../../../../platform/markers/common/markers.js';
 import { ITreeSitterLibraryService } from '../../../../../editor/common/services/treeSitter/treeSitterLibraryService.js';
@@ -248,11 +247,6 @@ export class CleanSlateEditService {
 			throw new Error(this.formatFailure(plan));
 		}
 		return plan.edits.map(edit => ({ range: edit.range, text: edit.text }));
-	}
-
-	public static computeWorkspaceEdits(uri: URI, model: ITextModel, request: CleanSlateEditPlanRequest): ResourceTextEdit[] {
-		const ops = this.computeEdits(model, request);
-		return ops.map(op => new ResourceTextEdit(uri, { range: op.range, text: op.text }, model.getVersionId()));
 	}
 
 	public static formatFailure(result: CleanSlateEditPlanResult): string {

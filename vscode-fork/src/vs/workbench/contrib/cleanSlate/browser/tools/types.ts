@@ -10,8 +10,7 @@ import { ICleanSlateIndexService, ICleanSlateConfigurationService, ICleanSlateCo
 import { ICleanSlateCommandExecutionService } from '../core/cleanSlateCommandExecutionService.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { IMarkerService } from '../../../../../platform/markers/common/markers.js';
-import { ICodeEditorService } from '../../../../../editor/browser/services/codeEditorService.js';
-import { ICleanSlateBulkEditHost, ICleanSlateEditorDecorationHost } from './cleanSlateHostTypes.js';
+import { ICleanSlateBulkEditHost, ICleanSlateEditorDecorationHost, ICleanSlateEditorRevealHost } from './cleanSlateHostTypes.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { ISearchService } from '../../../../services/search/common/search.js';
@@ -36,7 +35,7 @@ export interface CleanSlateToolContext {
     sessionId?: string;
     signal?: AbortSignal;
     modelService: IModelService;
-    codeEditorService: ICodeEditorService;
+    codeEditorService: ICleanSlateEditorRevealHost;
     textFileService: ITextFileService;
     fileService: IFileService;
     contextService: ICleanSlateContextService;
