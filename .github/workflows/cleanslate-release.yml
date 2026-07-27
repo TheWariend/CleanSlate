@@ -1,0 +1,276 @@
+name: CleanSlate Release
+run-name: CleanSlate Release
+
+on:
+  # Bumping VERSION and pushing the "CleanSlate Release" commit starts the build.
+  # The paths filter means ordinary pushes to main never create a run.
+  push:
+    branches:
+      - main
+    paths:
+      - VERSION
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to build, without the leading v (e.g. 1.0.1). Defaults to the VERSION file.
+        required: false
+      target:
+        description: Which platform to build
+        required: true
+        type: choice
+        default: macos
+        options:
+          # - windows
+          - macos
+          # - all
+
+permissions:
+  contents: write
+
+# One release at a time. Two pushes in quick succession must not race to
+# publish the same tag.
+concurrency:
+  group: cleanslate-release
+  cancel-in-progress: false
+
+env:
+  VSCODE_QUALITY: stable
+  CLEANSLATE_RELEASE_DIR: .build/cleanslate-release
+  RELEASES_REPOSITORY: TheWariend/CleanSlate-Releases
+  BUILD_SOURCEVERSION: ${{ github.sha }}
+  GITHUB_TOKEN: ${{ github.token }}
+
+jobs:
+  build-macos:
+    name: Build macOS app
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'macos' || inputs.target == 'all' }}
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: vscode-fork
+    steps:
+      - uses: actions/checkout@v4
+
+      # The release version comes from the VERSION file, and everything
+      # downstream reads these outputs.
+      - name: Resolve version
+        id: version
+        working-directory: ${{ github.workspace }}
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${INPUT_VERSION:-$(tr -d '[:space:]' < VERSION)}"
+          if ! printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::VERSION must be MAJOR.MINOR.PATCH, got '$version'."
+            exit 1
+          fi
+          tag="v$version"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "::error::$tag already exists. Bump VERSION."
+            exit 1
+          fi
+          # Versions must move forward. `sort -V` puts the greater version last.
+          latest="$(gh release view --repo "$RELEASES_REPOSITORY" --json tagName -q .tagName 2>/dev/null || true)"
+          if [ -n "$latest" ]; then
+            highest="$(printf '%s\n%s\n' "${latest#v}" "$version" | sort -V | tail -n1)"
+            if [ "$highest" != "$version" ] || [ "${latest#v}" = "$version" ]; then
+              echo "::error::$version is not higher than the latest release ($latest)."
+              exit 1
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Building $tag."
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: vscode-fork/.nvmrc
+          cache: npm
+          cache-dependency-path: vscode-fork/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm config set fetch-retries 5
+          npm config set fetch-retry-mintimeout 20000
+          npm config set fetch-retry-maxtimeout 120000
+          npm ci
+
+      - name: Download built-in extensions
+        run: npm run download-builtin-extensions
+
+      - name: Build CleanSlate for macOS
+        env:
+          VSCODE_ARCH: arm64
+        run: npm run gulp -- vscode-darwin-arm64
+
+      - name: Import macOS signing certificate
+        env:
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          RUNNER_TEMP_KEYCHAIN_PASSWORD: cleanslate-build-keychain
+        run: |
+          set -euo pipefail
+          if [ -z "${MACOS_CERTIFICATE_BASE64:-}" ] || [ -z "${MACOS_CERTIFICATE_PASSWORD:-}" ]; then
+            echo "Missing MACOS_CERTIFICATE_BASE64 or MACOS_CERTIFICATE_PASSWORD secret." >&2
+            exit 1
+          fi
+          security create-keychain -p "$RUNNER_TEMP_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/buildagent.keychain"
+          security set-keychain-settings -lut 21600 "$RUNNER_TEMP/buildagent.keychain"
+          security unlock-keychain -p "$RUNNER_TEMP_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/buildagent.keychain"
+          echo "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$RUNNER_TEMP/buildagent.keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -d user -s "$RUNNER_TEMP/buildagent.keychain" $(security list-keychains -d user | sed 's/[ "]//g')
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$RUNNER_TEMP_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/buildagent.keychain"
+          identity="$(security find-identity -v -p codesigning "$RUNNER_TEMP/buildagent.keychain" | grep 'Developer ID Application' | grep -oEi '([0-9A-F]{40})' | head -n 1)"
+          if [ -z "$identity" ]; then
+            echo "No macOS codesigning identity found in imported certificate." >&2
+            exit 1
+          fi
+          echo "CODESIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Codesign macOS app
+        env:
+          AGENT_TEMPDIRECTORY: ${{ runner.temp }}
+          VSCODE_ARCH: arm64
+        run: DEBUG=electron-osx-sign* node build/darwin/sign.ts "$GITHUB_WORKSPACE"
+
+      - name: Stage macOS artifacts
+        env:
+          VSCODE_ARCH: arm64
+        run: |
+          set -euo pipefail
+          mkdir -p "$CLEANSLATE_RELEASE_DIR"
+          ditto -c -k --sequesterRsrc --keepParent "$GITHUB_WORKSPACE/VSCode-darwin-arm64/CleanSlate.app" "$CLEANSLATE_RELEASE_DIR/CleanSlate-darwin-arm64.zip"
+          node build/darwin/create-dmg.ts "$GITHUB_WORKSPACE" "$CLEANSLATE_RELEASE_DIR"
+          mv "$CLEANSLATE_RELEASE_DIR/VSCode-darwin-arm64.dmg" "$CLEANSLATE_RELEASE_DIR/CleanSlate-darwin-arm64.dmg"
+
+      - name: Notarize macOS artifacts
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" ] || [ -z "${APPLE_TEAM_ID:-}" ]; then
+            echo "Missing APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, or APPLE_TEAM_ID secret." >&2
+            exit 1
+          fi
+          zip="$CLEANSLATE_RELEASE_DIR/CleanSlate-darwin-arm64.zip"
+          dmg="$CLEANSLATE_RELEASE_DIR/CleanSlate-darwin-arm64.dmg"
+          codesign --force --timestamp --sign "$CODESIGN_IDENTITY" "$dmg"
+          xcrun notarytool submit "$zip" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun notarytool submit "$dmg" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl -a -vvv -t install "$dmg"
+
+      - name: Create update manifest
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="$RELEASE_TAG"
+          release_version="$RELEASE_VERSION"
+          asset_base_url="https://github.com/${RELEASES_REPOSITORY}/releases/download/${tag}/"
+          node build/cleanslate/update/create-update-manifest.mjs \
+            --artifacts "$CLEANSLATE_RELEASE_DIR" \
+            --out "$CLEANSLATE_RELEASE_DIR/cleanslate-update.json" \
+            --repository "$RELEASES_REPOSITORY" \
+            --version "$release_version" \
+            --assetBaseUrl "$asset_base_url" \
+            --strict true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::Set RELEASES_REPO_TOKEN with Contents read/write access to ${RELEASES_REPOSITORY}."
+            exit 1
+          fi
+          tag="$RELEASE_TAG"
+          if gh release view "$tag" --repo "$RELEASES_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" "$CLEANSLATE_RELEASE_DIR"/* --repo "$RELEASES_REPOSITORY" --clobber
+          else
+            gh release create "$tag" "$CLEANSLATE_RELEASE_DIR"/* --repo "$RELEASES_REPOSITORY" --title "CleanSlate $tag" --notes "CleanSlate desktop release."
+          fi
+
+      # Tag last, so a failed build leaves no tag behind and the same version
+      # can be retried by pushing a fix.
+      - name: Tag the release
+        working-directory: ${{ github.workspace }}
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "CleanSlate Bot"
+          git config user.email "bot@thewariend.com"
+          git tag -a "$RELEASE_TAG" -m "CleanSlate $RELEASE_VERSION"
+          git push origin "$RELEASE_TAG"
+
+  # build-windows:
+  #   name: Build Windows app
+  #   if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'windows' || inputs.target == 'all' }}
+  #   runs-on: windows-2022
+  #   defaults:
+  #     run:
+  #       working-directory: vscode-fork
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version-file: vscode-fork/.nvmrc
+  #         cache: npm
+  #         cache-dependency-path: vscode-fork/package-lock.json
+  #
+  #     - name: Install dependencies
+  #       run: |
+  #         npm config set fetch-retries 5
+  #         npm config set fetch-retry-mintimeout 20000
+  #         npm config set fetch-retry-maxtimeout 120000
+  #         npm ci
+  #
+  #     - name: Download built-in extensions
+  #       run: npm run download-builtin-extensions
+  #
+  #     - name: Build CleanSlate for Windows
+  #       shell: pwsh
+  #       env:
+  #         VSCODE_ARCH: x64
+  #       run: |
+  #         npm run gulp -- vscode-win32-x64
+  #         npm run gulp -- vscode-win32-x64-inno-updater
+  #         npm run gulp -- vscode-win32-x64-user-setup
+  #
+  #     - name: Stage Windows artifacts
+  #       shell: pwsh
+  #       env:
+  #         INPUT_TAG: ${{ github.event.inputs.tag }}
+  #       run: |
+  #         $ErrorActionPreference = "Stop"
+  #         $tag = if ($env:INPUT_TAG) { $env:INPUT_TAG } else { $env:GITHUB_REF_NAME }
+  #         $version = $tag -replace '^v', ''
+  #         New-Item -ItemType Directory -Force -Path $env:CLEANSLATE_RELEASE_DIR
+  #         Copy-Item ".build/win32-x64/user-setup/VSCodeSetup.exe" "$env:CLEANSLATE_RELEASE_DIR/CleanSlateUserSetup-x64-$version.exe"
+  #         Compress-Archive -Path "$env:GITHUB_WORKSPACE/VSCode-win32-x64/*" -DestinationPath "$env:CLEANSLATE_RELEASE_DIR/CleanSlate-win32-x64-$version.zip" -Force
+  #
+  #     - uses: actions/upload-artifact@v4
+  #       with:
+  #         name: cleanslate-windows
+  #         path: vscode-fork/.build/cleanslate-release/*
+  #         if-no-files-found: error

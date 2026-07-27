@@ -1,0 +1,100 @@
+.ai-inline-preview {
+	opacity: 0.5;
+	font-style: italic;
+}
+
+
+.ai-preview-original {
+	opacity: 0.3;
+	text-decoration: line-through;
+}
+
+.ai-preview-widget {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 8px;
+	background-color: var(--vscode-editor-background);
+	border: 1px solid var(--vscode-widget-border);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+	border-radius: 6px;
+	z-index: 50;
+	font-family: var(--vscode-font-family);
+	font-size: 12px;
+}
+
+.ai-preview-label {
+	font-weight: 600;
+	color: var(--vscode-foreground);
+	margin-right: 4px;
+}
+
+.ai-preview-actions {
+	display: flex;
+	gap: 4px;
+}
+
+.ai-preview-button {
+	cursor: pointer;
+	padding: 2px 6px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: 2px;
+	font-size: 11px;
+	background-color: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+}
+
+.ai-preview-button:hover {
+	background-color: var(--vscode-button-secondaryHoverBackground);
+}
+
+.ai-preview-button.accept {
+	background-color: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	border: 1px solid var(--vscode-button-border, transparent);
+}
+
+.ai-preview-button.accept:hover {
+	background-color: var(--vscode-button-hoverBackground);
+}
+
+.ai-preview-button {
+	background-color: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+}
+
+.ai-preview-actions {
+	display: flex;
+	flex-direction: row;
+	gap: 6px;
+	align-items: center;
+}
+
+.ai-preview-input {
+	background-color: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border: 1px solid var(--vscode-input-border);
+	border-radius: 2px;
+	padding: 2px 4px;
+	font-family: inherit;
+	font-size: inherit;
+	width: 200px;
+	outline: none;
+}
+
+.ai-preview-input:focus {
+	border-color: var(--vscode-focusBorder);
+}
+
+.ai-preview-content {
+	padding: 4px 8px;
+	border-bottom: 1px solid var(--vscode-widget-border);
+	margin-bottom: 4px;
+	max-width: 400px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: pre-wrap;
+	font-family: var(--vscode-editor-font-family);
+	font-size: var(--vscode-editor-font-size);
+}

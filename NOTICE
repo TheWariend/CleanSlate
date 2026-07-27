@@ -1,0 +1,39 @@
+CleanSlate
+Copyright (c) 2026 CleanSlate
+
+This product includes software developed by third parties, listed below.
+CleanSlate itself is distributed under the MIT License; see LICENSE.
+
+--------------------------------------------------------------------------------
+
+Visual Studio Code
+Copyright (c) 2015 - present Microsoft Corporation
+Licensed under the MIT License.
+https://github.com/microsoft/vscode
+
+CleanSlate is a fork of Visual Studio Code. The full license text is retained
+in vscode-fork/LICENSE.txt. CleanSlate is not affiliated with, endorsed by, or
+sponsored by Microsoft.
+
+--------------------------------------------------------------------------------
+
+opencode
+Copyright (c) opencode contributors
+Licensed under the MIT License.
+https://github.com/anomalyco/opencode
+
+Portions of the following files are derived from opencode:
+
+  vscode-fork/src/vs/workbench/services/cleanSlate/common/core/
+    cleanSlateModelCapabilities.ts
+      - the OpenAI reasoning-effort tier tables and their version gates
+
+--------------------------------------------------------------------------------
+
+Xenova/bge-small-en-v1.5
+Licensed under the MIT License.
+https://huggingface.co/Xenova/bge-small-en-v1.5
+
+The quantized ONNX model bundled at
+vscode-fork/resources/cleanslate/models/Xenova/bge-small-en-v1.5/ is used for
+on-device code embeddings.

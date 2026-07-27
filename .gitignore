@@ -1,0 +1,15 @@
+.DS_Store
+node_modules
+out
+dist
+.env
+VSCode-darwin-arm64/
+
+# Local editor settings (may contain API keys)
+**/.vscode/settings.json
+
+# Build logs
+compile_errors.txt
+compile_output.txt
+ts_errors*.txt
+launch_error.log

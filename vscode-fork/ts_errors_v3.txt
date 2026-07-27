@@ -1,0 +1,10 @@
+npm warn Unknown project config "disturl". This will stop working in the next major version of npm.
+npm warn Unknown project config "target". This will stop working in the next major version of npm.
+npm warn Unknown project config "ms_build_id". This will stop working in the next major version of npm.
+npm warn Unknown project config "runtime". This will stop working in the next major version of npm.
+npm warn Unknown project config "build_from_source". This will stop working in the next major version of npm.
+npm warn Unknown project config "timeout". This will stop working in the next major version of npm.
+
+> cleanslate@1.110.0 compile-check-ts-native
+> tsgo --project ./src/tsconfig.json --noEmit --skipLibCheck
+

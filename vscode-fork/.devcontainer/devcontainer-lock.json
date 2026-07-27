@@ -1,0 +1,14 @@
+{
+  "features": {
+    "ghcr.io/devcontainers/features/desktop-lite:": {
+      "version": "1.2.8",
+      "resolved": "ghcr.io/devcontainers/features/desktop-lite@sha256:14ac23fd59afab939e6562ba6a1f42a659a805e4c574a1be23b06f28eb3b0b71",
+      "integrity": "sha256:14ac23fd59afab939e6562ba6a1f42a659a805e4c574a1be23b06f28eb3b0b71"
+    },
+    "ghcr.io/devcontainers/features/rust:1": {
+      "version": "1.3.3",
+      "resolved": "ghcr.io/devcontainers/features/rust@sha256:2521a8eeb4911bfcb22557c8394870ea22eb790d8e52219ddc5182f62d388995",
+      "integrity": "sha256:2521a8eeb4911bfcb22557c8394870ea22eb790d8e52219ddc5182f62d388995"
+    }
+  }
+}
