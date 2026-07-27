@@ -18,6 +18,7 @@ import { CleanSlateNativeToolTranscript } from './cleanSlateNativeToolTranscript
 import { CleanSlateToolCallLedger } from './cleanSlateToolCallLedger.js';
 import { CleanSlateContextBudgetManager } from './cleanSlateContextBudgetManager.js';
 import { buildExecutionNoProgressStopMessage, buildExecutionNoToolRecoveryPrompt, buildSerializedToolCallRecoveryPrompt, detectSerializedToolCallSyntax } from './cleanSlateExecutionLoopPrompts.js';
+import { CLEANSLATE_CODING_PROFILE, ICleanSlateDomainProfile } from './cleanSlateDomainProfile.js';
 import { extractPlanFileEntries, planEntryTargetToPath } from '../tools/cleanSlatePlanArtifactPolicy.js';
 import { evaluateExecutionCommandPolicy } from './cleanSlateCommandPolicy.js';
 import { getWebResearchFinalAnswerPrompt } from './cleanSlateRuntimePromptBuilder.js';
@@ -123,6 +124,17 @@ export interface IExecutionQueryRunOptions extends IExecutionRunOptions {
 }
 
 export class CleanSlateExecutionQueryEngine {
+    /**
+     * Describes what the tools in play do to the workspace, so the loop can
+     * reason about mutation, verification and concurrency without knowing any
+     * individual tool by name.
+     */
+    private readonly profile: ICleanSlateDomainProfile = CLEANSLATE_CODING_PROFILE;
+
+    /** The check the loop runs itself after mutations. */
+    private get verificationToolName(): string {
+        return this.profile.deterministicVerificationTool ?? '';
+    }
     private static readonly DEFAULT_MODEL_TURN_INTERVAL_MS = 0;
     private static readonly NORMAL_MODEL_TURN_INTERVAL_MS = 0;
     private static readonly PLANNING_MODEL_TURN_INTERVAL_MS = 0;
@@ -132,64 +144,6 @@ export class CleanSlateExecutionQueryEngine {
 	private static readonly MAX_CONSECUTIVE_COMPACTION_FAILURES = 3;
 	/** A summary must earn back meaningful context before another automatic summary is useful. */
 	private static readonly AUTO_COMPACTION_REGROWTH_RATIO = 1.25;
-    private static readonly PARALLEL_EXECUTION_NATIVE_TOOL_NAMES = new Set([
-        'web_search',
-        'web_fetch',
-        'execute_command',
-        'read_background_command'
-    ]);
-    /**
-     * Plan-mode tool profile: discovery and research tools only, plus
-     * ask_question for decision points and submit_artifact as the sole exit.
-     * No mutation tools, no execute_command, and no model-facing completion
-     * tool.
-     */
-    private static readonly PLAN_MODE_NATIVE_TOOL_NAMES = new Set([
-        'ask_question',
-        'submit_artifact',
-        'read_file',
-        'read_file_range',
-        'list_dir',
-        'find_by_name',
-        'grep_search',
-        'search_workspace',
-        'search_codebase',
-        'semantic_search',
-        'web_search',
-        'web_fetch',
-        'get_open_files',
-        'read_reference',
-        'read_symbols',
-        'get_definitions',
-        'find_references',
-        'read_lints',
-        'browser_open',
-        'browser_get_url',
-        'browser_snapshot',
-        'browser_click',
-        'browser_hover',
-        'browser_fill',
-        'browser_check',
-        'browser_select',
-        'browser_upload',
-        'browser_type',
-        'browser_key',
-        'browser_scroll',
-        'browser_screenshot',
-        'browser_diagnostics',
-        'browser_dialog',
-        'browser_clipboard',
-        'browser_tabs',
-        'browser_new_tab',
-        'browser_select_tab',
-        'browser_close_tab',
-        'browser_wait',
-        'browser_start_annotation',
-        'browser_stop_annotation',
-        'browser_list_annotations',
-        'browser_delete_annotation',
-        'browser_clear_annotations'
-    ]);
     private lastModelTurnStartedAt: number | undefined;
     private readonly executionPhase: CleanSlateAgentExecutionPhase;
     private readonly filesModifiedService = new CleanSlateFilesModifiedService();
@@ -573,7 +527,7 @@ export class CleanSlateExecutionQueryEngine {
                     if (verificationResult.result) {
                         messages.push({
                             role: 'system',
-                            content: `Deterministic read_lints verification result:\n${serializeToolResultForPrompt('read_lints', verificationResult.result)}`
+                            content: `Deterministic ${this.verificationToolName} verification result:\n${serializeToolResultForPrompt(this.verificationToolName, verificationResult.result)}`
                         });
                     }
                     const verificationFailed = verificationResult.result?.success === false;
@@ -621,7 +575,7 @@ export class CleanSlateExecutionQueryEngine {
                     for (const recoveryPrompt of recoveryPrompts) {
                         this.appendPendingRecoveryPrompt(queryState, recoveryPrompt);
                     }
-                    activeTaskSessionService.setPendingRecovery(queryState.pendingRecoveryPrompt, { toolName: 'apply_edit', code: 'recovery_required' });
+                    activeTaskSessionService.setPendingRecovery(queryState.pendingRecoveryPrompt, { toolName: this.profile.recoveryMutationTool ?? '', code: 'recovery_required' });
                     messages.push({
                         role: 'system',
                         content: queryState.pendingRecoveryPrompt ?? recoveryPrompts.join('\n\n')
@@ -749,7 +703,7 @@ export class CleanSlateExecutionQueryEngine {
         inputSummary: unknown,
         activeTaskSessionService: CleanSlateTaskSessionService
     ): boolean {
-        if (toolName !== 'ask_question' || result?.success === false || !result?.planning_question) {
+        if (toolName !== this.profile.questionTool || result?.success === false || !result?.planning_question) {
             return false;
         }
         const summary = typeof result?.summary === 'string' && result.summary.trim().length > 0
@@ -1172,12 +1126,12 @@ export class CleanSlateExecutionQueryEngine {
 			// tool is exposed, so normal mode receives every enabled tool.
 			return nativeTools;
 		}
-		return nativeTools.filter(tool => CleanSlateExecutionQueryEngine.PLAN_MODE_NATIVE_TOOL_NAMES.has(tool.name));
+		return nativeTools.filter(tool => this.profile.planModeTools.has(tool.name));
     }
 
     private isParallelToolCall(toolCall: ParsedToolCall): boolean {
         return this.options.getToolCategory(toolCall.toolName) === 'discovery'
-            || CleanSlateExecutionQueryEngine.PARALLEL_EXECUTION_NATIVE_TOOL_NAMES.has(toolCall.toolName);
+            || this.profile.parallelSafeTools.has(toolCall.toolName);
     }
 
     private async * streamToolExecutionParts(
@@ -1215,7 +1169,7 @@ export class CleanSlateExecutionQueryEngine {
         // only sees the read-only tool list, but tool calls parsed from text
         // bypass that filter — this is the hard guarantee that plan mode
         // cannot mutate the workspace or run commands.
-        if (queryState.planMode && !CleanSlateExecutionQueryEngine.PLAN_MODE_NATIVE_TOOL_NAMES.has(toolCall.toolName)) {
+        if (queryState.planMode && !this.profile.planModeTools.has(toolCall.toolName)) {
             const result = {
                 success: false,
                 code: 'plan_mode_tool_blocked',
@@ -1252,7 +1206,7 @@ export class CleanSlateExecutionQueryEngine {
             return;
         }
 
-        if (toolCall.toolName === 'execute_command') {
+        if (toolCall.toolName === this.profile.primaryCommandTool) {
 			const commandPolicy = evaluateExecutionCommandPolicy(toolCall.input);
             if (!commandPolicy.allowed) {
                 const result = {
@@ -1272,7 +1226,7 @@ export class CleanSlateExecutionQueryEngine {
         }
 
         if (queryState.pendingRecoveryPrompt
-            && (toolCall.toolName === 'apply_edit' || toolCall.toolName === 'multi_file_replace')
+            && this.profile.structuredEditTools.has(toolCall.toolName)
             && this.editPolicy.countStructuredEdits(toolCall) !== 1) {
             const result = {
                 success: false,
@@ -1308,7 +1262,7 @@ export class CleanSlateExecutionQueryEngine {
             yield this.nativeToolTranscript.attachToolCallId(part, executableToolCall.id);
         }
 
-        if (queryState.planMode && executableToolCall.toolName === 'submit_artifact') {
+        if (queryState.planMode && executableToolCall.toolName === this.profile.completionTool) {
             const conclusion = this.resolvePlanModeConclusion(executableToolCall, lastToolResult, activeTaskSessionService);
             if (conclusion) {
                 yield conclusion;
@@ -1396,14 +1350,14 @@ export class CleanSlateExecutionQueryEngine {
         const input = { paths: scopedPaths };
         let lastResult: any;
         for await (const part of this.executeToolWithTracking(
-            'read_lints',
+            this.verificationToolName,
             input,
             { signal }
         )) {
             if (part.type === 'tool_result') {
                 lastResult = part.result;
                 this.recordToolResultForGuardrails(
-                    { toolName: 'read_lints', input },
+                    { toolName: this.verificationToolName, input },
                     part.result,
                     guardState
                 );
@@ -1422,7 +1376,7 @@ export class CleanSlateExecutionQueryEngine {
             guardState.pendingVerificationPaths.clear();
         }
         guardState.verificationSummaries.push({
-            toolName: 'read_lints',
+            toolName: this.verificationToolName,
             paths: scopedPaths,
             passed: markerIssues.length === 0 && lastResult?.success !== false,
             lintIssueCount,
@@ -1498,7 +1452,7 @@ export class CleanSlateExecutionQueryEngine {
 
 	private hasFailedUserRequestedOrVerificationCommand(guardState: IExecutionGuardState): boolean {
 		return guardState.terminalSummaries.some(summary =>
-			summary.toolName === 'execute_command'
+			summary.toolName === this.profile.primaryCommandTool
 			&& summary.success === false
 			&& (summary.intent === 'verification' || summary.intent === 'user_requested')
 		);
@@ -1567,7 +1521,7 @@ export class CleanSlateExecutionQueryEngine {
             if (summary.success !== true) {
                 continue;
             }
-            const command = summary.command ? `"${summary.command}"` : 'execute_command';
+            const command = summary.command ? `"${summary.command}"` : (this.profile.primaryCommandTool ?? 'the command');
             const intent = summary.intent ? ` (${summary.intent})` : '';
             proofSummaries.push(`${command} succeeded${intent}`);
         }
@@ -1753,7 +1707,7 @@ export class CleanSlateExecutionQueryEngine {
     }
 
     private recordTerminalSummary(toolCall: ParsedToolCall, result: any, guardState: IExecutionGuardState): void {
-        if (toolCall.toolName !== 'execute_command' && toolCall.toolName !== 'start_background_command') {
+        if (!this.profile.commandTools.has(toolCall.toolName)) {
             return;
         }
 
@@ -1801,7 +1755,7 @@ export class CleanSlateExecutionQueryEngine {
 
     private getUnresolvedFailedGoalCommand(guardState: IExecutionGuardState): IExecutionTerminalSummary | undefined {
         const failedCommand = [...guardState.terminalSummaries].reverse().find(summary =>
-            summary.toolName === 'execute_command'
+            summary.toolName === this.profile.primaryCommandTool
             && summary.success === false
             && this.isFailedGoalCommand(summary)
         );
