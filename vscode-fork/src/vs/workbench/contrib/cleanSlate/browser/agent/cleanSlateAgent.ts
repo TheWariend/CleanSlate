@@ -48,7 +48,6 @@ import { ICleanSlateCommandApprovalService } from '../core/cleanSlateCommandAppr
 import { applyRequestedModeToExecutionSettings, CLEANSLATE_REQUESTED_MODE, CleanSlateRequestedMode, normalizePhaseForExecutionFlow } from './cleanSlateExecutionProfile.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
-import { ITerminalService } from '../../../terminal/browser/terminal.js';
 import { IMarkerService } from '../../../../../platform/markers/common/markers.js';
 import { CleanSlateTaskKind, CleanSlateTaskLifecycleStatus, CleanSlateTurnIntent, CleanSlateWorkspaceShape } from '../core/cleanSlateTaskState.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
@@ -115,7 +114,6 @@ export class CleanSlateAgent {
         @IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
         @ICleanSlateConfigurationService private readonly configService: ICleanSlateConfigurationService,
         @IFileService private readonly fileService: IFileService,
-        @ITerminalService private readonly terminalService: ITerminalService,
         @IMarkerService private readonly markerService: IMarkerService,
         @ICleanSlateArtifactService private readonly artifactService: ICleanSlateArtifactService,
         @IInstantiationService private readonly instantiationService: IInstantiationService,
@@ -144,7 +142,6 @@ export class CleanSlateAgent {
             workspaceContextService: this.workspaceContextService,
             ideWorkspaceContextService: this.workspaceContextService,
             configService: this.configService,
-            terminalService: this.terminalService,
             markerService: this.markerService,
             artifactService: this.artifactService,
             mcpClientService: this.mcpClientService,

@@ -3,47 +3,6 @@
  * Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Event } from '../../../../../base/common/event.js';
-import { ITerminalInstance } from '../../../terminal/browser/terminal.js';
-import { CleanSlateToolContext } from './types.js';
-
-export const AGENT_TERMINAL_NAME = 'CleanSlate Agent';
-
-export async function waitForTerminalProcessReady(terminal: ITerminalInstance): Promise<void> {
-    if (typeof terminal.processId === 'number') {
-        return;
-    }
-
-    await Promise.race([
-        Event.toPromise(Event.once(terminal.onProcessIdReady)).then(() => undefined),
-        new Promise<void>(resolve => setTimeout(resolve, 5000))
-    ]);
-}
-
-export async function getOrCreateAgentTerminal(context: CleanSlateToolContext): Promise<ITerminalInstance> {
-    const existing = context.terminalService.instances.find((terminal: ITerminalInstance) =>
-        !terminal.isDisposed &&
-        terminal.shellLaunchConfig.name === AGENT_TERMINAL_NAME &&
-        terminal.shellLaunchConfig.isFeatureTerminal
-    );
-    if (existing) {
-        await waitForTerminalProcessReady(existing);
-        return existing;
-    }
-
-    const terminal = await context.terminalService.createTerminal({
-        config: {
-            name: AGENT_TERMINAL_NAME,
-            hideFromUser: true,
-            forcePersist: true,
-            isFeatureTerminal: true,
-            useShellEnvironment: true
-        }
-    } as any);
-
-    await waitForTerminalProcessReady(terminal);
-    return terminal;
-}
 
 export function normalizeTerminalOutput(text: string): string {
     //  Normalize line endings to LF

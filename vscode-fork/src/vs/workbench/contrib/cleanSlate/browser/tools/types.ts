@@ -9,7 +9,6 @@ import { IFileService } from '../../../../../platform/files/common/files.js';
 import { ICleanSlateIndexService, ICleanSlateConfigurationService, ICleanSlateContextService, ICleanSlateArtifactService, IMCPClientService, ICleanSlateMainService } from '../../../../services/cleanSlate/common/core/cleanSlateAI.js';
 import { ICleanSlateCommandExecutionService } from '../core/cleanSlateCommandExecutionService.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
-import { ITerminalService } from '../../../terminal/browser/terminal.js';
 import { IMarkerService } from '../../../../../platform/markers/common/markers.js';
 import { ICodeEditorService } from '../../../../../editor/browser/services/codeEditorService.js';
 import { ICleanSlateBulkEditHost, ICleanSlateEditorDecorationHost } from './cleanSlateHostTypes.js';
@@ -51,7 +50,6 @@ export interface CleanSlateToolContext {
      */
     ideWorkspaceContextService?: IWorkspaceContextService;
     configService: ICleanSlateConfigurationService;
-    terminalService: ITerminalService;
     markerService: IMarkerService;
     artifactService: ICleanSlateArtifactService;
     mcpClientService?: IMCPClientService;
