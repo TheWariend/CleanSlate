@@ -76,7 +76,9 @@ export const applyEditTool: CleanSlateTool = {
                     await context.codeEditorService.openCodeEditor({ resource: uri }, activeEditor);
                 }
                 editor = context.codeEditorService.getActiveCodeEditor();
-                if (!editor) throw new Error('apply_edit: No active code editor found.');
+                // No editor means nothing to reveal into — a headless host, or a
+                // reveal the workbench declined. The edit still applies to disk;
+                // only the on-screen diff is skipped.
             }
             const beforeContent = model.getValue();
             const beforeVersionId = model.getVersionId();

@@ -97,7 +97,10 @@ export const readFileTool: CleanSlateTool = {
             } else {
                 const fileContent = await context.textFileService.read(uri);
                 content = fileContent.value;
-                languageId = fileContent.encoding || 'plaintext';
+                // `read` reports a text encoding, not a language. With no model
+                // resolved there is nothing to ask, so leave the default rather
+                // than reporting "utf8" as the file's language.
+                languageId = 'plaintext';
             }
             const totalLines = content.split('\n').length;
             const totalBytes = estimateCleanSlateUtf8Bytes(content);
