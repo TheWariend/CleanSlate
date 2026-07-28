@@ -251,7 +251,9 @@ export class CleanSlateNodeAgentRuntime {
 	}
 
 	dispose(): void {
-		(this.headlessRuntime.getToolContext().commandExecutionService as { dispose?: () => void }).dispose?.();
+		const context = this.headlessRuntime.getToolContext();
+		(context.commandExecutionService as { dispose?: () => void }).dispose?.();
+		void (context.browserAutomationService as { dispose?: () => Promise<void> }).dispose?.();
 	}
 
 	private buildPromptContext(): string {

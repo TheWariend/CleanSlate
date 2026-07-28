@@ -43,6 +43,7 @@ import { CleanSlateAnthropicMessageAdapter } from './cleanSlateAnthropicMessageA
 import { CleanSlateOpenAIMessageAdapter } from './cleanSlateOpenAIMessageAdapter.js';
 import { CleanSlateProviderSchemaNormalizer } from './cleanSlateProviderSchemaNormalizer.js';
 import { normalizeToolName } from '../protocol/cleanSlateProviderMessageTransforms.js';
+import { CleanSlateNodeWebRetrieval } from './cleanSlateNodeWebRetrieval.js';
 
 interface IReasoningTagSplitState {
 	inside: boolean;
@@ -68,6 +69,7 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 	private readonly openAIMessageAdapter = new CleanSlateOpenAIMessageAdapter();
 	private readonly anthropicMessageAdapter = new CleanSlateAnthropicMessageAdapter(this.providerSchemaNormalizer);
 	private readonly commandService: CleanSlateNodeCommandService;
+	private readonly webRetrieval = new CleanSlateNodeWebRetrieval();
 	readonly onDidPublishThreadSession: Event<ICleanSlateThreadSessionUpdate> = Event.None;
 
 	constructor(rootPath: string = process.cwd()) {
@@ -820,11 +822,11 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 		})();
 		return emitter.event;
 	}
-	webSearch(_options: ICleanSlateWebSearchOptions, _token: CancellationToken): Promise<ICleanSlateWebSearchResponse> {
-		return this.unsupported('web search');
+	webSearch(options: ICleanSlateWebSearchOptions, token: CancellationToken): Promise<ICleanSlateWebSearchResponse> {
+		return this.webRetrieval.search(options, token);
 	}
-	webFetch(_options: ICleanSlateWebFetchOptions, _token: CancellationToken): Promise<ICleanSlateWebFetchResponse> {
-		return this.unsupported('web fetch');
+	webFetch(options: ICleanSlateWebFetchOptions, token: CancellationToken): Promise<ICleanSlateWebFetchResponse> {
+		return this.webRetrieval.fetch(options, token);
 	}
 	localEmbeddings(_options: ICleanSlateLocalEmbeddingOptions, _token: CancellationToken): Promise<ICleanSlateLocalEmbeddingResponse> {
 		return this.unsupported('local embeddings');

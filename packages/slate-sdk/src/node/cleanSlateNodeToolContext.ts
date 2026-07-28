@@ -9,6 +9,7 @@ import { Emitter } from '../core/event.js';
 import { IWorkspaceFolder } from '../host/workspace.js';
 import { CleanSlateNodeFileService, CleanSlateNodeModelService, CleanSlateNodeTextFileService } from './cleanSlateNodeFileServices.js';
 import { CleanSlateNodeCommandService } from './cleanSlateNodeCommandService.js';
+import { CleanSlateNodeBrowserAutomation } from './cleanSlateNodeBrowserAutomation.js';
 
 /**
  * A single-folder workspace rooted at the directory the run was pointed at.
@@ -70,6 +71,7 @@ export function createCleanSlateNodeToolContext(options: ICleanSlateNodeRuntimeO
 	const modelService = new CleanSlateNodeModelService(textFileService);
 	const workspaceContextService = new CleanSlateNodeWorkspaceService(options.rootPath);
 	const commandExecutionService = new CleanSlateNodeCommandService(path.resolve(options.rootPath));
+	const browserAutomationService = new CleanSlateNodeBrowserAutomation();
 	const artifacts = new Map<string, any>();
 	const artifactEmitter = new Emitter<any>();
 	let nextArtifactId = 1;
@@ -92,6 +94,7 @@ export function createCleanSlateNodeToolContext(options: ICleanSlateNodeRuntimeO
 		modelService,
 		workspaceContextService,
 		commandExecutionService,
+		browserAutomationService,
 		codeEditorService: noEditorOpen,
 		configService: {
 			getConfiguration: () => options.configuration,
