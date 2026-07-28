@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToString } from 'ink';
 import { test } from 'node:test';
-import { commandPaletteSelection, formatActivityStatus, formatHeaderModeLabel, formatModelTerminationMessage, ModelTerminationNotice, nextInteractiveMode } from '../tui.js';
+import { commandPaletteSelection, formatActivityStatus, formatHeaderModeLabel, formatModelTerminationMessage, ModelTerminationNotice, nextInteractiveMode, runtimeModeForInteractiveMode } from '../tui.js';
 
 test('TUI activity status stays concise and hides internal turn details', () => {
 	assert.equal(formatActivityStatus('thinking'), 'Thinking…');
@@ -17,9 +17,10 @@ test('TUI activity status stays concise and hides internal turn details', () => 
 	assert.doesNotMatch(formatActivityStatus('thinking'), /turn|context/i);
 });
 
-test('TUI header only exposes planning mode', () => {
-	assert.equal(formatHeaderModeLabel('execution'), '');
+test('TUI header exposes the active interactive mode', () => {
 	assert.equal(formatHeaderModeLabel('planning'), 'PLAN');
+	assert.equal(formatHeaderModeLabel('accept-edits'), 'ACCEPT EDITS');
+	assert.equal(formatHeaderModeLabel('manual'), 'MANUAL');
 });
 
 test('command palette executes complete commands with one Enter and keeps argument commands editable', () => {
@@ -36,9 +37,13 @@ test('command palette executes complete commands with one Enter and keeps argume
 	}), { value: '/model ', execute: false });
 });
 
-test('Shift+Tab cycles into and out of planning mode', () => {
-	assert.equal(nextInteractiveMode('execution'), 'planning');
-	assert.equal(nextInteractiveMode('planning'), 'execution');
+test('Shift+Tab cycles planning, accept-edits, and manual modes', () => {
+	assert.equal(nextInteractiveMode('planning'), 'accept-edits');
+	assert.equal(nextInteractiveMode('accept-edits'), 'manual');
+	assert.equal(nextInteractiveMode('manual'), 'planning');
+	assert.equal(runtimeModeForInteractiveMode('planning'), 'planning');
+	assert.equal(runtimeModeForInteractiveMode('accept-edits'), 'execution');
+	assert.equal(runtimeModeForInteractiveMode('manual'), 'execution');
 });
 
 test('model termination is presented as a dedicated notification with a continuation action', () => {

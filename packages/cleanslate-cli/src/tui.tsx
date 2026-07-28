@@ -112,6 +112,8 @@ export interface ICommandPaletteItem {
 
 const COMMAND_PALETTE_ITEMS: readonly ICommandPaletteItem[] = [
 	{ id: '/plan', label: 'Plan mode', description: 'Turn planning mode on' },
+	{ id: '/accept-edits', label: 'Accept edits', description: 'Apply file edits without asking' },
+	{ id: '/manual', label: 'Manual approval', description: 'Review and approve each file edit' },
 	{ id: '/fix', label: 'Fix', description: 'Fix bugs and root causes', requiresArguments: true },
 	{ id: '/explain', label: 'Explain', description: 'Explain relevant code', requiresArguments: true },
 	{ id: '/test', label: 'Test', description: 'Write comprehensive tests', requiresArguments: true },
@@ -689,12 +691,26 @@ export function formatActivityStatus(status: string): string {
 	}
 }
 
-export function formatHeaderModeLabel(mode: 'execution' | 'planning'): string {
-	return mode === 'planning' ? 'PLAN' : '';
+export type CliInteractiveMode = 'planning' | 'accept-edits' | 'manual';
+
+export function formatHeaderModeLabel(mode: CliInteractiveMode): string {
+	switch (mode) {
+		case 'planning': return 'PLAN';
+		case 'accept-edits': return 'ACCEPT EDITS';
+		case 'manual': return 'MANUAL';
+	}
 }
 
-export function nextInteractiveMode(mode: 'execution' | 'planning'): 'execution' | 'planning' {
-	return mode === 'planning' ? 'execution' : 'planning';
+export function nextInteractiveMode(mode: CliInteractiveMode): CliInteractiveMode {
+	switch (mode) {
+		case 'planning': return 'accept-edits';
+		case 'accept-edits': return 'manual';
+		case 'manual': return 'planning';
+	}
+}
+
+export function runtimeModeForInteractiveMode(mode: CliInteractiveMode): 'execution' | 'planning' {
+	return mode === 'planning' ? 'planning' : 'execution';
 }
 
 type DiffSyntaxKind = 'plain' | 'keyword' | 'string' | 'number' | 'comment';
@@ -1052,11 +1068,11 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const [modelTermination, setModelTermination] = useState<IModelTerminationNotice | undefined>();
 	const [allowCommandsForSession, setAllowCommandsForSession] = useState(false);
 	const allowCommandsRef = useRef(false);
-	const [allowEditsForSession, setAllowEditsForSession] = useState(false);
-	const allowEditsRef = useRef(false);
 	const [showSessions, setShowSessions] = useState(false);
 	const [models, setModels] = useState<string[] | undefined>();
-	const [mode, setMode] = useState<'execution' | 'planning'>('execution');
+	const initialInteractiveMode: CliInteractiveMode = args.permissionMode === 'full' ? 'accept-edits' : 'manual';
+	const [mode, setMode] = useState<CliInteractiveMode>(initialInteractiveMode);
+	const modeRef = useRef<CliInteractiveMode>(initialInteractiveMode);
 	const [permissionMode, setPermissionMode] = useState<CliPermissionMode>(args.permissionMode);
 	const [expandedToolGroups, setExpandedToolGroups] = useState<Set<string>>(() => new Set());
 	const [expandedToolEntries, setExpandedToolEntries] = useState<Set<string>>(() => new Set());
@@ -1084,6 +1100,10 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const activeToolItemId = selectedToolItemId && toolItemIds.includes(selectedToolItemId)
 		? selectedToolItemId
 		: toolGroupIds.at(-1);
+	const selectInteractiveMode = (nextMode: CliInteractiveMode) => {
+		modeRef.current = nextMode;
+		setMode(nextMode);
+	};
 	const toggleToolItem = (itemId = activeToolItemId) => {
 		if (!itemId) {
 			return;
@@ -1169,8 +1189,12 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				if (!permissionPolicy.allowsTool(request)) {
 					return false;
 				}
-				if (!permissionPolicy.requiresToolApproval(request) || allowEditsRef.current) {
+				const isEdit = request.category === 'edit' || request.category === 'creation';
+				if (!isEdit || modeRef.current === 'accept-edits') {
 					return true;
+				}
+				if (modeRef.current === 'planning') {
+					return false;
 				}
 				let preview: ICliEditPreview | undefined;
 				try {
@@ -1231,8 +1255,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 
 	const decideEditApproval = (approved: boolean, forSession = false) => {
 		if (forSession && approved) {
-			allowEditsRef.current = true;
-			setAllowEditsForSession(true);
+			selectInteractiveMode('accept-edits');
 		}
 		const pending = editApproval;
 		setEditApproval(undefined);
@@ -1338,7 +1361,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		}
 	};
 
-	const executeTask = async (task: string, requestedMode: 'execution' | 'planning' = mode) => {
+	const executeTask = async (task: string, requestedMode: 'execution' | 'planning' = runtimeModeForInteractiveMode(mode)) => {
 		const runtime = runtimeRef.current;
 		if (!runtime) {
 			return;
@@ -1389,8 +1412,6 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		setShowSessions(false);
 		setAllowCommandsForSession(false);
 		allowCommandsRef.current = false;
-		setAllowEditsForSession(false);
-		allowEditsRef.current = false;
 		createRuntime(next);
 		setStatus('resumed');
 	};
@@ -1451,7 +1472,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		if (value === '/help') {
-			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /plan · shift+tab mode · /permissions read-only|default|full · /context · /changes · /diff · /details · /doctor · /logout · /clear · /exit'));
+			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /plan · /accept-edits · /manual · shift+tab mode · /permissions read-only|default|full · /context · /changes · /diff · /details · /doctor · /logout · /clear · /exit'));
 			return;
 		}
 		if (value === '/details') {
@@ -1521,11 +1542,11 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		if (value.startsWith('/mode ')) {
 			const requested = value.slice('/mode '.length).trim();
 			if (requested === 'plan' || requested === 'planning') {
-				setMode('planning');
+				selectInteractiveMode('planning');
 				append(transcriptEntry('system', 'Planning mode enabled. Write tools are filtered until the plan is complete.'));
 			} else if (requested === 'execution' || requested === 'execute') {
-				setMode('execution');
-				append(transcriptEntry('system', 'Execution mode enabled.'));
+				selectInteractiveMode('manual');
+				append(transcriptEntry('system', 'Manual edit approval enabled.'));
 			} else {
 				append(transcriptEntry('error', 'Use /mode plan or /mode execution.'));
 			}
@@ -1542,8 +1563,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				return;
 			}
 			setPermissionMode(requested);
-			setAllowEditsForSession(false);
-			allowEditsRef.current = false;
+			selectInteractiveMode(requested === 'full' ? 'accept-edits' : 'manual');
 			setAllowCommandsForSession(false);
 			allowCommandsRef.current = false;
 			args.permissionMode = requested;
@@ -1554,13 +1574,23 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		if (value === '/plan') {
-			setMode('planning');
+			selectInteractiveMode('planning');
 			append(transcriptEntry('system', 'Planning mode enabled. Write tools are filtered until the plan is complete.'));
 			return;
 		}
 		if (value.startsWith('/plan ')) {
-			setMode('planning');
+			selectInteractiveMode('planning');
 			await executeTask(value.slice('/plan '.length).trim(), 'planning');
+			return;
+		}
+		if (value === '/accept-edits') {
+			selectInteractiveMode('accept-edits');
+			append(transcriptEntry('system', 'Accept edits enabled. File edits will be applied without asking.'));
+			return;
+		}
+		if (value === '/manual') {
+			selectInteractiveMode('manual');
+			append(transcriptEntry('system', 'Manual edit approval enabled.'));
 			return;
 		}
 		if (value === '/status') {
@@ -1693,7 +1723,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			toggleToolItem();
 		} else if (key.tab && key.shift && !running) {
 			const nextMode = nextInteractiveMode(mode);
-			setMode(nextMode);
+			selectInteractiveMode(nextMode);
 			setInput('');
 			setCommandSelection(0);
 		} else if (paletteSize > 0 && key.upArrow) {
@@ -1760,8 +1790,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const activeDiffReview = diffReviews?.[Math.min(diffReviewIndex, diffReviews.length - 1)];
 	const contextStatus = [
 		contextUsage !== undefined ? `context ${Math.round(contextUsage)}%` : '',
-		allowCommandsForSession ? 'commands allowed' : '',
-		allowEditsForSession ? 'edits allowed' : ''
+		allowCommandsForSession ? 'commands allowed' : ''
 	].filter(Boolean).join(' · ');
 	const headerModeLabel = formatHeaderModeLabel(mode);
 
