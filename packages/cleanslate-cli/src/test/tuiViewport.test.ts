@@ -37,18 +37,29 @@ test('TUI uses compact turn markers without speaker labels', () => {
 
 test('TUI keeps compact tool activity inline and expands every call on demand', () => {
 	const tools: ICliTranscriptEntry[] = [
-		{ ...entry('list-1', 'tool', 'completed'), toolName: 'list_dir', status: 'completed' },
+		{ ...entry('search-1', 'tool', 'completed'), toolName: 'search_workspace', status: 'completed' },
+		{ ...entry('search-2', 'tool', 'completed'), toolName: 'grep_search', status: 'completed' },
 		{ ...entry('read-1', 'tool', 'lib/main.dart'), toolName: 'read_file', status: 'completed', detail: { input: { path: 'lib/main.dart' }, result: { success: true } } },
-		{ ...entry('read-2', 'tool', 'too large'), toolName: 'read_file', status: 'failed', detail: { input: { path: 'lib/large.dart' }, result: { success: false } } }
+		{ ...entry('read-2', 'tool', 'too large'), toolName: 'read_file', status: 'failed', detail: { input: { path: 'lib/large.dart' }, result: { success: false } } },
+		{
+			...entry('edit-1', 'tool', 'completed'),
+			toolName: 'apply_edit',
+			status: 'completed',
+			detail: {
+				input: { file_path: '/workspace/lib/main.dart' },
+				result: { success: true, path: '/workspace/lib/main.dart', added: 2, deleted: 1 }
+			}
+		},
+		{ ...entry('lints-1', 'tool', 'clean'), toolName: 'read_lints', status: 'completed' }
 	];
 
 	const compact = transcriptViewportLines(tools, 100);
-	assert.deepEqual(compact.map(line => line.text), ['● Listed · Read ×2 · 1 failed']);
+	assert.deepEqual(compact.map(line => line.text), ['● Searched ×2 · Read ×2 · Edited main.dart +2 -1 · Checked lints · 1 failed']);
 
 	const expanded = transcriptViewportLines(tools, 100, true);
-	assert.equal(expanded.length, 3);
-	assert.match(expanded[1].text, /read_file.*lib\/main\.dart/);
-	assert.match(expanded[2].text, /× read_file.*lib\/large\.dart/);
+	assert.equal(expanded.length, 6);
+	assert.match(expanded[2].text, /read_file.*lib\/main\.dart/);
+	assert.match(expanded[3].text, /× read_file.*lib\/large\.dart/);
 });
 
 test('TUI viewport never renders more rows than its content budget', () => {

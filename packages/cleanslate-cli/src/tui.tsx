@@ -14,7 +14,13 @@ import { apiKeyFromEnvironment, ICliArguments, SUPPORTED_PROVIDERS } from './arg
 import { CleanSlateTerminalLogo } from './brand.js';
 import { LiveTurnBuffer } from './liveTurn.js';
 import { CliProjectContext } from './projectContext.js';
-import { CliWorkspaceReview } from './workspaceReview.js';
+import {
+	CliWorkspaceReview,
+	cliTurnDiffReviews,
+	ICliDiffFile,
+	ICliDiffReview,
+	ICliDiffLine
+} from './workspaceReview.js';
 import { CliPermissionMode, CliPermissionPolicy } from './permissions.js';
 import {
 	CliSessionStore,
@@ -86,7 +92,7 @@ const COMMAND_PALETTE_ITEMS: readonly ICommandPaletteItem[] = [
 	{ id: '/status', label: 'Status', description: 'Show provider and execution status' },
 	{ id: '/context', label: 'Context', description: 'Show loaded project instructions and attached files' },
 	{ id: '/changes', label: 'Changes', description: 'Show the current Git working tree' },
-	{ id: '/diff', label: 'Diff', description: 'Review staged and unstaged changes' },
+	{ id: '/diff', label: 'Diff', description: 'Review current and per-turn changes' },
 	{ id: '/doctor', label: 'Doctor', description: 'Check the CLI, provider, workspace, and integrations' },
 	{ id: '/logout', label: 'Log out', description: 'Remove the saved credential for the active provider' },
 	{ id: '/clear', label: 'Clear', description: 'Clear conversation and transcript' },
@@ -234,11 +240,14 @@ const TOOL_ACTIVITY_LABELS: Record<string, string> = {
 	list_dir: 'Listed',
 	find_by_name: 'Searched',
 	search_files: 'Searched',
+	search_workspace: 'Searched',
+	grep_search: 'Searched',
 	read_file: 'Read',
 	read_file_range: 'Read',
 	read_symbols: 'Inspected symbols',
 	get_definitions: 'Found definitions',
 	find_references: 'Found references',
+	read_lints: 'Checked lints',
 	apply_edit: 'Edited',
 	write_file: 'Wrote',
 	execute_command: 'Ran commands'
@@ -246,16 +255,52 @@ const TOOL_ACTIVITY_LABELS: Record<string, string> = {
 
 function compactToolActivity(entries: readonly ICliTranscriptEntry[]): string {
 	const counts = new Map<string, number>();
+	const order: string[] = [];
+	const editEntries: ICliTranscriptEntry[] = [];
 	let failures = 0;
 	let running = 0;
 	for (const entry of entries) {
+		if (['apply_edit', 'multi_file_replace', 'write_file'].includes(entry.toolName ?? '')
+			&& entry.status === 'completed') {
+			if (editEntries.length === 0) {
+				order.push('@@edit');
+			}
+			editEntries.push(entry);
+			continue;
+		}
 		const label = TOOL_ACTIVITY_LABELS[entry.toolName ?? '']
 			?? (entry.toolName ?? 'Tool').replace(/_/g, ' ');
+		if (!counts.has(label)) {
+			order.push(label);
+		}
 		counts.set(label, (counts.get(label) ?? 0) + 1);
 		failures += entry.status === 'failed' ? 1 : 0;
 		running += entry.status === 'running' ? 1 : 0;
 	}
-	const activity = [...counts].map(([label, count]) => count > 1 ? `${label} ×${count}` : label).join(' · ');
+	let editActivity = '';
+	if (editEntries.length > 0) {
+		const results = editEntries.map(entry => {
+			const detail = entry.detail && typeof entry.detail === 'object'
+				? entry.detail as { input?: any; result?: any }
+				: undefined;
+			return detail?.result ?? detail;
+		});
+		const paths = [...new Set(results.map(result => result?.path).filter(Boolean))];
+		const added = results.reduce((total, result) => total + (Number(result?.added) || 0), 0);
+		const deleted = results.reduce((total, result) => total + (Number(result?.deleted) || 0), 0);
+		const target = paths.length === 1
+			? String(paths[0]).split(/[\\/]/).at(-1)
+			: `${paths.length || editEntries.length} files`;
+		editActivity = `Edited ${target} +${added} -${deleted}`;
+	}
+	const activities = order.map(label => {
+		if (label === '@@edit') {
+			return editActivity;
+		}
+		const count = counts.get(label) ?? 0;
+		return count > 1 ? `${label} ×${count}` : label;
+	}).filter(Boolean);
+	const activity = activities.join(' · ');
 	const suffix = [
 		failures > 0 ? `${failures} failed` : '',
 		running > 0 ? `${running} running` : ''
@@ -401,6 +446,60 @@ function TranscriptViewportLine({ line }: { line: ITranscriptViewportLine }) {
 	}
 }
 
+export function visibleDiffLines(file: ICliDiffFile, rows: number, scrollOffset: number): ICliDiffLine[] {
+	const safeRows = Math.max(1, rows);
+	const maxOffset = Math.max(0, file.lines.length - safeRows);
+	const offset = Math.max(0, Math.min(maxOffset, scrollOffset));
+	return file.lines.slice(offset, offset + safeRows);
+}
+
+function DiffLine({ line }: { line: ICliDiffLine }) {
+	switch (line.kind) {
+		case 'addition':
+			return <Text color={COLORS.success} wrap="truncate-end">{line.text || '+'}</Text>;
+		case 'deletion':
+			return <Text color={COLORS.danger} wrap="truncate-end">{line.text || '-'}</Text>;
+		case 'hunk':
+			return <Text color={COLORS.warning} wrap="truncate-end">{line.text}</Text>;
+		case 'header':
+			return <Text color={COLORS.muted} wrap="truncate-end">{line.text}</Text>;
+		default:
+			return <Text wrap="truncate-end">{line.text || ' '}</Text>;
+	}
+}
+
+function DiffViewer(props: {
+	review: ICliDiffReview;
+	reviewIndex: number;
+	reviewCount: number;
+	fileIndex: number;
+	scrollOffset: number;
+	rows: number;
+}): React.JSX.Element {
+	const { review, reviewIndex, reviewCount, fileIndex, scrollOffset, rows } = props;
+	const file = review.files[fileIndex];
+	if (!file) {
+		return <Text color={COLORS.muted}>No changes in this view.</Text>;
+	}
+	const lineRows = Math.max(1, rows - 2);
+	const lines = visibleDiffLines(file, lineRows, scrollOffset);
+	return (
+		<Box flexDirection="column" height={rows} overflow="hidden">
+			<Box justifyContent="space-between">
+				<Text bold>Diff · {review.label}</Text>
+				<Text>
+					<Text color={COLORS.success}>+{review.additions}</Text>
+					<Text color={COLORS.danger}> -{review.deletions}</Text>
+				</Text>
+			</Box>
+			<Text color={COLORS.muted} wrap="truncate-middle">
+				{reviewIndex + 1}/{reviewCount} · {fileIndex + 1}/{review.files.length} · {file.scope} · {file.path}
+			</Text>
+			{lines.map((line, index) => <DiffLine key={`${scrollOffset + index}-${line.kind}-${line.text}`} line={line} />)}
+		</Box>
+	);
+}
+
 function ApprovalBox({ approval, decide }: { approval: IPendingApproval; decide: (approved: boolean, session?: boolean) => void }) {
 	useInput((input, key) => {
 		if (input === 'y' || key.return) {
@@ -506,6 +605,10 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const [mode, setMode] = useState<'execution' | 'planning'>('execution');
 	const [permissionMode, setPermissionMode] = useState<CliPermissionMode>(args.permissionMode);
 	const [showToolDetails, setShowToolDetails] = useState(false);
+	const [diffReviews, setDiffReviews] = useState<ICliDiffReview[] | undefined>();
+	const [diffReviewIndex, setDiffReviewIndex] = useState(0);
+	const [diffFileIndex, setDiffFileIndex] = useState(0);
+	const [diffScrollOffset, setDiffScrollOffset] = useState(0);
 	const [scrollOffset, setScrollOffset] = useState(0);
 	const abortRef = useRef<AbortController | undefined>(undefined);
 	const runtimeRef = useRef<CleanSlateNodeAgentRuntime | undefined>(undefined);
@@ -937,7 +1040,19 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		if (value === '/diff') {
-			append(transcriptEntry('system', workspaceReview.diff().slice(0, 100_000)));
+			const reviews = [
+				workspaceReview.review(),
+				...cliTurnDiffReviews(transcript)
+			].filter(review => review.files.length > 0);
+			if (reviews.length === 0) {
+				append(transcriptEntry('system', 'No file changes to review.'));
+				return;
+			}
+			setDiffReviews(reviews);
+			setDiffReviewIndex(0);
+			setDiffFileIndex(0);
+			setDiffScrollOffset(0);
+			setShowToolDetails(false);
 			return;
 		}
 		if (value === '/doctor') {
@@ -963,6 +1078,38 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	};
 
 	useInput((inputValue, key) => {
+		if (diffReviews) {
+			const activeReview = diffReviews[diffReviewIndex];
+			if (key.escape || inputValue === 'q') {
+				setDiffReviews(undefined);
+				setDiffReviewIndex(0);
+				setDiffFileIndex(0);
+				setDiffScrollOffset(0);
+			} else if (key.leftArrow) {
+				setDiffReviewIndex(value => Math.max(0, value - 1));
+				setDiffFileIndex(0);
+				setDiffScrollOffset(0);
+			} else if (key.rightArrow) {
+				setDiffReviewIndex(value => Math.min(diffReviews.length - 1, value + 1));
+				setDiffFileIndex(0);
+				setDiffScrollOffset(0);
+			} else if (key.upArrow) {
+				setDiffFileIndex(value => Math.max(0, value - 1));
+				setDiffScrollOffset(0);
+			} else if (key.downArrow) {
+				setDiffFileIndex(value => Math.min((activeReview?.files.length ?? 1) - 1, value + 1));
+				setDiffScrollOffset(0);
+			} else if (inputValue === 'k') {
+				setDiffScrollOffset(value => Math.max(0, value - 1));
+			} else if (inputValue === 'j') {
+				setDiffScrollOffset(value => value + 1);
+			} else if (key.pageUp) {
+				setDiffScrollOffset(value => Math.max(0, value - Math.max(5, Math.floor((stdout.rows ?? 30) / 2))));
+			} else if (key.pageDown) {
+				setDiffScrollOffset(value => value + Math.max(5, Math.floor((stdout.rows ?? 30) / 2)));
+			}
+			return;
+		}
 		if (approval || showSessions || models) {
 			return;
 		}
@@ -1009,7 +1156,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			? Math.min(10, store.list().length) + 3
 			: models
 				? Math.min(10, models.length) + 3
-				: commandItems.length > 0
+				: !diffReviews && commandItems.length > 0
 					? Math.min(10, commandItems.length) + 3
 					: 0;
 	const footerRows = Math.max(1, Math.ceil(FOOTER_HELP.length / viewportColumns));
@@ -1032,6 +1179,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		() => visibleTranscriptLines(viewportEntries, contentWidth, contentRows, scrollOffset, showToolDetails),
 		[viewportEntries, contentWidth, contentRows, scrollOffset, showToolDetails]
 	);
+	const activeDiffReview = diffReviews?.[Math.min(diffReviewIndex, diffReviews.length - 1)];
 	const contextStatus = `${contextUsage !== undefined ? `context ${Math.round(contextUsage)}%` : ''}`
 		+ `${contextUsage !== undefined && allowCommandsForSession ? ' · ' : ''}`
 		+ `${allowCommandsForSession ? 'commands allowed' : ''}`;
@@ -1059,26 +1207,39 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			</Box>
 
 			<Box flexDirection="column" paddingX={1} height={contentRows} overflow="hidden">
-				{visibleLines.length === 0 && !showToolDetails && (
-					<>
-						{contentRows >= 1 && <Text bold>What are we building?</Text>}
-						{contentRows >= 2 && <Text color={COLORS.muted}>Describe a task.</Text>}
-						{contentRows >= 3 && <Text color={COLORS.muted}>Type /help for commands.</Text>}
-					</>
-				)}
-				{visibleLines.map(line => <TranscriptViewportLine key={line.key} line={line} />)}
+				{activeDiffReview && diffReviews
+					? <DiffViewer
+						review={activeDiffReview}
+						reviewIndex={diffReviewIndex}
+						reviewCount={diffReviews.length}
+						fileIndex={Math.min(diffFileIndex, activeDiffReview.files.length - 1)}
+						scrollOffset={diffScrollOffset}
+						rows={contentRows}
+					/>
+					: <>
+						{visibleLines.length === 0 && !showToolDetails && (
+							<>
+								{contentRows >= 1 && <Text bold>What are we building?</Text>}
+								{contentRows >= 2 && <Text color={COLORS.muted}>Describe a task.</Text>}
+								{contentRows >= 3 && <Text color={COLORS.muted}>Type /help for commands.</Text>}
+							</>
+						)}
+						{visibleLines.map(line => <TranscriptViewportLine key={line.key} line={line} />)}
+					</>}
 			</Box>
 
 			{approval && <ApprovalBox approval={approval} decide={decideApproval} />}
 			{showSessions && <SessionPicker sessions={store.list()} onSelect={switchSession} onCancel={() => setShowSessions(false)} />}
 			{models && <ModelPicker models={models} current={args.model} onSelect={switchModel} onCancel={() => setModels(undefined)} />}
-			{!approval && !showSessions && !models && commandItems.length > 0 && (
+			{!approval && !showSessions && !models && !diffReviews && commandItems.length > 0 && (
 				<CommandPalette items={commandItems} selected={visibleCommandSelection} />
 			)}
 
 			{!approval && !showSessions && !models && (
 				<Box borderStyle="round" borderColor={running ? COLORS.muted : COLORS.accent} paddingX={1}>
-					{running
+					{diffReviews
+						? <Text color={COLORS.muted}>←/→ view · ↑/↓ file · j/k scroll · PgUp/PgDn page · Esc close</Text>
+						: running
 						? <>
 							<Text color={COLORS.warning}><Spinner type="line" /> {formatActivityStatus(status)}</Text>
 							<Text color={COLORS.muted}> · Esc to cancel</Text>
@@ -1087,7 +1248,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 							<Text color={COLORS.accent}>{showToolDetails ? '' : '❯ '}</Text>
 							<PromptInput
 								value={showToolDetails ? '' : input}
-								focus={!showToolDetails}
+								focus={!showToolDetails && !diffReviews}
 								onChange={value => {
 									if (showToolDetails) {
 										return;

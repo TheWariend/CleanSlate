@@ -80,7 +80,7 @@ Run `cleanslate` in a terminal to open the TUI. Useful commands:
 - `/clear` — clear the visible transcript
 - `/context` — inspect loaded project instructions and context usage
 - `/changes` — inspect the Git branch and working tree
-- `/diff` — review staged and unstaged changes
+- `/diff` — open the colored diff viewer for current changes and individual agent turns
 - `/doctor` — validate the CLI, provider, workspace, Git, and MCP configuration
 - `/logout` — remove the active provider credential
 - `/exit` — save and quit
@@ -88,6 +88,10 @@ Run `cleanslate` in a terminal to open the TUI. Useful commands:
 Use Page Up and Page Down for transcript scrollback. Escape cancels the active
 turn. Ctrl-O toggles the detailed tool-activity viewer; the normal transcript
 keeps consecutive calls in a compact summary. Ctrl-C exits when idle.
+
+In the diff viewer, use Left/Right to move between current changes and agent
+turns, Up/Down to select files, `j`/`k` or Page Up/Page Down to scroll, and
+Escape to return to the conversation.
 
 Typing `/` opens the searchable command palette. Use the arrow keys to select a
 command and Enter to insert it.
