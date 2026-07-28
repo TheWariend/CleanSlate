@@ -96,6 +96,7 @@ export class CleanSlateNodeAgentRuntime {
 	private readonly mainService: NodeCleanSlateMainService;
 	private readonly headlessRuntime: CleanSlateHeadlessRuntime;
 	private readonly queryRunner: CleanSlateQueryRunner;
+	private readonly cleanSlateService: CleanSlateService;
 	private readonly agentSession = new CleanSlateAgentSession();
 	private readonly threadService = new CleanSlateThreadService();
 	private readonly taskSessionService = new CleanSlateTaskSessionService();
@@ -111,6 +112,7 @@ export class CleanSlateNodeAgentRuntime {
 		const configService = new NodeConfigurationService(options.configuration);
 		this.mainService = new NodeCleanSlateMainService(this.rootPath);
 		const cleanSlateService = new CleanSlateService(configService, this.mainService, createLogger(options.logger));
+		this.cleanSlateService = cleanSlateService;
 		this.headlessRuntime = new CleanSlateHeadlessRuntime({
 			rootPath: this.rootPath,
 			configuration: options.configuration,
@@ -150,26 +152,35 @@ export class CleanSlateNodeAgentRuntime {
 	}
 
 	async *run(task: string, signal?: AbortSignal): AsyncIterable<CleanSlateStreamPart> {
+		yield* this.runInPhase(task, AgentPhase.EXECUTION, signal);
+	}
+
+	async *plan(task: string, signal?: AbortSignal): AsyncIterable<CleanSlateStreamPart> {
+		yield* this.runInPhase(task, AgentPhase.PLANNING, signal);
+	}
+
+	private async *runInPhase(task: string, phase: AgentPhase, signal?: AbortSignal): AsyncIterable<CleanSlateStreamPart> {
 		const objective = task.trim();
 		if (!objective) {
 			throw new Error('Task must not be empty.');
 		}
-		const parsed = parseSlashCommand(objective, 'Execution');
+		const mode = phase === AgentPhase.PLANNING ? 'Planning' : 'Execution';
+		const parsed = parseSlashCommand(objective, mode);
 		const seedMessages = [
 			{ role: 'system' as const, content: parsed.systemInstruction },
 			{ role: 'user' as const, content: `[CONTEXT]\n${this.buildPromptContext()}\n\nUser Request: ${parsed.userMessage}` }
 		];
 		const messages = this.agentSession.hasMessages()
-			? this.agentSession.continueWithTurn(seedMessages, { objective, mode: 'Execution', phase: AgentPhase.EXECUTION })
-			: this.agentSession.start(seedMessages, { objective, mode: 'Execution', phase: AgentPhase.EXECUTION });
+			? this.agentSession.continueWithTurn(seedMessages, { objective, mode, phase })
+			: this.agentSession.start(seedMessages, { objective, mode, phase });
 		this.threadService.addMessage('user', objective);
 		this.taskSessionService.startNewTask(
 			CleanSlateTaskKind.MODIFY_EXISTING,
 			this.workspaceIsEmpty() ? CleanSlateWorkspaceShape.EMPTY : CleanSlateWorkspaceShape.EXISTING,
 			objective
 		);
-		this.taskSessionService.setPhase(AgentPhase.EXECUTION);
-		yield* this.runMessages(messages, objective, signal);
+		this.taskSessionService.setPhase(phase);
+		yield* this.runMessages(messages, objective, phase, signal);
 	}
 
 	async *resumePendingQuestion(answer: string, signal?: AbortSignal): AsyncIterable<CleanSlateStreamPart> {
@@ -180,8 +191,9 @@ export class CleanSlateNodeAgentRuntime {
 		const objective = pending.objective?.trim() || 'Continue the current task.';
 		this.threadService.addMessage('user', answer);
 		this.taskSessionService.resumeCurrentTask();
-		this.taskSessionService.setPhase(AgentPhase.EXECUTION);
-		yield* this.runMessages(this.agentSession.getMutableMessages(), objective, signal);
+		const phase = pending.phase === AgentPhase.PLANNING ? AgentPhase.PLANNING : AgentPhase.EXECUTION;
+		this.taskSessionService.setPhase(phase);
+		yield* this.runMessages(this.agentSession.getMutableMessages(), objective, phase, signal);
 	}
 
 	getPendingQuestion(): ICleanSlatePendingAgentInteraction | undefined {
@@ -213,9 +225,14 @@ export class CleanSlateNodeAgentRuntime {
 		this.threadService.clearHistory();
 	}
 
+	getModels(): Promise<string[]> {
+		return this.cleanSlateService.getModels();
+	}
+
 	private async *runMessages(
 		messages: ReturnType<CleanSlateAgentSession['getMutableMessages']>,
 		objective: string,
+		phase: AgentPhase,
 		signal?: AbortSignal
 	): AsyncIterable<CleanSlateStreamPart> {
 		const parsingSupport = new CleanSlateAgentParsingSupport(new NodeConfigurationService(this.options.configuration));
@@ -224,13 +241,16 @@ export class CleanSlateNodeAgentRuntime {
 		for await (const part of this.queryRunner.run(
 			messages,
 			objective,
-			'Execution',
+			phase === AgentPhase.PLANNING ? 'Planning' : 'Execution',
 			await this.contextService.getContext(),
 			'',
 			this.threadService,
 			this.taskSessionService,
 			signal,
-			{ executionFlow: 'normal', executionBudget: budget }
+			{
+				executionFlow: phase === AgentPhase.PLANNING ? 'planning' : 'normal',
+				executionBudget: budget
+			}
 		)) {
 			if (part.type === 'chat_text') {
 				assistantText += part.content;
@@ -254,6 +274,7 @@ export class CleanSlateNodeAgentRuntime {
 		const context = this.headlessRuntime.getToolContext();
 		(context.commandExecutionService as { dispose?: () => void }).dispose?.();
 		void (context.browserAutomationService as { dispose?: () => Promise<void> }).dispose?.();
+		void (context.mcpClientService as { dispose?: () => Promise<void> }).dispose?.();
 	}
 
 	private buildPromptContext(): string {
@@ -292,6 +313,9 @@ export function createNodeProviderConfiguration(options: {
 	bedrockAccessKeyId?: string;
 	bedrockSecretAccessKey?: string;
 	bedrockSessionToken?: string;
+	azureEndpoint?: string;
+	azureApiVersion?: string;
+	azureDeploymentName?: string;
 }): ICleanSlateConfiguration {
 	const provider = options.provider;
 	const common = { model: options.model, apiKey: options.apiKey, baseUrl: options.baseUrl };
@@ -303,6 +327,14 @@ export function createNodeProviderConfiguration(options: {
 		maxTurns: options.maxTurns,
 		providers: {
 			...(provider === 'openai' ? { openai: common } : {}),
+			...(provider === 'azureOpenAI' ? {
+				azureOpenAI: {
+					apiKey: options.apiKey,
+					endpoint: options.azureEndpoint,
+					apiVersion: options.azureApiVersion,
+					deploymentName: options.azureDeploymentName ?? options.model
+				}
+			} : {}),
 			...(provider === 'anthropic' ? { anthropic: common } : {}),
 			...(provider === 'gemini' ? { gemini: { model: options.model, apiKey: options.apiKey } } : {}),
 			...(provider === 'grok' ? { grok: common } : {}),

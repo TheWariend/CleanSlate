@@ -10,6 +10,9 @@ import { IWorkspaceFolder } from '../host/workspace.js';
 import { CleanSlateNodeFileService, CleanSlateNodeModelService, CleanSlateNodeTextFileService } from './cleanSlateNodeFileServices.js';
 import { CleanSlateNodeCommandService } from './cleanSlateNodeCommandService.js';
 import { CleanSlateNodeBrowserAutomation } from './cleanSlateNodeBrowserAutomation.js';
+import { CleanSlateNodeIndexService } from './cleanSlateNodeIndexService.js';
+import { CleanSlateNodeMcpClient } from './cleanSlateNodeMcpClient.js';
+import { CleanSlateNodeLanguageCommands } from './cleanSlateNodeLanguageCommands.js';
 
 /**
  * A single-folder workspace rooted at the directory the run was pointed at.
@@ -72,6 +75,9 @@ export function createCleanSlateNodeToolContext(options: ICleanSlateNodeRuntimeO
 	const workspaceContextService = new CleanSlateNodeWorkspaceService(options.rootPath);
 	const commandExecutionService = new CleanSlateNodeCommandService(path.resolve(options.rootPath));
 	const browserAutomationService = new CleanSlateNodeBrowserAutomation();
+	const indexService = new CleanSlateNodeIndexService(path.resolve(options.rootPath));
+	const mcpClientService = new CleanSlateNodeMcpClient(path.resolve(options.rootPath), options.configuration.mcpServers);
+	const commandService = new CleanSlateNodeLanguageCommands(path.resolve(options.rootPath));
 	const artifacts = new Map<string, any>();
 	const artifactEmitter = new Emitter<any>();
 	let nextArtifactId = 1;
@@ -134,10 +140,9 @@ export function createCleanSlateNodeToolContext(options: ICleanSlateNodeRuntimeO
 		contextService: {
 			getContext: async () => ({ activeFile: undefined, openFiles: [] })
 		},
-		indexService: {
-			search: async () => [],
-			isIndexing: () => false
-		},
+		indexService,
+		mcpClientService,
+		commandService,
 		requestCommandApproval: options.approveCommand
 			?? (async () => false),
 		onProgress: options.onProgress,

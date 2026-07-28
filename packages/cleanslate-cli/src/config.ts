@@ -13,10 +13,12 @@ export interface ICliConfig {
 	provider?: CliProvider;
 	model?: string;
 	baseUrl?: string;
-	reasoningLevel?: 'none' | 'low' | 'medium' | 'high';
+	reasoningLevel?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 	maxTurns?: number;
 	bedrockRegion?: string;
 	bedrockProfile?: string;
+	azureEndpoint?: string;
+	azureApiVersion?: string;
 }
 
 export function getCleanSlateHome(env: NodeJS.ProcessEnv = process.env): string {

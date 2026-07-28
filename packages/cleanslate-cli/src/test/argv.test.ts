@@ -49,4 +49,17 @@ describe('CLI argv', () => {
 		assert.equal(args.sessionId, 'session-123');
 		assert.equal(args.listSessions, true);
 	});
+
+	test('supports Azure aliases and extended reasoning levels', () => {
+		const args = parseArguments([
+			'--provider', 'azure',
+			'--model', 'deployment',
+			'--azure-endpoint', 'https://example.openai.azure.com',
+			'--reasoning', 'xhigh'
+		], { AZURE_OPENAI_API_KEY: 'secret' });
+		assert.equal(args.provider, 'azureOpenAI');
+		assert.equal(args.azureEndpoint, 'https://example.openai.azure.com');
+		assert.equal(args.reasoningLevel, 'xhigh');
+		assert.equal(args.apiKey, 'secret');
+	});
 });

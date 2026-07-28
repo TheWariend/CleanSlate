@@ -78,6 +78,9 @@ function validateProvider(args: ICliArguments): void {
 	if (args.provider === 'bedrock' && !args.bedrockRegion) {
 		throw new Error('Bedrock requires --aws-region, AWS_REGION, or AWS_DEFAULT_REGION.');
 	}
+	if (args.provider === 'azureOpenAI' && !args.azureEndpoint) {
+		throw new Error('Azure OpenAI requires --azure-endpoint or AZURE_OPENAI_ENDPOINT.');
+	}
 }
 
 function validateOneShot(args: ICliArguments): void {
@@ -149,7 +152,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 			args,
 			store: sessionStore,
 			initialSession,
-			initialTask: args.task
+			initialTask: args.task,
+			onConfigurationChange: changed => configStore.save(configFromArguments(changed))
 		}), { exitOnCtrlC: false });
 		await app.waitUntilExit();
 		return 0;
@@ -175,6 +179,8 @@ function applyStoredConfig(args: ICliArguments, config: ICliConfig): void {
 	args.maxTurns ??= config.maxTurns;
 	args.bedrockRegion ??= config.bedrockRegion;
 	args.bedrockProfile ??= config.bedrockProfile;
+	args.azureEndpoint ??= config.azureEndpoint;
+	args.azureApiVersion ??= config.azureApiVersion;
 }
 
 function configFromArguments(args: ICliArguments): ICliConfig {
@@ -186,7 +192,9 @@ function configFromArguments(args: ICliArguments): ICliConfig {
 		reasoningLevel: args.reasoningLevel,
 		maxTurns: args.maxTurns,
 		bedrockRegion: args.bedrockRegion,
-		bedrockProfile: args.bedrockProfile
+		bedrockProfile: args.bedrockProfile,
+		azureEndpoint: args.azureEndpoint,
+		azureApiVersion: args.azureApiVersion
 	};
 }
 
@@ -233,7 +241,10 @@ async function runOneShot(
 			maxTurns: args.maxTurns,
 			bedrockRegion: args.bedrockRegion,
 			bedrockCredentialMode: args.bedrockProfile ? 'profile' : 'default',
-			bedrockProfile: args.bedrockProfile
+			bedrockProfile: args.bedrockProfile,
+			azureEndpoint: args.azureEndpoint,
+			azureApiVersion: args.azureApiVersion,
+			azureDeploymentName: args.model
 		}),
 		approveCommand: request => requestCommandApproval(request),
 		onProgress: event => {

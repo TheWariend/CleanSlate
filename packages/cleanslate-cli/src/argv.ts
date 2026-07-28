@@ -3,7 +3,7 @@
  * Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-export const SUPPORTED_PROVIDERS = ['openai', 'anthropic', 'gemini', 'grok', 'nvidia', 'openrouter', 'custom', 'bedrock'] as const;
+export const SUPPORTED_PROVIDERS = ['openai', 'azureOpenAI', 'anthropic', 'gemini', 'grok', 'nvidia', 'openrouter', 'custom', 'bedrock'] as const;
 export type CliProvider = typeof SUPPORTED_PROVIDERS[number];
 
 export interface ICliArguments {
@@ -15,11 +15,13 @@ export interface ICliArguments {
 	modelSpecified: boolean;
 	apiKey?: string;
 	baseUrl?: string;
-	reasoningLevel: 'none' | 'low' | 'medium' | 'high';
+	reasoningLevel: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 	reasoningSpecified: boolean;
 	maxTurns?: number;
 	bedrockRegion?: string;
 	bedrockProfile?: string;
+	azureEndpoint?: string;
+	azureApiVersion?: string;
 	tui?: boolean;
 	resume: boolean;
 	sessionId?: string;
@@ -38,6 +40,9 @@ function valueAfter(argv: string[], index: number, flag: string): string {
 
 function inferredProvider(env: NodeJS.ProcessEnv): CliProvider {
 	const configured = env['CLEANSLATE_PROVIDER']?.trim().toLowerCase();
+	if (configured === 'azure' || configured === 'azureopenai') {
+		return 'azureOpenAI';
+	}
 	if (configured && SUPPORTED_PROVIDERS.includes(configured as CliProvider)) {
 		return configured as CliProvider;
 	}
@@ -98,7 +103,10 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 				break;
 			case '--provider':
 			case '-p': {
-				const provider = valueAfter(argv, index, arg).toLowerCase();
+				const rawProvider = valueAfter(argv, index, arg);
+				const provider = rawProvider.toLowerCase() === 'azure' || rawProvider.toLowerCase() === 'azureopenai'
+					? 'azureOpenAI'
+					: rawProvider.toLowerCase();
 				if (!SUPPORTED_PROVIDERS.includes(provider as CliProvider)) {
 					throw new Error(`Unsupported provider "${provider}". Expected one of: ${SUPPORTED_PROVIDERS.join(', ')}.`);
 				}
@@ -123,8 +131,8 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 				break;
 			case '--reasoning': {
 				const reasoning = valueAfter(argv, index, arg);
-				if (!['none', 'low', 'medium', 'high'].includes(reasoning)) {
-					throw new Error('--reasoning must be one of: none, low, medium, high.');
+				if (!['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(reasoning)) {
+					throw new Error('--reasoning must be one of: none, minimal, low, medium, high, xhigh, max.');
 				}
 				result.reasoningLevel = reasoning as ICliArguments['reasoningLevel'];
 				result.reasoningSpecified = true;
@@ -148,6 +156,14 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 				result.bedrockProfile = valueAfter(argv, index, arg);
 				index++;
 				break;
+			case '--azure-endpoint':
+				result.azureEndpoint = valueAfter(argv, index, arg);
+				index++;
+				break;
+			case '--azure-api-version':
+				result.azureApiVersion = valueAfter(argv, index, arg);
+				index++;
+				break;
 			case '--':
 				positionals.push(...argv.slice(index + 1));
 				index = argv.length;
@@ -166,12 +182,15 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 	result.baseUrl ??= env['CLEANSLATE_BASE_URL'] || env[`${result.provider.toUpperCase()}_BASE_URL`];
 	result.bedrockRegion ??= env['AWS_REGION'] || env['AWS_DEFAULT_REGION'];
 	result.bedrockProfile ??= env['AWS_PROFILE'];
+	result.azureEndpoint ??= env['AZURE_OPENAI_ENDPOINT'];
+	result.azureApiVersion ??= env['AZURE_OPENAI_API_VERSION'];
 	return result;
 }
 
 export function apiKeyFromEnvironment(provider: CliProvider, env: NodeJS.ProcessEnv): string | undefined {
 	switch (provider) {
 		case 'openai': return env['OPENAI_API_KEY'];
+		case 'azureOpenAI': return env['AZURE_OPENAI_API_KEY'];
 		case 'anthropic': return env['ANTHROPIC_API_KEY'];
 		case 'gemini': return env['GOOGLE_API_KEY'] || env['GEMINI_API_KEY'];
 		case 'grok': return env['XAI_API_KEY'] || env['GROK_API_KEY'];
@@ -188,14 +207,16 @@ Open the CleanSlate terminal agent, or run one task non-interactively.
 
 Options:
   -C, --cwd <path>          Workspace root (default: current directory)
-  -p, --provider <name>     openai, anthropic, gemini, grok, nvidia, openrouter, custom, bedrock
+  -p, --provider <name>     openai, azure, anthropic, gemini, grok, nvidia, openrouter, custom, bedrock
   -m, --model <id>          Provider model (or CLEANSLATE_MODEL)
       --api-key <key>       Provider API key (provider environment variables are supported)
       --base-url <url>      Override the provider base URL
-      --reasoning <level>   none, low, medium, high (default: low)
+      --reasoning <level>   none, minimal, low, medium, high, xhigh, max
       --max-turns <count>   Bound model turns
       --aws-region <id>     AWS region for Bedrock (or AWS_REGION)
       --aws-profile <name>  AWS profile for Bedrock
+      --azure-endpoint <url> Azure OpenAI endpoint
+      --azure-api-version <v> Azure OpenAI API version
       --tui                 Force the interactive terminal UI
       --no-tui              Stream one task without the terminal UI
   -r, --resume              Resume the latest workspace session

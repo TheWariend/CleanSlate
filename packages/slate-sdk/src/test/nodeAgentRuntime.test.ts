@@ -93,4 +93,31 @@ describe('CleanSlateNodeAgentRuntime', () => {
 		assert.equal(restored.getSessionSnapshot().threadHistory.at(-1)?.content, 'Second answer.');
 		restored.dispose();
 	});
+
+	test('runs the native planning phase with write tools filtered', async () => {
+		const runtime = new CleanSlateNodeAgentRuntime({
+			rootPath: process.cwd(),
+			configuration: createNodeProviderConfiguration({
+				provider: 'openai',
+				model: 'gpt-4o',
+				apiKey: 'test'
+			})
+		});
+		let request: any;
+		(runtime as any).mainService.openAICompatibleChatStream = (options: any) => {
+			request = options;
+			const emitter = new Emitter<any>();
+			setTimeout(() => {
+				emitter.fire('data: {"type":"text","content":"Plan ready."}\n\n');
+				emitter.fire(null);
+			}, 0);
+			return emitter.event;
+		};
+		for await (const _part of runtime.plan('Plan a safe refactor')) { /* consume */ }
+		const names = request.options.tools.map((tool: any) => tool.name);
+		assert.equal(names.includes('write_file'), false);
+		assert.equal(names.includes('apply_edit'), false);
+		assert.equal(names.includes('submit_artifact'), true);
+		runtime.dispose();
+	});
 });

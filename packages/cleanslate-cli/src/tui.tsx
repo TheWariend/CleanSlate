@@ -24,6 +24,7 @@ interface ITuiProps {
 	store: CliSessionStore;
 	initialSession: ICliSession;
 	initialTask?: string;
+	onConfigurationChange?: (args: ICliArguments) => void;
 }
 
 interface IApprovalRequest {
@@ -163,7 +164,39 @@ function SessionPicker({ sessions, onSelect, onCancel }: {
 	);
 }
 
-export function CleanSlateTui({ args, store, initialSession, initialTask }: ITuiProps) {
+function ModelPicker({ models, current, onSelect, onCancel }: {
+	models: string[];
+	current?: string;
+	onSelect: (model: string) => void;
+	onCancel: () => void;
+}) {
+	const initial = Math.max(0, models.indexOf(current ?? ''));
+	const [selected, setSelected] = useState(initial);
+	useInput((_input, key) => {
+		if (key.upArrow) {
+			setSelected(value => Math.max(0, value - 1));
+		} else if (key.downArrow) {
+			setSelected(value => Math.min(models.length - 1, value + 1));
+		} else if (key.return && models[selected]) {
+			onSelect(models[selected]);
+		} else if (key.escape) {
+			onCancel();
+		}
+	});
+	const start = Math.max(0, Math.min(selected - 5, models.length - 10));
+	return (
+		<Box borderStyle="round" borderColor={COLORS.cyan} flexDirection="column" paddingX={1} marginTop={1}>
+			<Text bold>Models · {models.length}</Text>
+			{models.slice(start, start + 10).map((model, offset) => {
+				const index = start + offset;
+				return <Text key={model} inverse={selected === index}>{selected === index ? '› ' : '  '}{model}{model === current ? '  ✓' : ''}</Text>;
+			})}
+			<Text color={COLORS.muted}>↑/↓ select · enter use model · esc close</Text>
+		</Box>
+	);
+}
+
+export function CleanSlateTui({ args, store, initialSession, initialTask, onConfigurationChange }: ITuiProps) {
 	const { exit } = useApp();
 	const { stdout } = useStdout();
 	const [session, setSession] = useState(initialSession);
@@ -177,6 +210,9 @@ export function CleanSlateTui({ args, store, initialSession, initialTask }: ITui
 	const [allowCommandsForSession, setAllowCommandsForSession] = useState(false);
 	const allowCommandsRef = useRef(false);
 	const [showSessions, setShowSessions] = useState(false);
+	const [models, setModels] = useState<string[] | undefined>();
+	const [mode, setMode] = useState<'execution' | 'planning'>('execution');
+	const [scrollOffset, setScrollOffset] = useState(0);
 	const abortRef = useRef<AbortController | undefined>(undefined);
 	const runtimeRef = useRef<CleanSlateNodeAgentRuntime | undefined>(undefined);
 	const initialTaskStarted = useRef(false);
@@ -213,13 +249,29 @@ export function CleanSlateTui({ args, store, initialSession, initialTask }: ITui
 				maxTurns: args.maxTurns,
 				bedrockRegion: args.bedrockRegion,
 				bedrockCredentialMode: args.bedrockProfile ? 'profile' : 'default',
-				bedrockProfile: args.bedrockProfile
+				bedrockProfile: args.bedrockProfile,
+				azureEndpoint: args.azureEndpoint,
+				azureApiVersion: args.azureApiVersion,
+				azureDeploymentName: args.model
 			}),
 			approveCommand: request => {
 				if (allowCommandsRef.current) {
 					return Promise.resolve(true);
 				}
 				return new Promise<boolean>(resolve => setApproval({ request, resolve }));
+			},
+			onProgress: event => {
+				if (event.type === 'command_output' && typeof event.chunk === 'string') {
+					replaceTranscript(entries => {
+						const index = entries.findLastIndex(entry => entry.kind === 'tool' && entry.status === 'running');
+						if (index < 0) {
+							return entries;
+						}
+						return entries.map((entry, entryIndex) => entryIndex === index
+							? { ...entry, content: compact(`${entry.content}\n${event.chunk}`, 500) }
+							: entry);
+					});
+				}
 			}
 		});
 		runtime.restoreSessionSnapshot(targetSession.runtimeSnapshot);
@@ -333,12 +385,16 @@ export function CleanSlateTui({ args, store, initialSession, initialTask }: ITui
 		}
 	};
 
-	const executeTask = async (task: string) => {
+	const executeTask = async (task: string, requestedMode: 'execution' | 'planning' = mode) => {
 		const runtime = runtimeRef.current;
 		if (!runtime) {
 			return;
 		}
 		append(transcriptEntry('user', task));
+		if (sessionRef.current.title === 'New session') {
+			sessionRef.current.title = compact(task, 72);
+			setSession({ ...sessionRef.current });
+		}
 		setRunning(true);
 		setStatus('thinking');
 		const abort = new AbortController();
@@ -346,7 +402,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask }: ITui
 		const pendingQuestion = runtime.getPendingQuestion();
 		await runStream(pendingQuestion
 			? runtime.resumePendingQuestion(task, abort.signal)
-			: runtime.run(task, abort.signal));
+			: requestedMode === 'planning' ? runtime.plan(task, abort.signal) : runtime.run(task, abort.signal));
 	};
 
 	const switchSession = (next: ICliSession) => {
@@ -367,6 +423,29 @@ export function CleanSlateTui({ args, store, initialSession, initialTask }: ITui
 		switchSession(next);
 	};
 
+	const switchModel = (model: string) => {
+		persist();
+		args.model = model;
+		sessionRef.current.model = model;
+		setSession({ ...sessionRef.current });
+		setModels(undefined);
+		createRuntime(sessionRef.current);
+		onConfigurationChange?.(args);
+		append(transcriptEntry('system', `Switched to ${args.provider}/${model}.`));
+	};
+
+	const loadModels = async () => {
+		setStatus('loading models');
+		try {
+			const available = await runtimeRef.current?.getModels() ?? [];
+			setModels(available.length > 0 ? available : [args.model!]);
+			setStatus('ready');
+		} catch (error) {
+			append(transcriptEntry('error', `Could not load models: ${error instanceof Error ? error.message : String(error)}`));
+			setStatus('error');
+		}
+	};
+
 	const submit = async (raw: string) => {
 		const value = raw.trim();
 		setInput('');
@@ -379,7 +458,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask }: ITui
 			return;
 		}
 		if (value === '/help') {
-			append(transcriptEntry('system', '/new · /sessions · /resume <id> · /model · /clear · /exit · esc cancels a running turn'));
+			append(transcriptEntry('system', '/new · /sessions · /resume <id> · /models · /model <id> · /mode plan|execution · /plan <task> · /clear · /exit'));
 			return;
 		}
 		if (value === '/new') {
@@ -395,7 +474,33 @@ export function CleanSlateTui({ args, store, initialSession, initialTask }: ITui
 			resumed ? switchSession(resumed) : append(transcriptEntry('error', 'Session not found.'));
 			return;
 		}
-		if (value === '/model') {
+		if (value === '/models' || value === '/model') {
+			await loadModels();
+			return;
+		}
+		if (value.startsWith('/model ')) {
+			switchModel(value.slice('/model '.length).trim());
+			return;
+		}
+		if (value.startsWith('/mode ')) {
+			const requested = value.slice('/mode '.length).trim();
+			if (requested === 'plan' || requested === 'planning') {
+				setMode('planning');
+				append(transcriptEntry('system', 'Planning mode enabled. Write tools are filtered until the plan is complete.'));
+			} else if (requested === 'execution' || requested === 'execute') {
+				setMode('execution');
+				append(transcriptEntry('system', 'Execution mode enabled.'));
+			} else {
+				append(transcriptEntry('error', 'Use /mode plan or /mode execution.'));
+			}
+			return;
+		}
+		if (value.startsWith('/plan ')) {
+			setMode('planning');
+			await executeTask(value.slice('/plan '.length).trim(), 'planning');
+			return;
+		}
+		if (value === '/status') {
 			append(transcriptEntry('system', `Provider: ${args.provider} · Model: ${args.model} · Reasoning: ${args.reasoningLevel}`));
 			return;
 		}
@@ -407,7 +512,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask }: ITui
 	};
 
 	useInput((inputValue, key) => {
-		if (approval || showSessions) {
+		if (approval || showSessions || models) {
 			return;
 		}
 		if (key.escape && running) {
@@ -421,11 +526,18 @@ export function CleanSlateTui({ args, store, initialSession, initialTask }: ITui
 				persist();
 				exit();
 			}
+		} else if (key.pageUp) {
+			setScrollOffset(value => Math.min(transcript.length, value + Math.max(5, Math.floor((stdout.rows ?? 30) / 2))));
+		} else if (key.pageDown) {
+			setScrollOffset(value => Math.max(0, value - Math.max(5, Math.floor((stdout.rows ?? 30) / 2))));
 		}
 	});
 
 	const visibleCount = Math.max(8, Math.floor((stdout.rows ?? 30) - 12));
-	const visibleTranscript = useMemo(() => transcript.slice(-visibleCount), [transcript, visibleCount]);
+	const visibleTranscript = useMemo(() => {
+		const end = Math.max(0, transcript.length - scrollOffset);
+		return transcript.slice(Math.max(0, end - visibleCount), end);
+	}, [transcript, visibleCount, scrollOffset]);
 
 	return (
 		<Box flexDirection="column">
@@ -434,7 +546,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask }: ITui
 					<Text color={COLORS.accent} bold>◆ CLEANSLATE</Text>
 					<Text color={COLORS.muted}>  agent terminal</Text>
 				</Box>
-				<Text color={COLORS.muted}>{args.provider}/{args.model}</Text>
+				<Text color={COLORS.muted}>{args.provider}/{args.model} · {mode}</Text>
 			</Box>
 
 			<Box paddingX={1} justifyContent="space-between">
@@ -459,8 +571,9 @@ export function CleanSlateTui({ args, store, initialSession, initialTask }: ITui
 
 			{approval && <ApprovalBox approval={approval} decide={decideApproval} />}
 			{showSessions && <SessionPicker sessions={store.list()} onSelect={switchSession} onCancel={() => setShowSessions(false)} />}
+			{models && <ModelPicker models={models} current={args.model} onSelect={switchModel} onCancel={() => setModels(undefined)} />}
 
-			{!approval && !showSessions && (
+			{!approval && !showSessions && !models && (
 				<Box borderStyle="round" borderColor={running ? COLORS.muted : COLORS.cyan} paddingX={1}>
 					<Text color={COLORS.cyan}>❯ </Text>
 					{running
@@ -468,7 +581,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask }: ITui
 						: <TextInput value={input} onChange={setInput} onSubmit={value => void submit(value)} placeholder="Ask CleanSlate…" />}
 				</Box>
 			)}
-			<Text color={COLORS.muted}> enter send · esc cancel · ctrl-c exit · /sessions resume · /new fresh session</Text>
+			<Text color={COLORS.muted}> enter send · esc cancel · ctrl-c exit · pgup/pgdn scroll · /sessions · /models · /new</Text>
 		</Box>
 	);
 }
