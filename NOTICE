@@ -31,9 +31,11 @@ https://github.com/anomalyco/opencode
 
 Portions of the following files are derived from opencode:
 
-  vscode-fork/src/vs/workbench/services/cleanSlate/common/core/
-    cleanSlateModelCapabilities.ts
+  packages/slate-sdk/src/protocol/cleanSlateModelCapabilities.ts
       - the OpenAI reasoning-effort tier tables and their version gates
+
+    (this file moved out of the fork into @slate/sdk; it was previously at
+     vscode-fork/src/vs/workbench/services/cleanSlate/common/core/)
 
 --------------------------------------------------------------------------------
 
