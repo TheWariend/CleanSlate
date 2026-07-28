@@ -1,7 +1,7 @@
 {
   "name": "@cleanslate/cli",
   "version": "0.1.0",
-  "description": "Run the CleanSlate agent from a terminal.",
+  "description": "CleanSlate coding agent for the terminal.",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -11,7 +11,9 @@
     "dist/*.js",
     "dist/*.js.map",
     "dist/*.d.ts",
-    "ARCHITECTURE.md"
+    "ARCHITECTURE.md",
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=20"
@@ -19,10 +21,11 @@
   "scripts": {
     "build": "npm --prefix ../slate-sdk run build && tsc -p tsconfig.json",
     "test": "npm run build && node --test \"dist/test/*.test.js\"",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {
-    "@slate/sdk": "file:../slate-sdk",
+    "@slate/sdk": "^0.1.0",
     "ink": "^7.1.1",
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",
@@ -32,5 +35,24 @@
     "@types/node": "^20.0.0",
     "@types/react": "^19.2.17",
     "typescript": "^5.6.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TheWariend/CleanSlate.git",
+    "directory": "packages/cleanslate-cli"
+  },
+  "homepage": "https://github.com/TheWariend/CleanSlate/tree/main/packages/cleanslate-cli",
+  "bugs": {
+    "url": "https://github.com/TheWariend/CleanSlate/issues"
+  },
+  "keywords": [
+    "cli",
+    "agent",
+    "ai",
+    "coding-agent",
+    "cleanslate"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }
