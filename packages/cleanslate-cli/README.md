@@ -27,6 +27,12 @@ stored in Keychain; on other platforms they are stored in an owner-only
 credentials file. Run `cleanslate --setup` whenever you want to reconnect or
 change provider credentials.
 
+After provider connection, setup loads that provider's available models and
+opens a terminal picker. A manual model-ID fallback remains for
+custom endpoints that do not expose a model catalog. Azure alone asks for a
+resource deployment name because Azure inference routes requests through
+deployments rather than public model IDs.
+
 Choose **CleanSlate** to sign in with your TheWariend account and use the same
 managed models and entitlements as the IDE. CleanSlate opens the existing
 TheWariend sign-in page in the system browser and completes a one-time device

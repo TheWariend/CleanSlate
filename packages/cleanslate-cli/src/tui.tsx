@@ -13,6 +13,7 @@ import {
 } from '@slate/sdk';
 import { apiKeyFromEnvironment, ICliArguments, SUPPORTED_PROVIDERS } from './argv.js';
 import { CleanSlateTerminalLogo } from './brand.js';
+import { LiveTurnBuffer } from './liveTurn.js';
 import {
 	CliSessionStore,
 	ICliSession,
@@ -256,6 +257,9 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const [session, setSession] = useState(initialSession);
 	const sessionRef = useRef(initialSession);
 	const [transcript, setTranscript] = useState<ICliTranscriptEntry[]>(initialSession.transcript);
+	const [liveReasoning, setLiveReasoning] = useState('');
+	const [liveText, setLiveText] = useState('');
+	const liveTurnRef = useRef(new LiveTurnBuffer());
 	const [input, setInput] = useState('');
 	const [commandSelection, setCommandSelection] = useState(0);
 	const [running, setRunning] = useState(false);
@@ -295,6 +299,35 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	};
 
 	const append = (entry: ICliTranscriptEntry) => replaceTranscript(entries => [...entries, entry]);
+
+	const updateLiveReasoning = (value: string) => {
+		setLiveReasoning(value);
+	};
+
+	const updateLiveText = (value: string) => {
+		setLiveText(value);
+	};
+
+	const flushWorkingTurn = () => {
+		const working = liveTurnRef.current.flushWorking();
+		if (working) {
+			append(transcriptEntry('reasoning', working));
+		}
+		updateLiveReasoning('');
+		updateLiveText('');
+	};
+
+	const finishResponse = () => {
+		const { reasoning, answer } = liveTurnRef.current.finish();
+		if (reasoning) {
+			append(transcriptEntry('reasoning', reasoning));
+		}
+		if (answer) {
+			append(transcriptEntry('assistant', answer));
+		}
+		updateLiveReasoning('');
+		updateLiveText('');
+	};
 
 	const createRuntime = (targetSession: ICliSession) => {
 		runtimeRef.current?.dispose();
@@ -361,40 +394,30 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	};
 
 	const runStream = async (stream: AsyncIterable<any>) => {
-		let assistantId: string | undefined;
-		let reasoningId: string | undefined;
+		let responseFinished = false;
 		try {
 			for await (const part of stream) {
 				switch (part.type) {
 					case 'assistant_turn_start':
-						setStatus(`turn ${part.turnIndex ?? ''}`.trim());
+						setStatus(`thinking · turn ${part.turnIndex ?? ''}`.trim());
 						break;
 					case 'context_usage':
 						setContextUsage(part.percentage);
 						break;
 					case 'reasoning':
-						if (!reasoningId) {
-							const entry = transcriptEntry('reasoning', part.content);
-							reasoningId = entry.id;
-							append(entry);
-						} else {
-							replaceTranscript(entries => entries.map(entry => entry.id === reasoningId
-								? { ...entry, content: `${entry.content}${part.content}` }
-								: entry));
-						}
+						updateLiveReasoning(liveTurnRef.current.appendReasoning(part.content).reasoning);
 						break;
 					case 'chat_text':
-						if (!assistantId) {
-							const entry = transcriptEntry('assistant', part.content);
-							assistantId = entry.id;
-							append(entry);
-						} else {
-							replaceTranscript(entries => entries.map(entry => entry.id === assistantId
-								? { ...entry, content: `${entry.content}${part.content}` }
-								: entry));
-						}
+						updateLiveText(liveTurnRef.current.appendText(part.content).text);
+						break;
+					case 'reasoning_reset':
+						updateLiveReasoning(liveTurnRef.current.resetReasoning().reasoning);
+						break;
+					case 'chat_text_reset':
+						updateLiveText(liveTurnRef.current.resetText().text);
 						break;
 					case 'tool_start':
+						flushWorkingTurn();
 						append(transcriptEntry('tool', compact(part.input), {
 							id: part.toolCallId || undefined,
 							toolName: part.toolName,
@@ -424,9 +447,14 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 						setStatus(part.status?.state ?? 'provider');
 						break;
 					case 'task_complete':
+						finishResponse();
+						responseFinished = true;
 						setStatus('complete');
 						break;
 				}
+			}
+			if (!responseFinished) {
+				finishResponse();
 			}
 			const pendingQuestion = runtimeRef.current?.getPendingQuestion();
 			if (pendingQuestion) {
@@ -439,6 +467,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				setStatus('ready');
 			}
 		} catch (error) {
+			flushWorkingTurn();
 			append(transcriptEntry('error', error instanceof Error ? error.message : String(error)));
 			setStatus('error');
 		} finally {
@@ -678,7 +707,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			<Box paddingX={1} justifyContent="space-between">
 				<Text color={COLORS.muted}>{session.title} · {session.id.slice(0, 8)} · {args.cwd}</Text>
 				<Text color={running ? COLORS.warning : COLORS.success}>
-					{running && <Spinner type="dots" />} {status}
+					{running && <Spinner type="line" />} {status}
 					{contextUsage !== undefined ? ` · context ${Math.round(contextUsage)}%` : ''}
 					{allowCommandsForSession ? ' · commands allowed' : ''}
 				</Text>
@@ -693,6 +722,18 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 					</Box>
 				)}
 				{visibleTranscript.map(entry => <TranscriptItem key={entry.id} entry={entry} />)}
+				{running && liveReasoning && (
+					<Box flexDirection="column" marginTop={1}>
+						<Text color={COLORS.warning} bold>thinking</Text>
+						<Text color={COLORS.muted} wrap="wrap">{liveReasoning}</Text>
+					</Box>
+				)}
+				{running && liveText && (
+					<Box flexDirection="column" marginTop={1}>
+						<Text color={COLORS.accent} bold>cleanslate</Text>
+						<Text wrap="wrap">{liveText}</Text>
+					</Box>
+				)}
 			</Box>
 
 			{approval && <ApprovalBox approval={approval} decide={decideApproval} />}

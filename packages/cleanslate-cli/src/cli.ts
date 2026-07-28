@@ -19,7 +19,7 @@ import { apiKeyFromEnvironment, HELP_TEXT, ICliArguments, parseArguments } from 
 import { CliConfigStore, CliCredentialStore, ICliConfig } from './config.js';
 import { authenticateCleanSlateInBrowser } from './managedAuth.js';
 import { CliSessionStore, ICliSession, transcriptEntry } from './sessions.js';
-import { CleanSlateSetupTui, ICliSetupResult } from './setupTui.js';
+import { CleanSlateModelSetupTui, CleanSlateSetupTui, ICliSetupResult } from './setupTui.js';
 import { clearInteractiveScreen, enterInteractiveScreen } from './terminalScreen.js';
 import { CleanSlateTui } from './tui.js';
 
@@ -108,6 +108,22 @@ async function runInteractiveSetup(initialProvider: ICliArguments['provider']): 
 	return result;
 }
 
+async function runModelSetup(provider: ICliArguments['provider'], models: string[], current?: string): Promise<string | undefined> {
+	let result: string | undefined;
+	clearInteractiveScreen();
+	const app = render(createElement(CleanSlateModelSetupTui, {
+		provider,
+		models,
+		current,
+		onComplete: value => { result = value; },
+		onCancel: () => { result = undefined; }
+	}), { exitOnCtrlC: false });
+	await app.waitUntilExit();
+	app.clear();
+	clearInteractiveScreen();
+	return result;
+}
+
 function applySetupResult(args: ICliArguments, setup: ICliSetupResult): void {
 	args.provider = setup.provider;
 	args.providerSpecified = true;
@@ -121,7 +137,7 @@ function applySetupResult(args: ICliArguments, setup: ICliSetupResult): void {
 	args.azureApiVersion = setup.azureApiVersion;
 }
 
-async function completeManagedSetup(args: ICliArguments, setup: ICliSetupResult, credentialStore: CliCredentialStore): Promise<void> {
+async function completeManagedSetup(args: ICliArguments, setup: ICliSetupResult, credentialStore: CliCredentialStore): Promise<string[]> {
 	clearInteractiveScreen();
 	const cancellation = new AbortController();
 	const cancel = () => cancellation.abort();
@@ -147,10 +163,64 @@ async function completeManagedSetup(args: ICliArguments, setup: ICliSetupResult,
 			? 'Your CleanSlate account currently has no managed models available.'
 			: 'Your account does not have CleanSlate managed-model access. Upgrade the account, then run cleanslate --setup again.');
 	}
-	const preferred = args.model && models.some(model => model.id === args.model) ? args.model : models[0]!.id;
 	setup.apiKey = signedIn.token;
-	setup.model = preferred;
-	process.stderr.write(`Connected to CleanSlate · ${preferred}\n`);
+	process.stderr.write(`Connected to CleanSlate · ${models.length} models available\n`);
+	return models.map(model => model.id);
+}
+
+async function loadProviderModels(args: ICliArguments, setup: ICliSetupResult): Promise<string[]> {
+	if (setup.provider === 'azureOpenAI') {
+		return [];
+	}
+	applySetupResult(args, setup);
+	clearInteractiveScreen();
+	process.stderr.write(`Loading available ${setup.provider} models…\n`);
+	const runtime = new CleanSlateNodeAgentRuntime({
+		rootPath: args.cwd,
+		sessionId: `setup-${Date.now().toString(36)}`,
+		configuration: createNodeProviderConfiguration({
+			provider: args.provider,
+			model: args.model || '',
+			apiKey: args.apiKey,
+			baseUrl: args.baseUrl,
+			reasoningLevel: args.reasoningLevel,
+			bedrockRegion: args.bedrockRegion,
+			bedrockCredentialMode: args.bedrockProfile ? 'profile' : 'default',
+			bedrockProfile: args.bedrockProfile,
+			azureEndpoint: args.azureEndpoint,
+			azureApiVersion: args.azureApiVersion
+		}),
+		approveCommand: async () => false
+	});
+	try {
+		return await runtime.getModels();
+	} catch (error) {
+		process.stderr.write(`Could not load the provider catalog: ${error instanceof Error ? error.message : String(error)}\n`);
+		return [];
+	} finally {
+		runtime.dispose();
+	}
+}
+
+async function completeInteractiveSetup(
+	args: ICliArguments,
+	setup: ICliSetupResult,
+	credentialStore: CliCredentialStore
+): Promise<boolean> {
+	const previousModel = args.provider === setup.provider ? args.model : undefined;
+	const models = setup.provider === 'cleanslate'
+		? await completeManagedSetup(args, setup, credentialStore)
+		: await loadProviderModels(args, setup);
+	const model = await runModelSetup(setup.provider, models, previousModel);
+	if (!model) {
+		return false;
+	}
+	setup.model = model;
+	applySetupResult(args, setup);
+	if (setup.apiKey) {
+		credentialStore.set(setup.provider, setup.apiKey);
+	}
+	return true;
 }
 
 function validateOneShot(args: ICliArguments): void {
@@ -223,12 +293,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 		if (!setup) {
 			return 130;
 		}
-		if (setup.provider === 'cleanslate') {
-			await completeManagedSetup(args, setup, credentialStore);
-		}
-		applySetupResult(args, setup);
-		if (setup.apiKey) {
-			credentialStore.set(setup.provider, setup.apiKey);
+		if (!await completeInteractiveSetup(args, setup, credentialStore)) {
+			return 130;
 		}
 	}
 	validateProvider(args);
@@ -262,12 +328,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
 			const setup = await runInteractiveSetup(args.provider);
 			if (setup) {
-				if (setup.provider === 'cleanslate') {
-					await completeManagedSetup(args, setup, credentialStore);
-				}
-				applySetupResult(args, setup);
-				if (setup.apiKey) {
-					credentialStore.set(setup.provider, setup.apiKey);
+				if (!await completeInteractiveSetup(args, setup, credentialStore)) {
+					continue;
 				}
 				validateProvider(args);
 				configStore.save(configFromArguments(args));

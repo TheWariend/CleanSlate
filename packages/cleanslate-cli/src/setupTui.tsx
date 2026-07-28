@@ -56,29 +56,29 @@ function fieldsFor(provider: CliProvider): ISetupField[] {
 	if (provider === 'bedrock') {
 		return [
 			{ key: 'bedrockRegion', label: 'AWS region', placeholder: 'us-east-1' },
-			{ key: 'bedrockProfile', label: 'AWS profile', placeholder: 'leave blank for default credential chain', optional: true },
-			{ key: 'model', label: 'Bedrock model ID', placeholder: 'provider model ID' }
+			{ key: 'bedrockProfile', label: 'AWS profile', placeholder: 'leave blank for default credential chain', optional: true }
 		];
 	}
 	if (provider === 'azureOpenAI') {
 		return [
 			{ key: 'azureEndpoint', label: 'Azure endpoint', placeholder: 'https://resource.openai.azure.com' },
 			{ key: 'apiKey', label: 'Azure API key', placeholder: `stored in ${CREDENTIAL_STORAGE_DESCRIPTION}`, secret: true },
-			{ key: 'model', label: 'Deployment name', placeholder: 'Azure deployment name' },
 			{ key: 'azureApiVersion', label: 'API version', placeholder: 'leave blank for default', optional: true }
 		];
 	}
 	if (provider === 'custom') {
 		return [
 			{ key: 'baseUrl', label: 'API base URL', placeholder: 'https://host.example/v1' },
-			{ key: 'apiKey', label: 'API key', placeholder: 'optional', secret: true, optional: true },
-			{ key: 'model', label: 'Model ID', placeholder: 'provider model ID' }
+			{ key: 'apiKey', label: 'API key', placeholder: 'optional', secret: true, optional: true }
 		];
 	}
 	return [
-		{ key: 'apiKey', label: `${PROVIDER_LABELS[provider]} API key`, placeholder: `stored in ${CREDENTIAL_STORAGE_DESCRIPTION}`, secret: true },
-		{ key: 'model', label: 'Model ID', placeholder: 'provider model ID' }
+		{ key: 'apiKey', label: `${PROVIDER_LABELS[provider]} API key`, placeholder: `stored in ${CREDENTIAL_STORAGE_DESCRIPTION}`, secret: true }
 	];
+}
+
+export function providerSetupFieldKeys(provider: CliProvider): Array<keyof ICliSetupResult> {
+	return fieldsFor(provider).map(field => field.key);
 }
 
 export function CleanSlateSetupTui({ initialProvider, onComplete, onCancel }: {
@@ -196,6 +196,91 @@ export function CleanSlateSetupTui({ initialProvider, onComplete, onCancel }: {
 						</Box>
 						{error && <Text color="red">{error}</Text>}
 						<Text color={COLORS.muted}>enter continue · ctrl-c cancel</Text>
+					</Box>
+				)}
+			</Box>
+		</Box>
+	);
+}
+
+export function CleanSlateModelSetupTui({ provider, models, current, onComplete, onCancel }: {
+	provider: CliProvider;
+	models: string[];
+	current?: string;
+	onComplete: (model: string) => void;
+	onCancel: () => void;
+}) {
+	const { exit } = useApp();
+	const uniqueModels = Array.from(new Set(models.filter(model => !!model.trim())));
+	const initialIndex = Math.max(0, uniqueModels.indexOf(current ?? ''));
+	const [selected, setSelected] = useState(initialIndex);
+	const [manualModel, setManualModel] = useState('');
+	const [manual, setManual] = useState(uniqueModels.length === 0 || provider === 'azureOpenAI');
+	const [error, setError] = useState<string>();
+	const finish = (model: string) => {
+		const normalized = model.trim();
+		if (!normalized) {
+			setError(provider === 'azureOpenAI' ? 'Azure deployment name is required to send requests.' : 'Model ID is required.');
+			return;
+		}
+		onComplete(normalized);
+		exit();
+	};
+	useInput((input, key) => {
+		if (input === 'c' && key.ctrl || key.escape) {
+			onCancel();
+			exit();
+			return;
+		}
+		if (manual) {
+			return;
+		}
+		if (key.upArrow) {
+			setSelected(value => Math.max(0, value - 1));
+		} else if (key.downArrow) {
+			setSelected(value => Math.min(uniqueModels.length - 1, value + 1));
+		} else if (key.return && uniqueModels[selected]) {
+			finish(uniqueModels[selected]);
+		} else if (input === 'm') {
+			setManual(true);
+		}
+	});
+	const start = Math.max(0, Math.min(selected - 6, uniqueModels.length - 12));
+	return (
+		<Box flexDirection="column">
+			<Box borderStyle="round" borderColor={COLORS.accent} paddingX={1} alignItems="center">
+				<CleanSlateTerminalLogo />
+				<Box flexDirection="column">
+					<Text color={COLORS.accent} bold>CLEANSLATE</Text>
+					<Text color={COLORS.muted}>choose model</Text>
+				</Box>
+			</Box>
+			<Box flexDirection="column" paddingX={2} paddingY={1}>
+				<Text bold>{PROVIDER_LABELS[provider]}</Text>
+				{manual ? (
+					<Box flexDirection="column" marginTop={1}>
+						<Text color={COLORS.muted}>
+							{provider === 'azureOpenAI'
+								? 'Azure routes inference through your resource deployment name.'
+								: uniqueModels.length === 0 ? 'The provider returned no model catalog. Enter a model ID.' : 'Enter a model ID manually.'}
+						</Text>
+						<Box>
+							<Text color={COLORS.cyan}>{provider === 'azureOpenAI' ? 'Deployment name  ' : 'Model ID  '}</Text>
+							<TextInput value={manualModel} onChange={setManualModel} onSubmit={finish} placeholder={current || (provider === 'azureOpenAI' ? 'your Azure deployment' : 'provider model ID')} />
+						</Box>
+						{error && <Text color="red">{error}</Text>}
+						<Text color={COLORS.muted}>enter use · esc cancel</Text>
+					</Box>
+				) : (
+					<Box flexDirection="column" marginTop={1}>
+						<Text color={COLORS.muted}>{uniqueModels.length} available models</Text>
+						{uniqueModels.slice(start, start + 12).map((model, offset) => {
+							const index = start + offset;
+							return <Text key={model} inverse={selected === index}>
+								{selected === index ? '› ' : '  '}{model}{model === current ? '  ✓' : ''}
+							</Text>;
+						})}
+						<Text color={COLORS.muted}>↑/↓ select · enter use · m manual ID · esc cancel</Text>
 					</Box>
 				)}
 			</Box>
