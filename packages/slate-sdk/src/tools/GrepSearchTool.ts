@@ -10,11 +10,11 @@ import { isStaleGeneratedDiagnosticPath } from './cleanSlateStaleDiagnosticPolic
 
 /**
  * Tool: grep_search
- * Real exact/case-sensitive text search powered by VS Code search service.
+ * Real exact/case-sensitive text search powered by the active host's native search adapter.
  */
 export const grepSearchTool: CleanSlateTool = {
     name: 'grep_search',
-    description: 'Searches for EXACT text matches across workspace files (cross-platform, powered by ripgrep engine). Input: { query: string, path?: string, caseSensitive?: boolean, isRegex?: boolean }. Also accepts alias { pattern, SearchPath }. Returns matches with line numbers.',
+    description: 'Searches for exact text matches across workspace files. Input: { query: string, path?: string, caseSensitive?: boolean, isRegex?: boolean }. Also accepts alias { pattern, SearchPath }. Returns matches with line numbers.',
     category: "discovery",
     parametersSchema: {
         query: "string",

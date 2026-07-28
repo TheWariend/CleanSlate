@@ -14,6 +14,7 @@ import { CleanSlateNodeBrowserAutomation } from './cleanSlateNodeBrowserAutomati
 import { CleanSlateNodeIndexService } from './cleanSlateNodeIndexService.js';
 import { CleanSlateNodeMcpClient } from './cleanSlateNodeMcpClient.js';
 import { CleanSlateNodeLanguageCommands } from './cleanSlateNodeLanguageCommands.js';
+import { CleanSlateNodeSearchService } from './cleanSlateNodeSearchService.js';
 
 /**
  * A single-folder workspace rooted at the directory the run was pointed at.
@@ -85,6 +86,7 @@ export function createCleanSlateNodeToolContext(options: ICleanSlateNodeRuntimeO
 	const indexService = new CleanSlateNodeIndexService(path.resolve(options.rootPath));
 	const mcpClientService = new CleanSlateNodeMcpClient(path.resolve(options.rootPath), options.configuration.mcpServers);
 	const commandService = new CleanSlateNodeLanguageCommands(path.resolve(options.rootPath));
+	const searchService = new CleanSlateNodeSearchService(path.resolve(options.rootPath));
 	const artifacts = new Map<string, any>();
 	const artifactEmitter = new Emitter<any>();
 	let nextArtifactId = 1;
@@ -106,6 +108,7 @@ export function createCleanSlateNodeToolContext(options: ICleanSlateNodeRuntimeO
 		textFileService,
 		modelService,
 		workspaceContextService,
+		searchService,
 		environmentService: options.workspaceStorageHome
 			? { workspaceStorageHome: URI.file(path.resolve(options.workspaceStorageHome)) }
 			: undefined,
