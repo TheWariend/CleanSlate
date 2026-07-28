@@ -763,9 +763,9 @@ function TranscriptViewportLine({ line, width }: { line: ITranscriptViewportLine
 		case 'reasoning':
 			return <Text color={COLORS.muted}>{text}</Text>;
 		case 'tool':
-			return <Text color={COLORS.success} inverse={line.selected} bold={line.selected}>{text}</Text>;
+			return <Text color={COLORS.success} bold={line.selected}>{text}</Text>;
 		case 'toolError':
-			return <Text color={COLORS.danger} inverse={line.selected} bold={line.selected}>{text}</Text>;
+			return <Text color={COLORS.danger} bold={line.selected}>{text}</Text>;
 		case 'error':
 			return <Text color={COLORS.danger}>{text}</Text>;
 		case 'diffAddition':
