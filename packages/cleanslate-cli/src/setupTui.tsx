@@ -29,7 +29,7 @@ interface ISetupField {
 }
 
 const COLORS = {
-	accent: '#8b5cf6',
+	accent: '#d4d4d8',
 	cyan: '#22d3ee',
 	muted: '#71717a',
 	success: '#22c55e'

@@ -49,7 +49,7 @@ interface IPendingApproval {
 }
 
 const COLORS = {
-	accent: '#8b5cf6',
+	accent: '#d4d4d8',
 	cyan: '#22d3ee',
 	muted: '#71717a',
 	success: '#22c55e',
@@ -870,10 +870,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			<Box borderStyle="round" borderColor={COLORS.accent} paddingX={1} justifyContent="space-between">
 				<Box alignItems="center">
 					<CleanSlateTerminalLogo />
-					<Box flexDirection="column">
-						<Text color={COLORS.accent} bold>CLEANSLATE</Text>
-						<Text color={COLORS.muted}>agent terminal</Text>
-					</Box>
+					<Text color={COLORS.accent} bold>CLEANSLATE</Text>
 				</Box>
 				<Box flexShrink={1}>
 					<Text color={COLORS.muted} wrap="truncate-middle">{args.provider}/{args.model} · {mode} · {permissionMode}</Text>
