@@ -5,7 +5,6 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
-import Spinner from 'ink-spinner';
 import {
 	CleanSlateNodeAgentRuntime,
 	createNodeProviderConfiguration
@@ -466,6 +465,11 @@ export function transcriptViewportLines(
 			});
 		}
 	};
+	const pushTurnSpacing = (entry: ICliTranscriptEntry) => {
+		if (lines.length > 0 && lines.at(-1)?.kind !== 'blank') {
+			lines.push({ key: `${entry.id}-space`, kind: 'blank', text: '' });
+		}
+	};
 	const pushExpandedTool = (entry: ICliTranscriptEntry) => {
 		const marker = entry.status === 'running' ? '●' : entry.status === 'failed' ? '×' : '✓';
 		const input = entry.detail && typeof entry.detail === 'object' && 'input' in entry.detail
@@ -524,10 +528,10 @@ export function transcriptViewportLines(
 			continue;
 		}
 		if (entry.kind === 'user') {
-			lines.push({ key: `${entry.id}-space`, kind: 'blank', text: '' });
+			pushTurnSpacing(entry);
 			pushTurn(entry, 'user', '❯');
 		} else if (entry.kind === 'assistant') {
-			lines.push({ key: `${entry.id}-space`, kind: 'blank', text: '' });
+			pushTurnSpacing(entry);
 			pushTurn(entry, 'assistant', '↳');
 		} else if (entry.kind === 'reasoning') {
 			continue;
@@ -564,7 +568,7 @@ export function padTranscriptViewportLines(
 		kind: 'blank' as const,
 		text: ''
 	}));
-	return [...blanks, ...visible];
+	return [...visible, ...blanks];
 }
 
 export function formatActivityStatus(status: string): string {
@@ -1588,7 +1592,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 						? <Text color={COLORS.muted}>←/→ view · ↑/↓ file · j/k scroll · PgUp/PgDn page · Esc close</Text>
 						: running
 						? <>
-							<Text color={COLORS.warning}><Spinner type="line" /> {formatActivityStatus(status)}</Text>
+							<Text><Text color={COLORS.success}>✻</Text><Text color={COLORS.muted}> {formatActivityStatus(status)}</Text></Text>
 							<Text color={COLORS.muted}> · Esc to cancel</Text>
 						</>
 						: <>

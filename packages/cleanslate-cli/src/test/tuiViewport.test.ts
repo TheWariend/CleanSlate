@@ -33,6 +33,7 @@ test('TUI uses compact turn markers without speaker labels', () => {
 
 	assert.deepEqual(visibleText, ['❯ hello', '↳ Hi! What can I help with?']);
 	assert.equal(visibleText.some(line => /^(?:you|cleanslate)\b/i.test(line)), false);
+	assert.notEqual(lines[0]?.kind, 'blank');
 });
 
 test('TUI keeps compact tool activity inline and expands every call on demand', () => {
@@ -131,6 +132,6 @@ test('TUI repaints vacated transcript rows when expanded content collapses', () 
 	const padded = padTranscriptViewportLines(visible, 6);
 
 	assert.equal(padded.length, 6);
-	assert.equal(padded.slice(0, 4).every(line => line.kind === 'blank'), true);
-	assert.equal(padded.at(-1)?.text, '↳ Done.');
+	assert.equal(padded[0]?.text, '↳ Done.');
+	assert.equal(padded.slice(1).every(line => line.kind === 'blank'), true);
 });
