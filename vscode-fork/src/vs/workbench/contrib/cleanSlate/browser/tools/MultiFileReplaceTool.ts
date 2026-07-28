@@ -3,7 +3,7 @@
  * Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ResourceTextEdit } from '../../../../../editor/browser/services/bulkEditService.js';
+import { ICleanSlateResourceTextEditDescriptor } from './cleanSlateHostTypes.js';
 import { CleanSlateEditService, CleanSlatePlannedEdit } from '../core/cleanSlateEditService.js';
 import { resolvePathToUri, isUriInIdeWorkspace, resolveTextModelHeadless } from './utils.js';
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
@@ -282,8 +282,16 @@ export const multiFileReplaceTool: CleanSlateTool = {
             });
         }
 
-        const workspaceEdits = plannedFiles.flatMap(file =>
-            file.edits.map(edit => new ResourceTextEdit(file.uri, { range: edit.range, text: edit.text }, file.versionId))
+        // Descriptors, not editor objects — the host builds the real edit. See
+        // ICleanSlateResourceTextEditDescriptor for why constructing it here
+        // would fail silently.
+        const workspaceEdits: ICleanSlateResourceTextEditDescriptor[] = plannedFiles.flatMap(file =>
+            file.edits.map(edit => ({
+                resource: file.uri,
+                range: edit.range,
+                text: edit.text,
+                versionId: file.versionId
+            }))
         );
 
         if (workspaceEdits.length === 0) {
@@ -299,7 +307,7 @@ export const multiFileReplaceTool: CleanSlateTool = {
         }
 
         if (context.bulkEditService) {
-            const applyResult = await context.bulkEditService.apply(workspaceEdits, {
+            const applyResult = await context.bulkEditService.applyTextEdits(workspaceEdits, {
                 label: 'CleanSlate multi-file edit',
                 respectAutoSaveConfig: false
             });

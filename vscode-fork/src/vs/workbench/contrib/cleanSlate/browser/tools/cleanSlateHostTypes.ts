@@ -81,14 +81,47 @@ export interface ICleanSlateBulkEditResult {
 	isApplied: boolean;
 }
 
+/** A range as the edit descriptors carry it. */
+export interface ICleanSlateEditRange {
+	startLineNumber: number;
+	startColumn: number;
+	endLineNumber: number;
+	endColumn: number;
+}
+
 /**
- * Applying edits across files as one unit. `edits` stays loosely typed because
- * its shape is the host's concern: workspace edits in the editor, plain writes
- * headless.
+ * One text replacement, described rather than constructed.
+ *
+ * This is deliberately plain data. The editor's bulk-edit service dispatches on
+ * `instanceof ResourceTextEdit` (see `editor/browser/services/bulkEditService`
+ * and `contrib/bulkEdit/browser/bulkEditService`), so a copy of that class
+ * built outside the editor would be a *different* class: every `instanceof`
+ * would return false and the edits would be dropped with no error and no failed
+ * result. Constructing it is therefore the host's job, not the tool's.
+ */
+export interface ICleanSlateResourceTextEditDescriptor {
+	resource: URI;
+	range: ICleanSlateEditRange;
+	text: string;
+	/** Guards against applying to a model that moved on. */
+	versionId?: number;
+}
+
+/** Options a caller may pass alongside a batch. */
+export interface ICleanSlateBulkEditOptions {
+	label?: string;
+	respectAutoSaveConfig?: boolean;
+}
+
+/**
+ * Applying edits across files as one unit.
+ *
+ * Takes descriptors, not editor objects: the editor host turns them into real
+ * `ResourceTextEdit`s, and a headless host writes them straight to the models.
  */
 export interface ICleanSlateBulkEditHost {
-	// `edit` and `options` stay untyped so the editor's bulk-edit service
-	// satisfies this as written: it accepts a resource-edit union and a wider
-	// options bag, and narrowing either here would reject it.
-	apply(edit: any, options?: any): Promise<ICleanSlateBulkEditResult>;
+	applyTextEdits(
+		edits: readonly ICleanSlateResourceTextEditDescriptor[],
+		options?: ICleanSlateBulkEditOptions
+	): Promise<ICleanSlateBulkEditResult>;
 }

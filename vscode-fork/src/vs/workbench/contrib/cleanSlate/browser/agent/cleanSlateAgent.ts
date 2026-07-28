@@ -12,6 +12,7 @@ import { IEditorService } from '../../../../services/editor/common/editorService
 import { Selection } from '../../../../../editor/common/core/selection.js';
 import { IBulkEditService } from '../../../../../editor/browser/services/bulkEditService.js';
 import { CleanSlateEditorDecorationHost } from '../tools/cleanSlateEditorDecorationHost.js';
+import { CleanSlateEditorBulkEditHost } from '../host/cleanSlateEditorBulkEditHost.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { IEnvironmentService } from '../../../../../platform/environment/common/environment.js';
 import { ILanguageFeaturesService } from '../../../../../editor/common/services/languageFeatures.js';
@@ -95,6 +96,8 @@ export class CleanSlateAgent {
     private readonly historyBuilder = new CleanSlateAgentHistoryBuilder();
     /** Inline diff decorations, backed by the editor's inline controller. */
     private readonly editorDecorationHost: CleanSlateEditorDecorationHost;
+    /** Turns edit descriptors into the editor's own ResourceTextEdit. */
+    private readonly bulkEditHost: CleanSlateEditorBulkEditHost;
     private sessionId: string | undefined;
     private mcpToolsLoaded = false;
     private mcpToolsLoadPromise: Promise<void> | undefined;
@@ -131,6 +134,7 @@ export class CleanSlateAgent {
         @IWorkspaceTrustManagementService private readonly workspaceTrustManagementService: IWorkspaceTrustManagementService
     ) {
         this.editorDecorationHost = new CleanSlateEditorDecorationHost(this.codeEditorService);
+        this.bulkEditHost = new CleanSlateEditorBulkEditHost(this.bulkEditService);
         this.toolContext = {
             surface: 'ide',
             modelService: this.modelService,
@@ -149,7 +153,7 @@ export class CleanSlateAgent {
             instantiationService: this.instantiationService,
             editorService: this.editorService,
             searchService: this.searchService,
-            bulkEditService: this.bulkEditService,
+            bulkEditService: this.bulkEditHost,
             editorDecorationHost: this.editorDecorationHost,
             languageFeaturesService: this.languageFeaturesService,
             commandExecutionService: this.commandExecutionService,
