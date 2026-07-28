@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { formatActivityStatus } from '../tui.js';
+import { formatActivityStatus, formatHeaderModeLabel } from '../tui.js';
 
 test('TUI activity status stays concise and hides internal turn details', () => {
 	assert.equal(formatActivityStatus('thinking'), 'Thinking…');
@@ -13,4 +13,9 @@ test('TUI activity status stays concise and hides internal turn details', () => 
 	assert.equal(formatActivityStatus('provider'), 'Working…');
 	assert.equal(formatActivityStatus('cancelling'), 'Cancelling…');
 	assert.doesNotMatch(formatActivityStatus('thinking'), /turn|context/i);
+});
+
+test('TUI header only exposes planning mode', () => {
+	assert.equal(formatHeaderModeLabel('execution'), '');
+	assert.equal(formatHeaderModeLabel('planning'), 'PLAN');
 });

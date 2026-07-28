@@ -229,6 +229,10 @@ export function formatActivityStatus(status: string): string {
 	}
 }
 
+export function formatHeaderModeLabel(mode: 'execution' | 'planning'): string {
+	return mode === 'planning' ? 'PLAN' : '';
+}
+
 function TranscriptViewportLine({ line }: { line: ITranscriptViewportLine }) {
 	switch (line.kind) {
 		case 'blank':
@@ -864,6 +868,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const contextStatus = `${contextUsage !== undefined ? `context ${Math.round(contextUsage)}%` : ''}`
 		+ `${contextUsage !== undefined && allowCommandsForSession ? ' · ' : ''}`
 		+ `${allowCommandsForSession ? 'commands allowed' : ''}`;
+	const headerModeLabel = formatHeaderModeLabel(mode);
 
 	return (
 		<Box flexDirection="column" height={viewportRows} overflow="hidden">
@@ -874,7 +879,8 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 						<Text color={COLORS.accent} bold>CLEANSLATE</Text>
 					</Box>
 					<Box flexShrink={1}>
-						<Text color={COLORS.muted} wrap="truncate-middle">{args.provider}/{args.model} · {mode} · {permissionMode}</Text>
+						<Text color={COLORS.muted} wrap="truncate-middle">{args.provider}/{args.model}</Text>
+						{headerModeLabel && <Text color={COLORS.warning} bold> · {headerModeLabel}</Text>}
 					</Box>
 				</Box>
 				<Box justifyContent="space-between">
