@@ -4,33 +4,28 @@ CleanSlate is the terminal surface for the same native agent engine and 59-tool
 registry used by the CleanSlate IDE. It runs directly against a repository
 without building or launching the VS Code fork.
 
-## Build and run
+## Install from this checkout
 
-From the repository:
+Build and link it once:
 
 ```sh
 cd packages/cleanslate-cli
 npm install
 npm run build
-```
-
-Launch the interactive terminal UI:
-
-```sh
-OPENAI_API_KEY=... node dist/cli.js --model gpt-5.4 -C /path/to/repo
-```
-
-Install the `cleanslate` command globally from this checkout:
-
-```sh
-cd packages/cleanslate-cli
 npm link
-cleanslate --model gpt-5.4 -C /path/to/repo
 ```
 
-After the first run, provider, model, reasoning level, and endpoint settings are
-remembered in `~/.cleanslate/config.json`. API keys are not saved; provide them
-through the provider environment variable or `--api-key`.
+Then, from any repository, run:
+
+```sh
+cleanslate
+```
+
+The first launch opens provider setup inside the TUI. CleanSlate remembers the
+provider, model, reasoning level, and endpoint settings. On macOS, API keys are
+stored in Keychain; on other platforms they are stored in an owner-only
+credentials file. Run `cleanslate --setup` whenever you want to reconnect or
+change provider credentials.
 
 Common provider examples:
 

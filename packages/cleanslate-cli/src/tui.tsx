@@ -25,6 +25,7 @@ interface ITuiProps {
 	initialSession: ICliSession;
 	initialTask?: string;
 	onConfigurationChange?: (args: ICliArguments) => void;
+	getCredential?: (provider: ICliArguments['provider']) => string | undefined;
 }
 
 interface IApprovalRequest {
@@ -196,7 +197,7 @@ function ModelPicker({ models, current, onSelect, onCancel }: {
 	);
 }
 
-export function CleanSlateTui({ args, store, initialSession, initialTask, onConfigurationChange }: ITuiProps) {
+export function CleanSlateTui({ args, store, initialSession, initialTask, onConfigurationChange, getCredential }: ITuiProps) {
 	const { exit } = useApp();
 	const { stdout } = useStdout();
 	const [session, setSession] = useState(initialSession);
@@ -492,9 +493,9 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				append(transcriptEntry('error', `Use /provider <name> <model>. Providers: ${SUPPORTED_PROVIDERS.join(', ')}`));
 				return;
 			}
-			const apiKey = apiKeyFromEnvironment(provider as any, process.env);
+			const apiKey = apiKeyFromEnvironment(provider as any, process.env) ?? getCredential?.(provider as any);
 			if (provider !== 'bedrock' && provider !== 'custom' && !apiKey) {
-				append(transcriptEntry('error', `Set the ${provider} API-key environment variable before switching providers.`));
+				append(transcriptEntry('error', `No saved credential for ${provider}. Run cleanslate --setup to connect it.`));
 				return;
 			}
 			persist();

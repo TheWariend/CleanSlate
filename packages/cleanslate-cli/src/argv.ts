@@ -26,6 +26,7 @@ export interface ICliArguments {
 	resume: boolean;
 	sessionId?: string;
 	listSessions: boolean;
+	setup: boolean;
 	help: boolean;
 	version: boolean;
 }
@@ -63,6 +64,7 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 		reasoningSpecified: false,
 		resume: false,
 		listSessions: false,
+		setup: false,
 		help: false,
 		version: false
 	};
@@ -95,6 +97,9 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 				break;
 			case '--list-sessions':
 				result.listSessions = true;
+				break;
+			case '--setup':
+				result.setup = true;
 				break;
 			case '--cwd':
 			case '-C':
@@ -222,6 +227,7 @@ Options:
   -r, --resume              Resume the latest workspace session
       --session <id>        Resume a specific session
       --list-sessions       List saved sessions for this workspace
+      --setup               Re-run interactive provider setup
   -h, --help                Show help
   -v, --version             Show version
 

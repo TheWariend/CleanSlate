@@ -16,8 +16,9 @@ import {
 	createNodeProviderConfiguration
 } from '@slate/sdk';
 import { apiKeyFromEnvironment, HELP_TEXT, ICliArguments, parseArguments } from './argv.js';
-import { CliConfigStore, ICliConfig } from './config.js';
+import { CliConfigStore, CliCredentialStore, ICliConfig } from './config.js';
 import { CliSessionStore, ICliSession, transcriptEntry } from './sessions.js';
+import { CleanSlateSetupTui, ICliSetupResult } from './setupTui.js';
 import { CleanSlateTui } from './tui.js';
 
 const VERSION = '0.1.0';
@@ -83,6 +84,38 @@ function validateProvider(args: ICliArguments): void {
 	}
 }
 
+export function providerSetupRequired(args: ICliArguments): boolean {
+	return !args.model
+		|| (args.provider !== 'custom' && args.provider !== 'bedrock' && !args.apiKey)
+		|| (args.provider === 'custom' && !args.baseUrl)
+		|| (args.provider === 'bedrock' && !args.bedrockRegion)
+		|| (args.provider === 'azureOpenAI' && !args.azureEndpoint);
+}
+
+async function runInteractiveSetup(initialProvider: ICliArguments['provider']): Promise<ICliSetupResult | undefined> {
+	let result: ICliSetupResult | undefined;
+	const app = render(createElement(CleanSlateSetupTui, {
+		initialProvider,
+		onComplete: value => { result = value; },
+		onCancel: () => { result = undefined; }
+	}), { exitOnCtrlC: false });
+	await app.waitUntilExit();
+	return result;
+}
+
+function applySetupResult(args: ICliArguments, setup: ICliSetupResult): void {
+	args.provider = setup.provider;
+	args.providerSpecified = true;
+	args.model = setup.model;
+	args.modelSpecified = true;
+	args.apiKey = setup.apiKey;
+	args.baseUrl = setup.baseUrl;
+	args.bedrockRegion = setup.bedrockRegion;
+	args.bedrockProfile = setup.bedrockProfile;
+	args.azureEndpoint = setup.azureEndpoint;
+	args.azureApiVersion = setup.azureApiVersion;
+}
+
 function validateOneShot(args: ICliArguments): void {
 	if (!args.task) {
 		throw new Error('A task is required. Run cleanslate --help for usage.');
@@ -113,9 +146,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 	validateWorkspace(args);
 
 	const configStore = new CliConfigStore();
+	const credentialStore = new CliCredentialStore();
 	const storedConfig = configStore.load();
 	applyStoredConfig(args, storedConfig);
 	const sessionStore = new CliSessionStore(args.cwd);
+	const useTui = args.tui ?? (process.stdin.isTTY === true && process.stdout.isTTY === true);
 
 	if (args.listSessions) {
 		printSessions(sessionStore.list());
@@ -138,7 +173,21 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 	}
 
 	if (!argv.includes('--api-key')) {
-		args.apiKey = apiKeyFromEnvironment(args.provider, process.env);
+		args.apiKey = apiKeyFromEnvironment(args.provider, process.env) ?? credentialStore.get(args.provider);
+	}
+
+	if (args.setup && !useTui) {
+		throw new Error('--setup requires an interactive terminal.');
+	}
+	if (useTui && (args.setup || providerSetupRequired(args))) {
+		const setup = await runInteractiveSetup(args.provider);
+		if (!setup) {
+			return 130;
+		}
+		applySetupResult(args, setup);
+		if (setup.apiKey) {
+			credentialStore.set(setup.provider, setup.apiKey);
+		}
 	}
 	validateProvider(args);
 	configStore.save(configFromArguments(args));
@@ -146,14 +195,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 	initialSession ??= sessionStore.create(args.provider, args.model!, args.task);
 	sessionStore.save(initialSession);
 
-	const useTui = args.tui ?? (process.stdin.isTTY === true && process.stdout.isTTY === true);
 	if (useTui) {
 		const app = render(createElement(CleanSlateTui, {
 			args,
 			store: sessionStore,
 			initialSession,
 			initialTask: args.task,
-			onConfigurationChange: changed => configStore.save(configFromArguments(changed))
+			onConfigurationChange: changed => configStore.save(configFromArguments(changed)),
+			getCredential: provider => credentialStore.get(provider)
 		}), { exitOnCtrlC: false });
 		await app.waitUntilExit();
 		return 0;

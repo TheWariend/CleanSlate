@@ -42,12 +42,14 @@ describe('CLI argv', () => {
 			'--tui',
 			'--resume',
 			'--session', 'session-123',
-			'--list-sessions'
+			'--list-sessions',
+			'--setup'
 		], {});
 		assert.equal(args.tui, true);
 		assert.equal(args.resume, true);
 		assert.equal(args.sessionId, 'session-123');
 		assert.equal(args.listSessions, true);
+		assert.equal(args.setup, true);
 	});
 
 	test('supports Azure aliases and extended reasoning levels', () => {
