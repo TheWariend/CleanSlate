@@ -57,6 +57,12 @@ export function enterInteractiveScreen(output: NodeJS.WriteStream = process.stdo
 	}
 	output.write(ENTER_ALTERNATE_SCREEN);
 
+	// Terminal resizes invalidate every cursor position retained by the renderer.
+	// Clear the alternate screen before Ink handles the resize so its next frame is
+	// painted onto a known blank viewport instead of being diffed over stale rows.
+	const handleResize = () => output.write(CLEAR_SCREEN);
+	output.on('resize', handleResize);
+
 	const originalLog = console.log;
 	const originalInfo = console.info;
 	const originalWarn = console.warn;
@@ -76,6 +82,7 @@ export function enterInteractiveScreen(output: NodeJS.WriteStream = process.stdo
 			return;
 		}
 		disposed = true;
+		output.off('resize', handleResize);
 		console.log = originalLog;
 		console.info = originalInfo;
 		console.warn = originalWarn;

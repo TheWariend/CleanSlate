@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { test } from 'node:test';
 import {
 	clearInteractiveScreen,
@@ -15,13 +16,14 @@ import {
 
 test('interactive TUI uses an alternate screen and restores terminal state', () => {
 	let output = '';
-	const stream = {
-		isTTY: true,
+	const events = new EventEmitter();
+	const stream = Object.assign(events, {
+		isTTY: true as const,
 		write: (value: string) => {
 			output += value;
 			return true;
 		}
-	} as NodeJS.WriteStream;
+	}) as NodeJS.WriteStream;
 	const originalLog = console.log;
 	const leave = enterInteractiveScreen(stream);
 
@@ -32,8 +34,14 @@ test('interactive TUI uses an alternate screen and restores terminal state', () 
 	assert.notEqual(console.log, originalLog);
 	clearInteractiveScreen(stream);
 	assert.match(output, /\u001b\[2J\u001b\[H/);
+	const clearsBeforeResize = output.match(/\u001b\[2J\u001b\[H/g)?.length ?? 0;
+	stream.emit('resize');
+	assert.equal(output.match(/\u001b\[2J\u001b\[H/g)?.length, clearsBeforeResize + 1);
 
 	leave();
+	const outputAfterLeave = output;
+	stream.emit('resize');
+	assert.equal(output, outputAfterLeave);
 	assert.equal(console.log, originalLog);
 	assert.match(output, /\u001b\[\?1006l/);
 	assert.match(output, /\u001b\[\?1000l/);
