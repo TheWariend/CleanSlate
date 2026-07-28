@@ -366,7 +366,6 @@ export class CleanSlateNodeAgentRuntime {
 			: this.options.additionalContext;
 		return [
 			`Workspace root: ${this.rootPath}`,
-			'This is a headless Node workspace. Use the available file, search, edit, and command tools to inspect and work in this repository.',
 			additional?.trim()
 		].filter(Boolean).join('\n\n');
 	}

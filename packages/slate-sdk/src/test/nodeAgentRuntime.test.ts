@@ -184,6 +184,8 @@ describe('CleanSlateNodeAgentRuntime', () => {
 		assert.equal(request.messages.some((message: any) =>
 			JSON.stringify(message.content).includes('Project rule for: Inspect safely')), true);
 		assert.equal(request.messages.some((message: any) =>
+			JSON.stringify(message.content).includes('headless Node workspace')), false);
+		assert.equal(request.messages.some((message: any) =>
 			JSON.stringify(message.content).includes('data:image/png;base64,iVBORw0KGgo=')), true);
 
 		const denied: any[] = [];
