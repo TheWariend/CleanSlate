@@ -867,21 +867,22 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 
 	return (
 		<Box flexDirection="column" height={viewportRows} overflow="hidden">
-			<Box borderStyle="round" borderColor={COLORS.accent} paddingX={1} justifyContent="space-between">
-				<Box alignItems="center">
-					<CleanSlateTerminalLogo />
-					<Text color={COLORS.accent} bold>CLEANSLATE</Text>
+			<Box borderStyle="round" borderColor={COLORS.accent} paddingX={1} flexDirection="column">
+				<Box justifyContent="space-between">
+					<Box alignItems="center">
+						<CleanSlateTerminalLogo />
+						<Text color={COLORS.accent} bold>CLEANSLATE</Text>
+					</Box>
+					<Box flexShrink={1}>
+						<Text color={COLORS.muted} wrap="truncate-middle">{args.provider}/{args.model} · {mode} · {permissionMode}</Text>
+					</Box>
 				</Box>
-				<Box flexShrink={1}>
-					<Text color={COLORS.muted} wrap="truncate-middle">{args.provider}/{args.model} · {mode} · {permissionMode}</Text>
+				<Box justifyContent="space-between">
+					<Box flexGrow={1} flexShrink={1}>
+						<Text color={COLORS.muted} wrap="truncate-middle">{session.title} · {session.id.slice(0, 8)} · {args.cwd}</Text>
+					</Box>
+					{contextStatus && <Text color={COLORS.muted}> {contextStatus}</Text>}
 				</Box>
-			</Box>
-
-			<Box paddingX={1} justifyContent="space-between">
-				<Box flexGrow={1} flexShrink={1}>
-					<Text color={COLORS.muted} wrap="truncate-middle">{session.title} · {session.id.slice(0, 8)} · {args.cwd}</Text>
-				</Box>
-				{contextStatus && <Text color={COLORS.muted}> {contextStatus}</Text>}
 			</Box>
 
 			<Box flexDirection="column" paddingX={1} height={contentRows} overflow="hidden">
