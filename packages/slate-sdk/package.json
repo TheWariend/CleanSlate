@@ -27,7 +27,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@vscode/tree-sitter-wasm": "^0.1.4"
+    "@anthropic-ai/sdk": "^0.96.0",
+    "@vscode/tree-sitter-wasm": "^0.1.4",
+    "openai": "^6.49.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

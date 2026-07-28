@@ -15,6 +15,7 @@ export {
 	CleanSlateNodeTextFileService
 } from './cleanSlateNodeFileServices.js';
 export { CleanSlateNodeCommandService } from './cleanSlateNodeCommandService.js';
+export { NodeCleanSlateMainService } from './cleanSlateNodeMainService.js';
 
 /**
  * Assembles a tool context rooted at a directory on disk.

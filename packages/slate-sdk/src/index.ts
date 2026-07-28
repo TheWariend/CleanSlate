@@ -96,7 +96,8 @@ export { CleanSlateDiffService } from './services/cleanSlateDiffService.js';
 
 export {
 	CleanSlateHeadlessRuntime,
-	createNodeHost
+	createNodeHost,
+	NodeCleanSlateMainService
 } from './node/index.js';
 export type {
 	ICleanSlateHeadlessTool,
