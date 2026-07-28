@@ -5,6 +5,7 @@
 
 import * as path from 'path';
 import { URI } from '../core/uri.js';
+import { Emitter } from '../core/event.js';
 import { IWorkspaceFolder } from '../host/workspace.js';
 import { CleanSlateNodeFileService, CleanSlateNodeModelService, CleanSlateNodeTextFileService } from './cleanSlateNodeFileServices.js';
 import { CleanSlateNodeCommandService } from './cleanSlateNodeCommandService.js';
@@ -29,7 +30,7 @@ export class CleanSlateNodeWorkspaceService {
 	}
 
 	getWorkspace(): { folders: IWorkspaceFolder[] } {
-		return { folders: [this.folder] };
+		return { id: this.folder.uri.toString(), folders: [this.folder] } as any;
 	}
 
 	getWorkspaceFolder(resource: URI): IWorkspaceFolder | undefined {
@@ -69,6 +70,15 @@ export function createCleanSlateNodeToolContext(options: ICleanSlateNodeRuntimeO
 	const modelService = new CleanSlateNodeModelService(textFileService);
 	const workspaceContextService = new CleanSlateNodeWorkspaceService(options.rootPath);
 	const commandExecutionService = new CleanSlateNodeCommandService(path.resolve(options.rootPath));
+	const artifacts = new Map<string, any>();
+	const artifactEmitter = new Emitter<any>();
+	let nextArtifactId = 1;
+	const saveArtifact = (type: string, content: string, metadata?: any) => {
+		const artifact = { id: `artifact-${nextArtifactId++}`, type, content, timestamp: Date.now(), metadata };
+		artifacts.set(artifact.id, artifact);
+		artifactEmitter.fire(artifact);
+		return artifact;
+	};
 
 	const noEditorOpen = {
 		getActiveCodeEditor: () => null,
@@ -104,8 +114,19 @@ export function createCleanSlateNodeToolContext(options: ICleanSlateNodeRuntimeO
 			createInstance: (Ctor: any, ...args: any[]) => new Ctor(...args)
 		},
 		artifactService: {
-			getArtifact: async () => undefined,
-			setArtifact: async () => undefined
+			_serviceBrand: undefined,
+			onDidArtifactChange: artifactEmitter.event,
+			createArtifact: saveArtifact,
+			saveArtifact,
+			getArtifact: (id: string) => artifacts.get(id),
+			getArtifactsByType: (type: string, lookup?: { sessionId?: string }) => Array.from(artifacts.values()).filter(artifact =>
+				artifact.type === type && (!lookup?.sessionId || artifact.metadata?.sessionId === lookup.sessionId)
+			),
+			getLatestArtifactByType(type: string, lookup?: { sessionId?: string }) {
+				return this.getArtifactsByType(type, lookup).at(-1);
+			},
+			deleteArtifact: (id: string) => { artifacts.delete(id); },
+			clear: () => { artifacts.clear(); }
 		},
 		contextService: {
 			getContext: async () => ({ activeFile: undefined, openFiles: [] })
