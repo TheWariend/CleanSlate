@@ -19,7 +19,8 @@ import {
 	cliTurnDiffReviews,
 	ICliDiffFile,
 	ICliDiffReview,
-	ICliDiffLine
+	ICliDiffLine,
+	parseCliDiffFile
 } from './workspaceReview.js';
 import { CliPermissionMode, CliPermissionPolicy } from './permissions.js';
 import {
@@ -228,7 +229,20 @@ function toolSummary(part: any): string {
 	return result?.success === false ? 'failed' : 'completed';
 }
 
-export type TranscriptViewportLineKind = 'blank' | 'user' | 'assistant' | 'reasoning' | 'tool' | 'toolError' | 'system' | 'error';
+export type TranscriptViewportLineKind =
+	| 'blank'
+	| 'user'
+	| 'assistant'
+	| 'reasoning'
+	| 'tool'
+	| 'toolError'
+	| 'diffHeader'
+	| 'diffHunk'
+	| 'diffAddition'
+	| 'diffDeletion'
+	| 'diffContext'
+	| 'system'
+	| 'error';
 
 export interface ITranscriptViewportLine {
 	key: string;
@@ -286,8 +300,11 @@ function compactToolActivity(entries: readonly ICliTranscriptEntry[]): string {
 			return detail?.result ?? detail;
 		});
 		const paths = [...new Set(results.map(result => result?.path).filter(Boolean))];
-		const added = results.reduce((total, result) => total + (Number(result?.added) || 0), 0);
-		const deleted = results.reduce((total, result) => total + (Number(result?.deleted) || 0), 0);
+		const stats = results.map(result => typeof result?.diff === 'string'
+			? parseCliDiffFile(String(result.path ?? 'changed file'), 'turn', result.diff)
+			: { additions: Number(result?.added) || 0, deletions: Number(result?.deleted) || 0 });
+		const added = stats.reduce((total, result) => total + result.additions, 0);
+		const deleted = stats.reduce((total, result) => total + result.deletions, 0);
 		const target = paths.length === 1
 			? String(paths[0]).split(/[\\/]/).at(-1)
 			: `${paths.length || editEntries.length} files`;
@@ -306,6 +323,55 @@ function compactToolActivity(entries: readonly ICliTranscriptEntry[]): string {
 		running > 0 ? `${running} running` : ''
 	].filter(Boolean).join(' · ');
 	return `● ${activity}${suffix ? ` · ${suffix}` : ''}`;
+}
+
+function inlineEditDiffLines(
+	entry: ICliTranscriptEntry,
+	width: number,
+	maxPreviewLines = 14
+): ITranscriptViewportLine[] {
+	if (!entry.detail || typeof entry.detail !== 'object') {
+		return [];
+	}
+	const detail = entry.detail as { input?: any; result?: any };
+	const result = detail.result ?? detail;
+	if (entry.status !== 'completed' || typeof result?.diff !== 'string' || !result.diff.trim()) {
+		return [];
+	}
+	const filePath = String(result.path ?? detail.input?.file_path ?? detail.input?.path ?? 'changed file');
+	const parsed = parseCliDiffFile(filePath, 'turn', result.diff);
+	const content = parsed.lines.filter(line => line.kind !== 'header' && line.text !== '');
+	const preview = content.slice(0, maxPreviewLines);
+	const safeWidth = Math.max(8, width);
+	const lines: ITranscriptViewportLine[] = [{
+		key: `${entry.id}-inline-diff-header`,
+		kind: 'diffHeader',
+		text: `  ${filePath.split(/[\\/]/).at(-1)}  +${parsed.additions} -${parsed.deletions}`
+	}];
+	for (const [index, line] of preview.entries()) {
+		const kind: TranscriptViewportLineKind = line.kind === 'addition'
+			? 'diffAddition'
+			: line.kind === 'deletion'
+				? 'diffDeletion'
+				: line.kind === 'hunk'
+					? 'diffHunk'
+					: 'diffContext';
+		for (const [wrapIndex, text] of wrapViewportText(`  ${line.text}`, safeWidth).entries()) {
+			lines.push({
+				key: `${entry.id}-inline-diff-${index}-${wrapIndex}`,
+				kind,
+				text
+			});
+		}
+	}
+	if (content.length > preview.length) {
+		lines.push({
+			key: `${entry.id}-inline-diff-more`,
+			kind: 'diffHeader',
+			text: `  … ${content.length - preview.length} more diff lines · /diff to review`
+		});
+	}
+	return lines;
 }
 
 function wrapViewportText(value: string, width: number): string[] {
@@ -360,6 +426,9 @@ export function transcriptViewportLines(
 				toolEntries.push(entries[++entryIndex]);
 			}
 			pushWrapped(entry, toolEntries.every(item => item.status === 'failed') ? 'toolError' : 'tool', compactToolActivity(toolEntries));
+			for (const toolEntry of toolEntries) {
+				lines.push(...inlineEditDiffLines(toolEntry, safeWidth));
+			}
 			continue;
 		}
 		if (entry.kind === 'user') {
@@ -400,6 +469,18 @@ export function visibleTranscriptLines(
 }
 
 export function formatActivityStatus(status: string): string {
+	if (/running (?:apply_edit|multi_file_replace|write_file)/.test(status)) {
+		return 'Editing…';
+	}
+	if (/running (?:search_workspace|grep_search|find_by_name|search_files)/.test(status)) {
+		return 'Searching…';
+	}
+	if (/running (?:read_file|read_file_range|list_dir)/.test(status)) {
+		return 'Reading…';
+	}
+	if (/running (?:read_lints|execute_command)/.test(status)) {
+		return 'Checking…';
+	}
 	switch (status) {
 		case 'thinking':
 			return 'Thinking…';
@@ -439,6 +520,16 @@ function TranscriptViewportLine({ line }: { line: ITranscriptViewportLine }) {
 		case 'toolError':
 		case 'error':
 			return <Text color={COLORS.danger}>{line.text}</Text>;
+		case 'diffAddition':
+			return <Text color={COLORS.success}>{line.text}</Text>;
+		case 'diffDeletion':
+			return <Text color={COLORS.danger}>{line.text}</Text>;
+		case 'diffHunk':
+			return <Text color={COLORS.warning}>{line.text}</Text>;
+		case 'diffHeader':
+			return <Text color={COLORS.muted} bold>{line.text}</Text>;
+		case 'diffContext':
+			return <Text color={COLORS.muted}>{line.text}</Text>;
 		case 'system':
 			return <Text color={COLORS.muted}>{line.text}</Text>;
 		default:

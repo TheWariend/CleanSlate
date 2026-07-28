@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ICliTranscriptEntry } from '../sessions.js';
-import { transcriptViewportLines, visibleTranscriptLines } from '../tui.js';
+import { formatActivityStatus, transcriptViewportLines, visibleTranscriptLines } from '../tui.js';
 
 function entry(id: string, kind: ICliTranscriptEntry['kind'], content: string): ICliTranscriptEntry {
 	return { id, kind, content, timestamp: 0 };
@@ -47,19 +47,52 @@ test('TUI keeps compact tool activity inline and expands every call on demand', 
 			status: 'completed',
 			detail: {
 				input: { file_path: '/workspace/lib/main.dart' },
-				result: { success: true, path: '/workspace/lib/main.dart', added: 2, deleted: 1 }
+				result: {
+					success: true,
+					path: '/workspace/lib/main.dart',
+					added: 2,
+					deleted: 1,
+					diff: [
+						'--- a/lib/main.dart',
+						'+++ b/lib/main.dart',
+						'@@ -1,2 +1,3 @@',
+						'-const oldValue = true;',
+						'+const newValue = true;',
+						'+const enabled = true;'
+					].join('\n')
+				}
 			}
 		},
 		{ ...entry('lints-1', 'tool', 'clean'), toolName: 'read_lints', status: 'completed' }
 	];
 
 	const compact = transcriptViewportLines(tools, 100);
-	assert.deepEqual(compact.map(line => line.text), ['● Searched ×2 · Read ×2 · Edited main.dart +2 -1 · Checked lints · 1 failed']);
+	assert.deepEqual(compact.map(line => line.text), [
+		'● Searched ×2 · Read ×2 · Edited main.dart +2 -1 · Checked lints · 1 failed',
+		'  main.dart  +2 -1',
+		'  @@ -1,2 +1,3 @@',
+		'  -const oldValue = true;',
+		'  +const newValue = true;',
+		'  +const enabled = true;'
+	]);
+	assert.deepEqual(compact.slice(1).map(line => line.kind), [
+		'diffHeader',
+		'diffHunk',
+		'diffDeletion',
+		'diffAddition',
+		'diffAddition'
+	]);
 
 	const expanded = transcriptViewportLines(tools, 100, true);
 	assert.equal(expanded.length, 6);
 	assert.match(expanded[2].text, /read_file.*lib\/main\.dart/);
 	assert.match(expanded[3].text, /× read_file.*lib\/large\.dart/);
+});
+
+test('TUI exposes active edit tools as editing activity', () => {
+	assert.equal(formatActivityStatus('running apply_edit'), 'Editing…');
+	assert.equal(formatActivityStatus('running write_file'), 'Editing…');
+	assert.equal(formatActivityStatus('running read_file'), 'Reading…');
 });
 
 test('TUI viewport never renders more rows than its content budget', () => {

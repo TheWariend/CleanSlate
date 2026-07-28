@@ -93,6 +93,10 @@ In the diff viewer, use Left/Right to move between current changes and agent
 turns, Up/Down to select files, `j`/`k` or Page Up/Page Down to scroll, and
 Escape to return to the conversation.
 
+Successful edit tools leave a compact colored diff preview directly in the
+conversation with minimal added/removed line counts. Larger previews are
+truncated with a `/diff` hint for full review.
+
 Typing `/` opens the searchable command palette. Use the arrow keys to select a
 command and Enter to insert it.
 

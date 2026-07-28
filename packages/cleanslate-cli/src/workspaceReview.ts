@@ -56,8 +56,60 @@ function diffLineKind(line: string): CliDiffLineKind {
 	return 'context';
 }
 
+function minimizeReplacementBlock(deletions: ICliDiffLine[], additions: ICliDiffLine[]): ICliDiffLine[] {
+	if (deletions.length === 0 || additions.length === 0 || deletions.length * additions.length > 250_000) {
+		return [...deletions, ...additions];
+	}
+	const oldLines = deletions.map(line => line.text.slice(1));
+	const newLines = additions.map(line => line.text.slice(1));
+	const lengths = Array.from({ length: oldLines.length + 1 }, () => new Uint32Array(newLines.length + 1));
+	for (let oldIndex = oldLines.length - 1; oldIndex >= 0; oldIndex--) {
+		for (let newIndex = newLines.length - 1; newIndex >= 0; newIndex--) {
+			lengths[oldIndex][newIndex] = oldLines[oldIndex] === newLines[newIndex]
+				? lengths[oldIndex + 1][newIndex + 1] + 1
+				: Math.max(lengths[oldIndex + 1][newIndex], lengths[oldIndex][newIndex + 1]);
+		}
+	}
+	const result: ICliDiffLine[] = [];
+	let oldIndex = 0;
+	let newIndex = 0;
+	while (oldIndex < oldLines.length && newIndex < newLines.length) {
+		if (oldLines[oldIndex] === newLines[newIndex]) {
+			result.push({ kind: 'context', text: ` ${oldLines[oldIndex]}` });
+			oldIndex++;
+			newIndex++;
+		} else if (lengths[oldIndex + 1][newIndex] >= lengths[oldIndex][newIndex + 1]) {
+			result.push(deletions[oldIndex++]);
+		} else {
+			result.push(additions[newIndex++]);
+		}
+	}
+	result.push(...deletions.slice(oldIndex), ...additions.slice(newIndex));
+	return result;
+}
+
+function minimizeReplacementBlocks(lines: ICliDiffLine[]): ICliDiffLine[] {
+	const result: ICliDiffLine[] = [];
+	for (let index = 0; index < lines.length;) {
+		if (lines[index].kind !== 'deletion') {
+			result.push(lines[index++]);
+			continue;
+		}
+		const deletions: ICliDiffLine[] = [];
+		while (lines[index]?.kind === 'deletion') {
+			deletions.push(lines[index++]);
+		}
+		const additions: ICliDiffLine[] = [];
+		while (lines[index]?.kind === 'addition') {
+			additions.push(lines[index++]);
+		}
+		result.push(...minimizeReplacementBlock(deletions, additions));
+	}
+	return result;
+}
+
 export function parseCliDiffFile(filePath: string, scope: CliDiffScope, rawDiff: string): ICliDiffFile {
-	const lines = rawDiff.split('\n').map(text => ({ kind: diffLineKind(text), text }));
+	const lines = minimizeReplacementBlocks(rawDiff.split('\n').map(text => ({ kind: diffLineKind(text), text })));
 	return {
 		path: filePath,
 		scope,
@@ -107,12 +159,6 @@ export function cliTurnDiffReviews(entries: readonly ICliTranscriptEntry[]): ICl
 		const input = (entry.detail as { input?: any })?.input;
 		const filePath = String(result.path ?? input?.file_path ?? input?.path ?? entry.toolName ?? 'changed file');
 		const parsed = parseCliDiffFile(filePath, 'turn', result.diff);
-		if (Number.isFinite(result.added)) {
-			parsed.additions = Number(result.added);
-		}
-		if (Number.isFinite(result.deleted)) {
-			parsed.deletions = Number(result.deleted);
-		}
 		current.files.push(parsed);
 	}
 
