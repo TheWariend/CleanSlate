@@ -17,9 +17,10 @@ import {
 } from '@slate/sdk';
 import { apiKeyFromEnvironment, HELP_TEXT, ICliArguments, parseArguments } from './argv.js';
 import { CliConfigStore, CliCredentialStore, ICliConfig } from './config.js';
-import { signInToCleanSlate } from './managedAuth.js';
+import { authenticateCleanSlateInBrowser } from './managedAuth.js';
 import { CliSessionStore, ICliSession, transcriptEntry } from './sessions.js';
 import { CleanSlateSetupTui, ICliSetupResult } from './setupTui.js';
+import { clearInteractiveScreen, enterInteractiveScreen } from './terminalScreen.js';
 import { CleanSlateTui } from './tui.js';
 
 const VERSION = '0.1.0';
@@ -95,12 +96,15 @@ export function providerSetupRequired(args: ICliArguments): boolean {
 
 async function runInteractiveSetup(initialProvider: ICliArguments['provider']): Promise<ICliSetupResult | undefined> {
 	let result: ICliSetupResult | undefined;
+	clearInteractiveScreen();
 	const app = render(createElement(CleanSlateSetupTui, {
 		initialProvider,
 		onComplete: value => { result = value; },
 		onCancel: () => { result = undefined; }
 	}), { exitOnCtrlC: false });
 	await app.waitUntilExit();
+	app.clear();
+	clearInteractiveScreen();
 	return result;
 }
 
@@ -118,11 +122,24 @@ function applySetupResult(args: ICliArguments, setup: ICliSetupResult): void {
 }
 
 async function completeManagedSetup(args: ICliArguments, setup: ICliSetupResult, credentialStore: CliCredentialStore): Promise<void> {
-	if (!setup.managedEmail || !setup.managedPassword) {
-		throw new Error('CleanSlate account email and password are required.');
+	clearInteractiveScreen();
+	const cancellation = new AbortController();
+	const cancel = () => cancellation.abort();
+	process.once('SIGINT', cancel);
+	let signedIn;
+	try {
+		signedIn = await authenticateCleanSlateInBrowser({
+			signal: cancellation.signal,
+			onReady: url => {
+				process.stderr.write('CleanSlate sign in\n\n');
+				process.stderr.write('TheWariend sign-in opened in your browser.\n');
+				process.stderr.write('Waiting for authentication…  ctrl-c cancel\n\n');
+				process.stderr.write(`If the browser did not open, visit:\n${url}\n`);
+			}
+		});
+	} finally {
+		process.off('SIGINT', cancel);
 	}
-	process.stderr.write('Signing in to CleanSlate and loading your models…\n');
-	const signedIn = await signInToCleanSlate(setup.managedEmail, setup.managedPassword);
 	credentialStore.set('cleanslate', signedIn.token);
 	const models = (signedIn.entitlements.models ?? []).filter(model => !!model.id?.trim());
 	if (models.length === 0) {
@@ -177,6 +194,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 		return 0;
 	}
 
+	const leaveInteractiveScreen = useTui ? enterInteractiveScreen() : undefined;
+	try {
 	let initialSession = args.sessionId
 		? sessionStore.load(args.sessionId)
 		: args.resume ? sessionStore.latest() : undefined;
@@ -222,6 +241,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 		let pendingInitialTask = args.task;
 		while (true) {
 			let setupRequested = false;
+			clearInteractiveScreen();
 			const app = render(createElement(CleanSlateTui, {
 				args,
 				store: sessionStore,
@@ -233,6 +253,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 				onRequestSetup: () => { setupRequested = true; }
 			}), { exitOnCtrlC: false });
 			await app.waitUntilExit();
+			app.clear();
+			clearInteractiveScreen();
 			pendingInitialTask = undefined;
 			if (!setupRequested) {
 				return 0;
@@ -257,6 +279,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
 	validateOneShot(args);
 	return runOneShot(args, initialSession, sessionStore);
+	} finally {
+		leaveInteractiveScreen?.();
+	}
 }
 
 function applyStoredConfig(args: ICliArguments, config: ICliConfig): void {

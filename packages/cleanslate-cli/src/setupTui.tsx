@@ -13,8 +13,6 @@ export interface ICliSetupResult {
 	provider: CliProvider;
 	model: string;
 	apiKey?: string;
-	managedEmail?: string;
-	managedPassword?: string;
 	baseUrl?: string;
 	bedrockRegion?: string;
 	bedrockProfile?: string;
@@ -55,12 +53,6 @@ const CREDENTIAL_STORAGE_DESCRIPTION = process.platform === 'darwin'
 	: '~/.cleanslate/credentials.json with owner-only permissions';
 
 function fieldsFor(provider: CliProvider): ISetupField[] {
-	if (provider === 'cleanslate') {
-		return [
-			{ key: 'managedEmail', label: 'CleanSlate account email', placeholder: 'you@example.com' },
-			{ key: 'managedPassword', label: 'CleanSlate account password', placeholder: 'sent securely; never stored', secret: true }
-		];
-	}
 	if (provider === 'bedrock') {
 		return [
 			{ key: 'bedrockRegion', label: 'AWS region', placeholder: 'us-east-1' },
@@ -119,7 +111,13 @@ export function CleanSlateSetupTui({ initialProvider, onComplete, onCancel }: {
 			} else if (key.downArrow) {
 				setProviderIndex(index => Math.min(SUPPORTED_PROVIDERS.length - 1, index + 1));
 			} else if (key.return) {
-				setProvider(SUPPORTED_PROVIDERS[providerIndex]);
+				const selectedProvider = SUPPORTED_PROVIDERS[providerIndex];
+				if (selectedProvider === 'cleanslate') {
+					onComplete({ provider: 'cleanslate', model: '' });
+					exit();
+				} else {
+					setProvider(selectedProvider);
+				}
 			} else if (key.escape) {
 				cancel();
 			}
@@ -149,8 +147,6 @@ export function CleanSlateSetupTui({ initialProvider, onComplete, onCancel }: {
 			provider,
 			model: nextValues.model ? String(nextValues.model) : '',
 			apiKey: nextValues.apiKey,
-			managedEmail: nextValues.managedEmail,
-			managedPassword: nextValues.managedPassword,
 			baseUrl: nextValues.baseUrl,
 			bedrockRegion: nextValues.bedrockRegion,
 			bedrockProfile: nextValues.bedrockProfile,

@@ -28,9 +28,10 @@ credentials file. Run `cleanslate --setup` whenever you want to reconnect or
 change provider credentials.
 
 Choose **CleanSlate** to sign in with your TheWariend account and use the same
-managed models and entitlements as the IDE. The password is sent only to the
-Wariend authentication endpoint and is never stored; the returned session token
-is kept in the operating system credential store.
+managed models and entitlements as the IDE. CleanSlate opens the existing
+TheWariend sign-in page in the system browser and completes a one-time device
+authorization. Your password never passes through the CLI; the returned session
+token is kept in the operating system credential store.
 
 Common provider examples:
 
@@ -70,6 +71,9 @@ turn. Ctrl-C exits when idle.
 
 Typing `/` opens the searchable command palette. Use the arrow keys to select a
 command and Enter to insert it.
+
+The interactive agent uses the terminal's alternate screen, so redraws and
+provider setup replace the current view instead of accumulating in scrollback.
 
 Sessions are isolated by workspace and stored under
 `~/.cleanslate/sessions/`. They include the native provider/tool transcript, so
