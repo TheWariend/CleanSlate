@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ICliTranscriptEntry } from '../sessions.js';
-import { formatActivityStatus, transcriptViewportLines, visibleTranscriptLines } from '../tui.js';
+import { formatActivityStatus, toggleLatestToolGroup, transcriptViewportLines, visibleTranscriptLines } from '../tui.js';
 
 function entry(id: string, kind: ICliTranscriptEntry['kind'], content: string): ICliTranscriptEntry {
 	return { id, kind, content, timestamp: 0 };
@@ -103,6 +103,8 @@ test('TUI expands only the selected tool group', () => {
 	assert.equal(expanded.filter(line => line.includes('✓ Read')).length, 1);
 	assert.match(expanded[0], /^▸ Read/);
 	assert.equal(expanded.some(line => line === '  ✓ Read'), true);
+	assert.equal(toggleLatestToolGroup('old-read', transcript), undefined);
+	assert.equal(toggleLatestToolGroup(undefined, transcript), 'new-read');
 });
 
 test('TUI exposes active edit tools as editing activity', () => {

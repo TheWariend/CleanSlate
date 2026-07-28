@@ -561,6 +561,13 @@ export function latestToolGroupId(entries: readonly ICliTranscriptEntry[]): stri
 	return latest;
 }
 
+export function toggleLatestToolGroup(
+	current: string | undefined,
+	entries: readonly ICliTranscriptEntry[]
+): string | undefined {
+	return current !== undefined ? undefined : latestToolGroupId(entries);
+}
+
 export function formatActivityStatus(status: string): string {
 	if (/running (?:apply_edit|multi_file_replace|write_file)/.test(status)) {
 		return 'Editing…';
@@ -882,6 +889,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			append(transcriptEntry('assistant', working));
 		}
 		updateLiveText('');
+		return Boolean(working);
 	};
 
 	const finishResponse = () => {
@@ -1025,7 +1033,11 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 						updateLiveText(liveTurnRef.current.resetText().text);
 						break;
 					case 'tool_start':
-						flushWorkingTurn();
+						const previousWasTool = sessionRef.current.transcript.at(-1)?.kind === 'tool';
+						const flushedWorkingTurn = flushWorkingTurn();
+						if (!previousWasTool || flushedWorkingTurn) {
+							setExpandedToolGroupId(undefined);
+						}
 						append(transcriptEntry('tool', compact(part.input), {
 							id: part.toolCallId || undefined,
 							toolName: part.toolName,
@@ -1196,8 +1208,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		if (value === '/details') {
-			const target = latestToolGroupId(transcript);
-			setExpandedToolGroupId(current => current === target ? undefined : target);
+			setExpandedToolGroupId(current => toggleLatestToolGroup(current, transcript));
 			setScrollOffset(0);
 			return;
 		}
@@ -1446,8 +1457,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		} else if (isTerminalMouseEvent(inputValue)) {
 			return;
 		} else if (inputValue === 'o' && key.ctrl) {
-			const target = latestToolGroupId(transcript);
-			setExpandedToolGroupId(current => current === target ? undefined : target);
+			setExpandedToolGroupId(current => toggleLatestToolGroup(current, transcript));
 			setScrollOffset(0);
 		} else if (key.tab && key.shift && !running) {
 			const nextMode = nextInteractiveMode(mode);
