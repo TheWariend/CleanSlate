@@ -10,11 +10,18 @@ export interface ICliArguments {
 	task?: string;
 	cwd: string;
 	provider: CliProvider;
+	providerSpecified: boolean;
 	model?: string;
+	modelSpecified: boolean;
 	apiKey?: string;
 	baseUrl?: string;
 	reasoningLevel: 'none' | 'low' | 'medium' | 'high';
+	reasoningSpecified: boolean;
 	maxTurns?: number;
+	tui?: boolean;
+	resume: boolean;
+	sessionId?: string;
+	listSessions: boolean;
 	help: boolean;
 	version: boolean;
 }
@@ -43,7 +50,12 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 	const result: ICliArguments = {
 		cwd: process.cwd(),
 		provider: inferredProvider(env),
+		providerSpecified: false,
+		modelSpecified: false,
 		reasoningLevel: 'low',
+		reasoningSpecified: false,
+		resume: false,
+		listSessions: false,
 		help: false,
 		version: false
 	};
@@ -59,6 +71,24 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 			case '-v':
 				result.version = true;
 				break;
+			case '--tui':
+				result.tui = true;
+				break;
+			case '--no-tui':
+				result.tui = false;
+				break;
+			case '--resume':
+			case '-r':
+				result.resume = true;
+				break;
+			case '--session':
+				result.sessionId = valueAfter(argv, index, arg);
+				result.resume = true;
+				index++;
+				break;
+			case '--list-sessions':
+				result.listSessions = true;
+				break;
 			case '--cwd':
 			case '-C':
 				result.cwd = valueAfter(argv, index, arg);
@@ -71,12 +101,14 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 					throw new Error(`Unsupported provider "${provider}". Expected one of: ${SUPPORTED_PROVIDERS.join(', ')}.`);
 				}
 				result.provider = provider as CliProvider;
+				result.providerSpecified = true;
 				index++;
 				break;
 			}
 			case '--model':
 			case '-m':
 				result.model = valueAfter(argv, index, arg);
+				result.modelSpecified = true;
 				index++;
 				break;
 			case '--api-key':
@@ -93,6 +125,7 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 					throw new Error('--reasoning must be one of: none, low, medium, high.');
 				}
 				result.reasoningLevel = reasoning as ICliArguments['reasoningLevel'];
+				result.reasoningSpecified = true;
 				index++;
 				break;
 			}
@@ -135,9 +168,9 @@ export function apiKeyFromEnvironment(provider: CliProvider, env: NodeJS.Process
 	}
 }
 
-export const HELP_TEXT = `Usage: cleanslate [options] "task"
+export const HELP_TEXT = `Usage: cleanslate [options] ["task"]
 
-Run the CleanSlate agent against a real repository.
+Open the CleanSlate terminal agent, or run one task non-interactively.
 
 Options:
   -C, --cwd <path>          Workspace root (default: current directory)
@@ -147,8 +180,16 @@ Options:
       --base-url <url>      Override the provider base URL
       --reasoning <level>   none, low, medium, high (default: low)
       --max-turns <count>   Bound model turns
+      --tui                 Force the interactive terminal UI
+      --no-tui              Stream one task without the terminal UI
+  -r, --resume              Resume the latest workspace session
+      --session <id>        Resume a specific session
+      --list-sessions       List saved sessions for this workspace
   -h, --help                Show help
   -v, --version             Show version
+
+With a terminal attached, CleanSlate opens the TUI by default. In a pipe or
+with --no-tui, a task is required.
 
 Every shell command requires an explicit y/N approval. Non-interactive input
 refuses commands by default. Ctrl-C cancels the active run.`;

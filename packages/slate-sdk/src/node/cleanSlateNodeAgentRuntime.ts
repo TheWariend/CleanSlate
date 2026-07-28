@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { CleanSlateAgentExecutionSupport } from '../agent/cleanSlateAgentExecutionSupport.js';
 import { CleanSlateAgentParsingSupport } from '../agent/cleanSlateAgentParsing.js';
+import { CleanSlateAgentSession } from '../agent/cleanSlateAgentSession.js';
 import { CleanSlateStreamPart } from '../agent/cleanSlateAgentTypes.js';
 import { CleanSlateExecutionBudget } from '../agent/cleanSlateExecutionBudget.js';
 import { AgentPhase, parseSlashCommand } from '../agent/cleanSlatePrompts.js';
@@ -16,12 +17,15 @@ import {
 	AIProvider,
 	ICleanSlateConfiguration,
 	ICleanSlateConfigurationService,
+	ICleanSlateAgentRuntimeSnapshot,
 	ICleanSlateLogger,
 	ICleanSlateManagedAccount,
-	ICleanSlateManagedEntitlements
+	ICleanSlateManagedEntitlements,
+	ICleanSlatePendingAgentInteraction
 } from '../protocol/cleanSlateAI.js';
 import { CleanSlateService } from '../protocol/cleanSlateService.js';
-import { CleanSlateTaskSessionService } from '../services/cleanSlateTaskSessionService.js';
+import { CleanSlateTaskSessionService, ICleanSlateTaskSessionSnapshot } from '../services/cleanSlateTaskSessionService.js';
+import { ICleanSlateThreadMessage } from '../services/cleanSlateThreadService.js';
 import { CleanSlateTaskKind, CleanSlateWorkspaceShape } from '../services/cleanSlateTaskState.js';
 import { CleanSlateThreadService } from '../services/cleanSlateThreadService.js';
 import { ALL_TOOLS } from '../tools/registry.js';
@@ -34,6 +38,15 @@ export interface ICleanSlateNodeAgentRuntimeOptions {
 	approveCommand?: (request: { command: string; cwd?: string; reason?: string }) => Promise<boolean>;
 	onProgress?: (event: { type: string; [key: string]: any }) => void;
 	logger?: Partial<ICleanSlateLogger>;
+	sessionId?: string;
+}
+
+export interface ICleanSlateNodeAgentSessionSnapshot {
+	version: 1;
+	sessionId: string;
+	agent?: ICleanSlateAgentRuntimeSnapshot;
+	task?: ICleanSlateTaskSessionSnapshot;
+	threadHistory: ICleanSlateThreadMessage[];
 }
 
 class NodeConfigurationService implements ICleanSlateConfigurationService {
@@ -83,6 +96,10 @@ export class CleanSlateNodeAgentRuntime {
 	private readonly mainService: NodeCleanSlateMainService;
 	private readonly headlessRuntime: CleanSlateHeadlessRuntime;
 	private readonly queryRunner: CleanSlateQueryRunner;
+	private readonly agentSession = new CleanSlateAgentSession();
+	private readonly threadService = new CleanSlateThreadService();
+	private readonly taskSessionService = new CleanSlateTaskSessionService();
+	private readonly sessionId: string;
 	private readonly contextService = {
 		_serviceBrand: undefined,
 		getContext: async () => ({ activeFile: undefined, openFiles: [] })
@@ -90,6 +107,7 @@ export class CleanSlateNodeAgentRuntime {
 
 	constructor(private readonly options: ICleanSlateNodeAgentRuntimeOptions) {
 		this.rootPath = path.resolve(options.rootPath);
+		this.sessionId = options.sessionId?.trim() || `cli-${process.pid}-${Date.now()}`;
 		const configService = new NodeConfigurationService(options.configuration);
 		this.mainService = new NodeCleanSlateMainService(this.rootPath);
 		const cleanSlateService = new CleanSlateService(configService, this.mainService, createLogger(options.logger));
@@ -120,12 +138,13 @@ export class CleanSlateNodeAgentRuntime {
 			recentFocusLines: toolContext.recentFocusLines,
 			referenceBuffer: new Map(),
 			getTools: () => this.headlessRuntime.getTools(),
-			getSessionId: () => `cli-${process.pid}`,
+			getSessionId: () => this.sessionId,
 			getToolCategory: toolName => this.headlessRuntime.getToolCategory(toolName),
 			buildPromptContext: async () => this.buildPromptContext(),
 			buildPromptContextForMode: async () => this.buildPromptContext(),
 			checkCrossFileReferences: async () => [],
 			executeTool: (toolName, input, toolCallId, signal) => this.headlessRuntime.executeTool(toolName, input, toolCallId, signal),
+			onQuestionPaused: (toolCall, result) => this.agentSession.pauseForQuestion(toolCall, result),
 			getToolDescriptions: () => this.getToolDescriptions()
 		});
 	}
@@ -136,32 +155,91 @@ export class CleanSlateNodeAgentRuntime {
 			throw new Error('Task must not be empty.');
 		}
 		const parsed = parseSlashCommand(objective, 'Execution');
-		const messages = [
+		const seedMessages = [
 			{ role: 'system' as const, content: parsed.systemInstruction },
 			{ role: 'user' as const, content: `[CONTEXT]\n${this.buildPromptContext()}\n\nUser Request: ${parsed.userMessage}` }
 		];
-		const threadService = new CleanSlateThreadService();
-		const taskSessionService = new CleanSlateTaskSessionService();
-		taskSessionService.startNewTask(
+		const messages = this.agentSession.hasMessages()
+			? this.agentSession.continueWithTurn(seedMessages, { objective, mode: 'Execution', phase: AgentPhase.EXECUTION })
+			: this.agentSession.start(seedMessages, { objective, mode: 'Execution', phase: AgentPhase.EXECUTION });
+		this.threadService.addMessage('user', objective);
+		this.taskSessionService.startNewTask(
 			CleanSlateTaskKind.MODIFY_EXISTING,
 			this.workspaceIsEmpty() ? CleanSlateWorkspaceShape.EMPTY : CleanSlateWorkspaceShape.EXISTING,
 			objective
 		);
-		taskSessionService.setPhase(AgentPhase.EXECUTION);
+		this.taskSessionService.setPhase(AgentPhase.EXECUTION);
+		yield* this.runMessages(messages, objective, signal);
+	}
+
+	async *resumePendingQuestion(answer: string, signal?: AbortSignal): AsyncIterable<CleanSlateStreamPart> {
+		const pending = this.agentSession.resumePendingQuestion(answer);
+		if (!pending) {
+			throw new Error('There is no pending agent question to resume.');
+		}
+		const objective = pending.objective?.trim() || 'Continue the current task.';
+		this.threadService.addMessage('user', answer);
+		this.taskSessionService.resumeCurrentTask();
+		this.taskSessionService.setPhase(AgentPhase.EXECUTION);
+		yield* this.runMessages(this.agentSession.getMutableMessages(), objective, signal);
+	}
+
+	getPendingQuestion(): ICleanSlatePendingAgentInteraction | undefined {
+		return this.agentSession.getSnapshot()?.pendingInteraction;
+	}
+
+	getSessionSnapshot(): ICleanSlateNodeAgentSessionSnapshot {
+		return {
+			version: 1,
+			sessionId: this.sessionId,
+			agent: this.agentSession.getSnapshot(),
+			task: this.taskSessionService.getStateSnapshot(),
+			threadHistory: this.threadService.getHistory()
+		};
+	}
+
+	restoreSessionSnapshot(snapshot: ICleanSlateNodeAgentSessionSnapshot | undefined): void {
+		if (!snapshot || snapshot.version !== 1) {
+			return;
+		}
+		this.agentSession.restore(snapshot.agent);
+		this.taskSessionService.restoreStateSnapshot(snapshot.task);
+		this.threadService.setHistory(Array.isArray(snapshot.threadHistory) ? snapshot.threadHistory : []);
+	}
+
+	clearConversation(): void {
+		this.agentSession.clear();
+		this.taskSessionService.reset();
+		this.threadService.clearHistory();
+	}
+
+	private async *runMessages(
+		messages: ReturnType<CleanSlateAgentSession['getMutableMessages']>,
+		objective: string,
+		signal?: AbortSignal
+	): AsyncIterable<CleanSlateStreamPart> {
 		const parsingSupport = new CleanSlateAgentParsingSupport(new NodeConfigurationService(this.options.configuration));
 		const budget = new CleanSlateExecutionBudget(parsingSupport.getExecutionLoopSettings().maxTurns);
-
-		yield* this.queryRunner.run(
+		let assistantText = '';
+		for await (const part of this.queryRunner.run(
 			messages,
 			objective,
 			'Execution',
 			await this.contextService.getContext(),
 			'',
-			threadService,
-			taskSessionService,
+			this.threadService,
+			this.taskSessionService,
 			signal,
 			{ executionFlow: 'normal', executionBudget: budget }
-		);
+		)) {
+			if (part.type === 'chat_text') {
+				assistantText += part.content;
+			}
+			yield part;
+		}
+		if (assistantText.trim()) {
+			this.threadService.addMessage('assistant', assistantText);
+		}
 	}
 
 	getAvailableToolCount(): number {

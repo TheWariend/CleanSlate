@@ -36,4 +36,17 @@ describe('CLI argv', () => {
 		assert.equal(args.provider, 'anthropic');
 		assert.equal(args.model, 'claude-test');
 	});
+
+	test('parses interactive session controls', () => {
+		const args = parseArguments([
+			'--tui',
+			'--resume',
+			'--session', 'session-123',
+			'--list-sessions'
+		], {});
+		assert.equal(args.tui, true);
+		assert.equal(args.resume, true);
+		assert.equal(args.sessionId, 'session-123');
+		assert.equal(args.listSessions, true);
+	});
 });

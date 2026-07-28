@@ -18,6 +18,7 @@ export { CleanSlateNodeCommandService } from './cleanSlateNodeCommandService.js'
 export { NodeCleanSlateMainService } from './cleanSlateNodeMainService.js';
 export { CleanSlateNodeAgentRuntime, createNodeProviderConfiguration } from './cleanSlateNodeAgentRuntime.js';
 export type { ICleanSlateNodeAgentRuntimeOptions } from './cleanSlateNodeAgentRuntime.js';
+export type { ICleanSlateNodeAgentSessionSnapshot } from './cleanSlateNodeAgentRuntime.js';
 
 /**
  * Assembles a tool context rooted at a directory on disk.

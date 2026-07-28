@@ -108,6 +108,7 @@ export type {
 } from './node/cleanSlateHeadlessRunner.js';
 export type { ICleanSlateNodeRuntimeOptions } from './node/cleanSlateNodeToolContext.js';
 export type { ICleanSlateNodeAgentRuntimeOptions } from './node/cleanSlateNodeAgentRuntime.js';
+export type { ICleanSlateNodeAgentSessionSnapshot } from './node/cleanSlateNodeAgentRuntime.js';
 
 //#endregion
 
