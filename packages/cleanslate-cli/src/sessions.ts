@@ -16,6 +16,7 @@ export interface ICliTranscriptEntry {
 	kind: CliTranscriptKind;
 	content: string;
 	timestamp: number;
+	durationMs?: number;
 	status?: 'running' | 'completed' | 'failed' | 'cancelled';
 	toolName?: string;
 	detail?: unknown;

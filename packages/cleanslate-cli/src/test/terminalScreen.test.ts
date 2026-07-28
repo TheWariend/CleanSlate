@@ -9,6 +9,7 @@ import {
 	clearInteractiveScreen,
 	enterInteractiveScreen,
 	isTerminalMouseEvent,
+	terminalMouseEvent,
 	terminalMouseWheelDirection
 } from '../terminalScreen.js';
 
@@ -48,4 +49,16 @@ test('terminal mouse wheel events are decoded for the TUI viewport', () => {
 	assert.equal(terminalMouseWheelDirection('[<68;20;10M'), -1);
 	assert.equal(terminalMouseWheelDirection('[<0;20;10M'), 0);
 	assert.equal(terminalMouseWheelDirection('hello'), 0);
+});
+
+test('terminal mouse clicks retain coordinates and press state', () => {
+	assert.deepEqual(terminalMouseEvent('[<0;42;17M'), {
+		button: 0,
+		x: 42,
+		y: 17,
+		action: 'press',
+		wheelDirection: 0
+	});
+	assert.equal(terminalMouseEvent('[<0;42;17m')?.action, 'release');
+	assert.equal(terminalMouseEvent('hello'), undefined);
 });

@@ -26,7 +26,7 @@ import {
 import { createEditPreview, ICliEditPreview } from './editPreview.js';
 import { CliPermissionMode, CliPermissionPolicy } from './permissions.js';
 import { getCleanSlateWorkspaceStorageHome } from './config.js';
-import { isTerminalMouseEvent, terminalMouseWheelDirection } from './terminalScreen.js';
+import { isTerminalMouseEvent, terminalMouseEvent, terminalMouseWheelDirection } from './terminalScreen.js';
 import {
 	CliSessionStore,
 	ICliSession,
@@ -135,7 +135,7 @@ const COMMAND_PALETTE_ITEMS: readonly ICommandPaletteItem[] = [
 	{ id: '/context', label: 'Context', description: 'Show loaded project instructions and attached files' },
 	{ id: '/changes', label: 'Changes', description: 'Show the current Git working tree' },
 	{ id: '/diff', label: 'Diff', description: 'Review current and per-turn changes' },
-	{ id: '/details', label: 'Tool details', description: 'Expand or collapse tool calls and results' },
+	{ id: '/details', label: 'Tool details', description: 'Expand or collapse the selected tool item' },
 	{ id: '/doctor', label: 'Doctor', description: 'Check the CLI, provider, workspace, and integrations' },
 	{ id: '/logout', label: 'Log out', description: 'Remove the saved credential for the active provider' },
 	{ id: '/clear', label: 'Clear', description: 'Clear conversation and transcript' },
@@ -149,7 +149,8 @@ export function commandPaletteSelection(item: ICommandPaletteItem): { value: str
 		: { value: item.id, execute: true };
 }
 
-const FOOTER_HELP = ' enter send · shift+tab mode · ctrl+o details · esc cancel · ctrl-c exit · ↑/↓/pgup/pgdn scroll · / commands';
+const FOOTER_HELP = ' enter send · shift+tab mode · ctrl+j/k tools · ctrl+o details · esc cancel · ctrl-c exit · ↑/↓/pgup/pgdn scroll · / commands';
+const TRANSCRIPT_FIRST_ROW = 6;
 
 function PromptInput(props: {
 	value: string;
@@ -167,7 +168,7 @@ function PromptInput(props: {
 
 	useInput((input, key) => {
 		if (isTerminalMouseEvent(input)
-			|| (key.ctrl && (input === 'c' || input === 'o'))
+			|| (key.ctrl && (input === 'c' || input === 'o' || input === 'j' || input === 'k'))
 			|| key.tab
 			|| key.escape
 			|| key.upArrow
@@ -291,6 +292,57 @@ export interface ITranscriptViewportLine {
 	key: string;
 	kind: TranscriptViewportLineKind;
 	text: string;
+	toolGroupId?: string;
+	toolItemId?: string;
+	selected?: boolean;
+}
+
+export function transcriptToolGroupIds(entries: readonly ICliTranscriptEntry[]): string[] {
+	const ids: string[] = [];
+	let previousWasTool = false;
+	for (const entry of entries) {
+		if (entry.kind === 'tool' && !previousWasTool) {
+			ids.push(`group:${entry.id}`);
+		}
+		previousWasTool = entry.kind === 'tool';
+	}
+	return ids;
+}
+
+export function transcriptToolItemIds(
+	entries: readonly ICliTranscriptEntry[],
+	expandedToolGroups: ReadonlySet<string>
+): string[] {
+	const ids: string[] = [];
+	for (let index = 0; index < entries.length; index++) {
+		const entry = entries[index];
+		if (entry.kind !== 'tool') {
+			continue;
+		}
+		const groupId = `group:${entry.id}`;
+		ids.push(groupId);
+		if (expandedToolGroups.has(groupId)) {
+			ids.push(entry.id);
+			while (entries[index + 1]?.kind === 'tool') {
+				ids.push(entries[++index].id);
+			}
+		} else {
+			while (entries[index + 1]?.kind === 'tool') {
+				index++;
+			}
+		}
+	}
+	return ids;
+}
+
+export function formatElapsedTime(durationMs: number): string {
+	const seconds = Math.max(1, Math.round(durationMs / 1000));
+	if (seconds < 60) {
+		return `Worked for ${seconds}s`;
+	}
+	const minutes = Math.floor(seconds / 60);
+	const remainder = seconds % 60;
+	return `Worked for ${minutes}m${remainder ? ` ${remainder}s` : ''}`;
 }
 
 const TOOL_ACTIVITY_LABELS: Record<string, string> = {
@@ -442,7 +494,9 @@ function wrapViewportText(value: string, width: number): string[] {
 export function transcriptViewportLines(
 	entries: readonly ICliTranscriptEntry[],
 	width: number,
-	showToolDetails = false
+	expandedToolGroups: boolean | ReadonlySet<string> = false,
+	selectedToolItemId?: string,
+	expandedToolEntries: boolean | ReadonlySet<string> = expandedToolGroups
 ): ITranscriptViewportLine[] {
 	const safeWidth = Math.max(8, width);
 	const lines: ITranscriptViewportLine[] = [];
@@ -471,7 +525,7 @@ export function transcriptViewportLines(
 			lines.push({ key: `${entry.id}-space`, kind: 'blank', text: '' });
 		}
 	};
-	const pushExpandedTool = (entry: ICliTranscriptEntry) => {
+	const pushExpandedTool = (entry: ICliTranscriptEntry, expanded: boolean) => {
 		const marker = entry.status === 'running' ? '●' : entry.status === 'failed' ? '×' : '✓';
 		const input = entry.detail && typeof entry.detail === 'object' && 'input' in entry.detail
 			? (entry.detail as { input?: unknown }).input
@@ -489,20 +543,31 @@ export function transcriptViewportLines(
 			search_workspace: 'Search',
 			grep_search: 'Search',
 			find_by_name: 'Find',
-			list_dir: 'List'
+			list_dir: 'List',
+			read_lints: 'Checked lints'
 		} as Record<string, string>)[entry.toolName ?? ''] ?? (entry.toolName ?? 'Tool').replace(/_/g, ' ');
-		const heading = target ? `  ${marker} ${label}(${compact(target, 140)})` : `  ${marker} ${label}`;
+		const duration = entry.durationMs === undefined ? '' : ` · ${Math.max(1, Math.round(entry.durationMs / 100) / 10)}s`;
+		const heading = target
+			? `  ${marker} ${expanded ? '⌄' : '›'} ${label}(${compact(target, 140)})${duration}`
+			: `  ${marker} ${expanded ? '⌄' : '›'} ${label}${duration}`;
+		const headingStart = lines.length;
 		pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', heading, 'heading');
+		for (let lineIndex = headingStart; lineIndex < lines.length; lineIndex++) {
+			lines[lineIndex] = {
+				...lines[lineIndex],
+				toolItemId: entry.id,
+				selected: entry.id === selectedToolItemId
+			};
+		}
 		const result = entry.detail && typeof entry.detail === 'object' && 'result' in entry.detail
 			? (entry.detail as { result?: any }).result
 			: undefined;
 		const resultDetail = typeof result?.output === 'string' && result.output.trim()
 			? result.output
 			: entry.content && entry.content !== 'completed' ? entry.content : '';
-		if (resultDetail) {
+		if (expanded && resultDetail) {
 			pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', `    └ ${compact(resultDetail, 800)}`, 'result');
 		}
-		lines.push(...inlineEditDiffLines(entry, safeWidth));
 	};
 	for (let entryIndex = 0; entryIndex < entries.length; entryIndex++) {
 		const entry = entries[entryIndex];
@@ -511,20 +576,37 @@ export function transcriptViewportLines(
 			while (entries[entryIndex + 1]?.kind === 'tool') {
 				toolEntries.push(entries[++entryIndex]);
 			}
-			if (showToolDetails) {
+			const groupId = `group:${entry.id}`;
+			const expanded = expandedToolGroups === true
+				|| (expandedToolGroups instanceof Set && expandedToolGroups.has(groupId));
+			const summaryEntry = { ...entry, id: `${entry.id}-group` };
+			const summaryLinesBefore = lines.length;
+			pushWrapped(
+				summaryEntry,
+				toolEntries.every(item => item.status === 'failed') ? 'toolError' : 'tool',
+				`● ${expanded ? '⌄' : '›'} ${compactToolActivity(toolEntries)}`
+			);
+			for (let lineIndex = summaryLinesBefore; lineIndex < lines.length; lineIndex++) {
+				lines[lineIndex] = {
+					...lines[lineIndex],
+					toolGroupId: groupId,
+					toolItemId: groupId,
+					selected: groupId === selectedToolItemId
+				};
+			}
+			if (expanded) {
 				for (const toolEntry of toolEntries) {
-					pushExpandedTool(toolEntry);
+					const entryExpanded = expandedToolEntries === true
+						|| (expandedToolEntries instanceof Set && expandedToolEntries.has(toolEntry.id));
+					const before = lines.length;
+					pushExpandedTool(toolEntry, entryExpanded);
+					for (let lineIndex = before; lineIndex < lines.length; lineIndex++) {
+						lines[lineIndex] = { ...lines[lineIndex], toolGroupId: groupId, toolItemId: toolEntry.id };
+					}
 				}
-			} else {
-				const summaryEntry = { ...entry, id: `${entry.id}-group` };
-				pushWrapped(
-					summaryEntry,
-					toolEntries.every(item => item.status === 'failed') ? 'toolError' : 'tool',
-					`● ${compactToolActivity(toolEntries)}`
-				);
-				for (const toolEntry of toolEntries) {
-					lines.push(...inlineEditDiffLines(toolEntry, safeWidth));
-				}
+			}
+			for (const toolEntry of toolEntries) {
+				lines.push(...inlineEditDiffLines(toolEntry, safeWidth).map(line => ({ ...line, toolGroupId: groupId })));
 			}
 			continue;
 		}
@@ -534,6 +616,13 @@ export function transcriptViewportLines(
 		} else if (entry.kind === 'assistant') {
 			pushTurnSpacing(entry);
 			pushTurn(entry, 'assistant', '↳');
+			if (entry.durationMs !== undefined) {
+				lines.push({
+					key: `${entry.id}-elapsed`,
+					kind: 'system',
+					text: `  ${formatElapsedTime(entry.durationMs)}`
+				});
+			}
 		} else if (entry.kind === 'reasoning') {
 			continue;
 		} else {
@@ -548,9 +637,11 @@ export function visibleTranscriptLines(
 	width: number,
 	rows: number,
 	scrollOffset = 0,
-	showToolDetails = false
+	expandedToolGroups: boolean | ReadonlySet<string> = false,
+	selectedToolItemId?: string,
+	expandedToolEntries: boolean | ReadonlySet<string> = expandedToolGroups
 ): ITranscriptViewportLine[] {
-	const lines = transcriptViewportLines(entries, width, showToolDetails);
+	const lines = transcriptViewportLines(entries, width, expandedToolGroups, selectedToolItemId, expandedToolEntries);
 	const safeRows = Math.max(1, rows);
 	const maxOffset = Math.max(0, lines.length - safeRows);
 	const offset = Math.max(0, Math.min(maxOffset, scrollOffset));
@@ -607,6 +698,58 @@ export function nextInteractiveMode(mode: 'execution' | 'planning'): 'execution'
 	return mode === 'planning' ? 'execution' : 'planning';
 }
 
+type DiffSyntaxKind = 'plain' | 'keyword' | 'string' | 'number' | 'comment';
+
+export interface IDiffSyntaxToken {
+	kind: DiffSyntaxKind;
+	text: string;
+}
+
+export function diffSyntaxTokens(value: string): IDiffSyntaxToken[] {
+	const pattern = /(\/\/.*$|#.*$|\/\*[\s\S]*?\*\/|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`|\b(?:class|interface|type|function|const|let|var|return|if|else|for|while|switch|case|break|continue|async|await|import|export|from|new|extends|implements|public|private|protected|static|final|void|true|false|null|undefined|this|super|try|catch|finally|throw)\b|\b\d+(?:\.\d+)?\b)/gm;
+	const tokens: IDiffSyntaxToken[] = [];
+	let offset = 0;
+	for (const match of value.matchAll(pattern)) {
+		const index = match.index ?? offset;
+		if (index > offset) {
+			tokens.push({ kind: 'plain', text: value.slice(offset, index) });
+		}
+		const text = match[0];
+		const kind: DiffSyntaxKind = text.startsWith('//') || text.startsWith('#') || text.startsWith('/*')
+			? 'comment'
+			: /^['"`]/.test(text)
+				? 'string'
+				: /^\d/.test(text)
+					? 'number'
+					: 'keyword';
+		tokens.push({ kind, text });
+		offset = index + text.length;
+	}
+	if (offset < value.length) {
+		tokens.push({ kind: 'plain', text: value.slice(offset) });
+	}
+	return tokens.length > 0 ? tokens : [{ kind: 'plain', text: value }];
+}
+
+function SyntaxDiffText({ text, color, backgroundColor }: { text: string; color: string; backgroundColor?: string }) {
+	return (
+		<Text color={color} backgroundColor={backgroundColor} wrap="truncate-end">
+			{diffSyntaxTokens(text).map((token, index) => {
+				const tokenColor = token.kind === 'keyword'
+					? '#c4b5fd'
+					: token.kind === 'string'
+						? '#fde68a'
+						: token.kind === 'number'
+							? '#93c5fd'
+							: token.kind === 'comment'
+								? '#a1a1aa'
+								: color;
+				return <Text key={`${index}-${token.kind}`} color={tokenColor} backgroundColor={backgroundColor}>{token.text}</Text>;
+			})}
+		</Text>
+	);
+}
+
 function TranscriptViewportLine({ line, width }: { line: ITranscriptViewportLine; width: number }) {
 	const text = line.text.padEnd(Math.max(1, width));
 	switch (line.kind) {
@@ -621,14 +764,15 @@ function TranscriptViewportLine({ line, width }: { line: ITranscriptViewportLine
 		case 'reasoning':
 			return <Text color={COLORS.muted}>{text}</Text>;
 		case 'tool':
-			return <Text color={COLORS.success}>{text}</Text>;
+			return <Text color={COLORS.success} inverse={line.selected} bold={line.selected}>{text}</Text>;
 		case 'toolError':
+			return <Text color={COLORS.danger} inverse={line.selected} bold={line.selected}>{text}</Text>;
 		case 'error':
 			return <Text color={COLORS.danger}>{text}</Text>;
 		case 'diffAddition':
-			return <Text color="#bbf7d0" backgroundColor="#153f2a">{text}</Text>;
+			return <SyntaxDiffText text={text} color="#bbf7d0" backgroundColor="#153f2a" />;
 		case 'diffDeletion':
-			return <Text color="#fecaca" backgroundColor="#4a2028">{text}</Text>;
+			return <SyntaxDiffText text={text} color="#fecaca" backgroundColor="#4a2028" />;
 		case 'diffHunk':
 			return <Text color={COLORS.warning}>{text}</Text>;
 		case 'diffHeader':
@@ -653,9 +797,9 @@ function DiffLine({ line }: { line: ICliDiffLine }) {
 	const formatted = formatCliDiffLine(line);
 	switch (line.kind) {
 		case 'addition':
-			return <Text color="#bbf7d0" backgroundColor="#153f2a" wrap="truncate-end">{formatted || '+'}</Text>;
+			return <SyntaxDiffText text={formatted || '+'} color="#bbf7d0" backgroundColor="#153f2a" />;
 		case 'deletion':
-			return <Text color="#fecaca" backgroundColor="#4a2028" wrap="truncate-end">{formatted || '-'}</Text>;
+			return <SyntaxDiffText text={formatted || '-'} color="#fecaca" backgroundColor="#4a2028" />;
 		case 'hunk':
 			return <Text color={COLORS.warning} wrap="truncate-end">{formatted}</Text>;
 		case 'header':
@@ -697,9 +841,23 @@ function DiffViewer(props: {
 	);
 }
 
-function ApprovalBox({ approval, decide }: { approval: IPendingApproval; decide: (approved: boolean, session?: boolean) => void }) {
+function ApprovalBox({ approval, decide, topRow }: {
+	approval: IPendingApproval;
+	decide: (approved: boolean, session?: boolean) => void;
+	topRow: number;
+}) {
 	useInput((input, key) => {
-		if (input === 'y' || key.return) {
+		const mouse = terminalMouseEvent(input);
+		const optionRow = topRow + 4 + (approval.request.reason ? 1 : 0);
+		if (mouse?.action === 'press' && mouse.button === 0 && mouse.y === optionRow) {
+			if (mouse.x < 14) {
+				decide(true);
+			} else if (mouse.x < 48) {
+				decide(true, true);
+			} else {
+				decide(false);
+			}
+		} else if (input === 'y' || key.return) {
 			decide(true);
 		} else if (input === 'a') {
 			decide(true, true);
@@ -713,41 +871,68 @@ function ApprovalBox({ approval, decide }: { approval: IPendingApproval; decide:
 			{approval.request.reason && <Text>{approval.request.reason}</Text>}
 			<Text color={COLORS.muted}>{approval.request.cwd}</Text>
 			<Text bold>{approval.request.command}</Text>
-			<Text><Text color={COLORS.success}>[y]</Text> once  <Text color={COLORS.accent}>[a]</Text> allow commands this session  <Text color={COLORS.danger}>[n]</Text> deny</Text>
+			<Text><Text color={COLORS.success}>[y]</Text> once  <Text color={COLORS.accent}>[a]</Text> allow commands this session  <Text color={COLORS.danger}>[n]</Text> deny  <Text color={COLORS.muted}>· click an option</Text></Text>
 		</Box>
 	);
 }
 
-function EditApprovalBox({ approval, decide, maxDiffRows }: {
+function EditApprovalBox({ approval, decide, maxDiffRows, topRow }: {
 	approval: IPendingEditApproval;
 	decide: (approved: boolean, session?: boolean) => void;
 	maxDiffRows: number;
+	topRow: number;
 }) {
 	const [selected, setSelected] = useState(0);
+	const [diffOffset, setDiffOffset] = useState(0);
+	const previewFiles = approval.preview?.files ?? [];
+	const allDiffRows = previewFiles.flatMap(file => [
+		{ kind: 'header' as const, text: `Edit file · ${file.path}  +${file.additions} -${file.deletions}` },
+		...file.lines.filter(line => line.kind !== 'header' && line.text !== '')
+	]);
+	const safeDiffRows = Math.max(1, maxDiffRows);
+	const maxDiffOffset = Math.max(0, allDiffRows.length - safeDiffRows);
+	const visibleDiffOffset = Math.min(diffOffset, maxDiffOffset);
+	const diffRows = allDiffRows.slice(visibleDiffOffset, visibleDiffOffset + safeDiffRows);
 	useInput((input, key) => {
-		if (key.upArrow) {
+		const mouse = terminalMouseEvent(input);
+		const optionStartRow = topRow + 3 + diffRows.length;
+		if (mouse?.action === 'wheel' && mouse.wheelDirection < 0) {
+			setDiffOffset(value => Math.max(0, value - 3));
+		} else if (mouse?.action === 'wheel' && mouse.wheelDirection > 0) {
+			setDiffOffset(value => Math.min(maxDiffOffset, value + 3));
+		} else if (mouse?.action === 'press' && mouse.button === 0 && mouse.y >= optionStartRow && mouse.y < optionStartRow + 3) {
+			const choice = mouse.y - optionStartRow;
+			setSelected(choice);
+			decide(choice !== 2, choice === 1);
+		} else if (input === 'k') {
+			setDiffOffset(value => Math.max(0, value - 1));
+		} else if (input === 'j') {
+			setDiffOffset(value => Math.min(maxDiffOffset, value + 1));
+		} else if (key.pageUp) {
+			setDiffOffset(value => Math.max(0, value - safeDiffRows));
+		} else if (key.pageDown) {
+			setDiffOffset(value => Math.min(maxDiffOffset, value + safeDiffRows));
+		} else if (key.upArrow) {
 			setSelected(value => Math.max(0, value - 1));
 		} else if (key.downArrow) {
 			setSelected(value => Math.min(2, value + 1));
-		} else if (input === 'y') {
+		} else if (input === 'y' || input === '1') {
 			decide(true);
-		} else if (input === 'a') {
+		} else if (input === 'a' || input === '2') {
 			decide(true, true);
-		} else if (input === 'n' || key.escape) {
+		} else if (input === 'n' || input === '3' || key.escape) {
 			decide(false);
 		} else if (key.return) {
 			decide(selected !== 2, selected === 1);
 		}
 	});
-	const previewFiles = approval.preview?.files ?? [];
-	const diffRows = previewFiles.flatMap(file => [
-		{ kind: 'header' as const, text: `Edit file · ${file.path}  +${file.additions} -${file.deletions}` },
-		...file.lines.filter(line => line.kind !== 'header' && line.text !== '')
-	]).slice(0, Math.max(1, maxDiffRows));
 	const target = (approval.request.input as any)?.file_path ?? (approval.request.input as any)?.path;
 	return (
 		<Box borderStyle="round" borderColor={COLORS.accent} flexDirection="column" paddingX={1}>
-			<Text color={COLORS.accent} bold>{target ? `Edit ${String(target).split(/[\\/]/).at(-1)}` : 'Apply workspace edit'}</Text>
+			<Box justifyContent="space-between">
+				<Text color={COLORS.accent} bold>{target ? `Edit ${String(target).split(/[\\/]/).at(-1)}` : 'Apply workspace edit'}</Text>
+				{allDiffRows.length > safeDiffRows && <Text color={COLORS.muted}>{visibleDiffOffset + 1}-{Math.min(allDiffRows.length, visibleDiffOffset + safeDiffRows)}/{allDiffRows.length}</Text>}
+			</Box>
 			{diffRows.length > 0
 				? diffRows.map((line, index) => <DiffLine key={`${index}-${line.kind}-${line.text}`} line={line} />)
 				: <Text color={COLORS.muted}>{compact(approval.request.input, 300)}</Text>}
@@ -755,7 +940,7 @@ function EditApprovalBox({ approval, decide, maxDiffRows }: {
 			<Text inverse={selected === 0}>{selected === 0 ? '› ' : '  '}1. Yes</Text>
 			<Text inverse={selected === 1}>{selected === 1 ? '› ' : '  '}2. Yes, allow all edits this session</Text>
 			<Text inverse={selected === 2}>{selected === 2 ? '› ' : '  '}3. No</Text>
-			<Text color={COLORS.muted}>↑/↓ select · enter confirm · esc deny</Text>
+			<Text color={COLORS.muted}>↑/↓ select · j/k diff · enter confirm · click choose · esc deny</Text>
 		</Box>
 	);
 }
@@ -847,7 +1032,9 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const [models, setModels] = useState<string[] | undefined>();
 	const [mode, setMode] = useState<'execution' | 'planning'>('execution');
 	const [permissionMode, setPermissionMode] = useState<CliPermissionMode>(args.permissionMode);
-	const [showToolDetails, setShowToolDetails] = useState(false);
+	const [expandedToolGroups, setExpandedToolGroups] = useState<Set<string>>(() => new Set());
+	const [expandedToolEntries, setExpandedToolEntries] = useState<Set<string>>(() => new Set());
+	const [selectedToolItemId, setSelectedToolItemId] = useState<string | undefined>();
 	const [diffReviews, setDiffReviews] = useState<ICliDiffReview[] | undefined>();
 	const [diffReviewIndex, setDiffReviewIndex] = useState(0);
 	const [diffFileIndex, setDiffFileIndex] = useState(0);
@@ -855,6 +1042,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const [scrollOffset, setScrollOffset] = useState(0);
 	const abortRef = useRef<AbortController | undefined>(undefined);
 	const runtimeRef = useRef<CleanSlateNodeAgentRuntime | undefined>(undefined);
+	const turnStartedAtRef = useRef<number | undefined>(undefined);
 	const initialTaskStarted = useRef(false);
 	const projectContext = useMemo(() => new CliProjectContext(args.cwd), [args.cwd]);
 	const workspaceReview = useMemo(() => new CliWorkspaceReview(args.cwd), [args.cwd]);
@@ -865,6 +1053,32 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			(mode !== 'planning' || item.id !== '/plan')
 			&& (item.id.slice(1).includes(commandQuery) || item.label.toLowerCase().includes(commandQuery)));
 	const visibleCommandSelection = Math.min(commandSelection, Math.max(0, commandItems.length - 1));
+	const toolGroupIds = useMemo(() => transcriptToolGroupIds(transcript), [transcript]);
+	const toolItemIds = useMemo(() => transcriptToolItemIds(transcript, expandedToolGroups), [transcript, expandedToolGroups]);
+	const activeToolItemId = selectedToolItemId && toolItemIds.includes(selectedToolItemId)
+		? selectedToolItemId
+		: toolGroupIds.at(-1);
+	const toggleToolItem = (itemId = activeToolItemId) => {
+		if (!itemId) {
+			return;
+		}
+		setSelectedToolItemId(itemId);
+		const update = (current: Set<string>) => {
+			const next = new Set(current);
+			next.has(itemId) ? next.delete(itemId) : next.add(itemId);
+			return next;
+		};
+		itemId.startsWith('group:') ? setExpandedToolGroups(update) : setExpandedToolEntries(update);
+		setScrollOffset(0);
+	};
+	const selectToolItem = (direction: -1 | 1) => {
+		if (toolItemIds.length === 0) {
+			return;
+		}
+		const currentIndex = activeToolItemId ? toolItemIds.indexOf(activeToolItemId) : toolItemIds.length - 1;
+		const nextIndex = Math.max(0, Math.min(toolItemIds.length - 1, currentIndex + direction));
+		setSelectedToolItemId(toolItemIds[nextIndex]);
+	};
 
 	const persist = (nextTranscript?: ICliTranscriptEntry[]) => {
 		const current = sessionRef.current;
@@ -900,7 +1114,8 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const finishResponse = () => {
 		const { answer } = liveTurnRef.current.finish();
 		if (answer) {
-			append(transcriptEntry('assistant', answer));
+			const durationMs = turnStartedAtRef.current === undefined ? undefined : Date.now() - turnStartedAtRef.current;
+			append(transcriptEntry('assistant', answer, { durationMs }));
 		}
 		updateLiveText('');
 	};
@@ -1055,6 +1270,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 								id: part.toolCallId || undefined,
 								toolName: part.toolName,
 								status: part.result?.success === false ? 'failed' : 'completed',
+								durationMs: started ? Date.now() - started.timestamp : undefined,
 								detail: {
 									input: started?.detail,
 									result: part.result
@@ -1110,6 +1326,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		append(transcriptEntry('user', task));
+		turnStartedAtRef.current = Date.now();
 		setModelTermination(undefined);
 		if (sessionRef.current.title === 'New session') {
 			sessionRef.current.title = compact(task, 72);
@@ -1133,6 +1350,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		}
 		setModelTermination(undefined);
 		setRunning(true);
+		turnStartedAtRef.current = Date.now();
 		setStatus('thinking');
 		const abort = new AbortController();
 		abortRef.current = abort;
@@ -1147,7 +1365,9 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		sessionRef.current = next;
 		setSession(next);
 		setTranscript(next.transcript);
-		setShowToolDetails(false);
+		setExpandedToolGroups(new Set());
+		setExpandedToolEntries(new Set());
+		setSelectedToolItemId(undefined);
 		setShowSessions(false);
 		setAllowCommandsForSession(false);
 		allowCommandsRef.current = false;
@@ -1208,8 +1428,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		if (value === '/details') {
-			setShowToolDetails(current => !current);
-			setScrollOffset(0);
+			toggleToolItem();
 			return;
 		}
 		if (value === '/new') {
@@ -1392,6 +1611,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	};
 
 	useInput((inputValue, key) => {
+		const mouse = terminalMouseEvent(inputValue);
 		const wheelDirection = terminalMouseWheelDirection(inputValue);
 		if (modelTermination) {
 			if (key.return) {
@@ -1454,10 +1674,20 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		} else if (wheelDirection > 0) {
 			setScrollOffset(value => Math.max(0, value - 3));
 		} else if (isTerminalMouseEvent(inputValue)) {
+			if (mouse?.action === 'press' && mouse.button === 0) {
+				const line = renderedLines[mouse.y - TRANSCRIPT_FIRST_ROW];
+				const itemId = line?.toolItemId ?? line?.toolGroupId;
+				if (itemId) {
+					toggleToolItem(itemId);
+				}
+			}
 			return;
 		} else if (inputValue === 'o' && key.ctrl) {
-			setShowToolDetails(current => !current);
-			setScrollOffset(0);
+			toggleToolItem();
+		} else if ((key.ctrl && key.upArrow) || (key.ctrl && inputValue === 'k')) {
+			selectToolItem(-1);
+		} else if ((key.ctrl && key.downArrow) || (key.ctrl && inputValue === 'j')) {
+			selectToolItem(1);
 		} else if (key.tab && key.shift && !running) {
 			const nextMode = nextInteractiveMode(mode);
 			setMode(nextMode);
@@ -1499,7 +1729,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const overlayRows = approval
 		? 7
 		: editApproval
-			? editPreviewRows + 7
+			? editPreviewRows + 8
 			: showSessions
 				? Math.min(10, store.list().length) + 3
 				: models
@@ -1517,8 +1747,8 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		return entries;
 	}, [transcript, running, liveText]);
 	const visibleLines = useMemo(
-		() => visibleTranscriptLines(viewportEntries, contentWidth, contentRows, scrollOffset, showToolDetails),
-		[viewportEntries, contentWidth, contentRows, scrollOffset, showToolDetails]
+		() => visibleTranscriptLines(viewportEntries, contentWidth, contentRows, scrollOffset, expandedToolGroups, activeToolItemId, expandedToolEntries),
+		[viewportEntries, contentWidth, contentRows, scrollOffset, expandedToolGroups, expandedToolEntries, activeToolItemId]
 	);
 	const renderedLines = useMemo(
 		() => visibleLines.length > 0 ? padTranscriptViewportLines(visibleLines, contentRows) : [],
@@ -1575,8 +1805,8 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 					</>}
 			</Box>
 
-			{approval && <ApprovalBox approval={approval} decide={decideApproval} />}
-			{editApproval && <EditApprovalBox approval={editApproval} decide={decideEditApproval} maxDiffRows={editPreviewRows} />}
+			{approval && <ApprovalBox approval={approval} decide={decideApproval} topRow={TRANSCRIPT_FIRST_ROW + contentRows + 1} />}
+			{editApproval && <EditApprovalBox approval={editApproval} decide={decideEditApproval} maxDiffRows={editPreviewRows} topRow={TRANSCRIPT_FIRST_ROW + contentRows} />}
 			{showSessions && <SessionPicker sessions={store.list()} onSelect={switchSession} onCancel={() => setShowSessions(false)} />}
 			{models && <ModelPicker models={models} current={args.model} onSelect={switchModel} onCancel={() => setModels(undefined)} />}
 			{!approval && !editApproval && !showSessions && !models && !modelTermination && !diffReviews && commandItems.length > 0 && (

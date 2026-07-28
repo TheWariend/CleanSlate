@@ -6,7 +6,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ICliTranscriptEntry } from '../sessions.js';
-import { formatActivityStatus, padTranscriptViewportLines, transcriptViewportLines, visibleTranscriptLines } from '../tui.js';
+import {
+	diffSyntaxTokens,
+	formatActivityStatus,
+	formatElapsedTime,
+	padTranscriptViewportLines,
+	transcriptToolGroupIds,
+	transcriptToolItemIds,
+	transcriptViewportLines,
+	visibleTranscriptLines
+} from '../tui.js';
 
 function entry(id: string, kind: ICliTranscriptEntry['kind'], content: string): ICliTranscriptEntry {
 	return { id, kind, content, timestamp: 0 };
@@ -69,7 +78,7 @@ test('TUI keeps compact tool activity inline and expands every call on demand', 
 
 	const compact = transcriptViewportLines(tools, 100);
 	assert.deepEqual(compact.map(line => line.text), [
-		'● Searched ×2 · Read ×2 · Edited main.dart +2 -1 · Checked lints · 1 failed',
+		'● › Searched ×2 · Read ×2 · Edited main.dart +2 -1 · Checked lints · 1 failed',
 		'  main.dart  +2 -1',
 		'  @@ -1,2 +1,3 @@',
 		'     1 - const oldValue = true;',
@@ -85,12 +94,12 @@ test('TUI keeps compact tool activity inline and expands every call on demand', 
 	]);
 
 	const expanded = transcriptViewportLines(tools, 100, true);
-	assert.equal(expanded.length, 14);
+	assert.equal(expanded.length, 15);
 	assert.equal(new Set(expanded.map(line => line.key)).size, expanded.length);
-	assert.match(expanded[2].text, /Read\(lib\/main\.dart\)/);
-	assert.match(expanded[4].text, /× Read\(lib\/large\.dart\)/);
-	assert.match(expanded[6].text, /Update\(\/workspace\/lib\/main\.dart\)/);
-	assert.equal(expanded[9].kind, 'diffDeletion');
+	assert.match(expanded[3].text, /Read\(lib\/main\.dart\)/);
+	assert.match(expanded[5].text, /× ⌄ Read\(lib\/large\.dart\)/);
+	assert.match(expanded[7].text, /Update\(\/workspace\/lib\/main\.dart\)/);
+	assert.equal(expanded[12].kind, 'diffDeletion');
 });
 
 test('TUI details mode expands tool groups without reordering the transcript', () => {
@@ -101,11 +110,40 @@ test('TUI details mode expands tool groups without reordering the transcript', (
 	];
 
 	const expanded = transcriptViewportLines(transcript, 100, true).map(line => line.text);
-	assert.equal(expanded.filter(line => line.includes('✓ Read')).length, 2);
-	assert.equal(expanded[0], '  ✓ Read');
-	assert.equal(expanded[2], '');
-	assert.equal(expanded[3], '↳ Done with the first task.');
-	assert.equal(expanded[4], '  ✓ Read');
+	assert.equal(expanded.filter(line => /✓ [⌄›] Read/.test(line)).length, 2);
+	assert.equal(expanded[0], '● ⌄ Read');
+	assert.equal(expanded[3], '');
+	assert.equal(expanded[4], '↳ Done with the first task.');
+	assert.equal(expanded[5], '● ⌄ Read');
+});
+
+test('TUI expands tool groups and individual tool results independently', () => {
+	const tools: ICliTranscriptEntry[] = [
+		{ ...entry('search', 'tool', '2 matches'), toolName: 'grep_search', status: 'completed' },
+		{ ...entry('read', 'tool', 'lib/main.dart'), toolName: 'read_file', status: 'completed', detail: { input: { path: 'lib/main.dart' }, result: { success: true } } }
+	];
+	const groups = new Set(['group:search']);
+	const groupOnly = transcriptViewportLines(tools, 100, groups, 'read');
+	const withRead = transcriptViewportLines(tools, 100, groups, 'read', new Set(['read']));
+
+	assert.deepEqual(transcriptToolGroupIds(tools), ['group:search']);
+	assert.deepEqual(transcriptToolItemIds(tools, groups), ['group:search', 'search', 'read']);
+	assert.equal(groupOnly.some(line => line.text.includes('└ lib/main.dart')), false);
+	assert.equal(withRead.some(line => line.text.includes('└ lib/main.dart')), true);
+	assert.equal(withRead.find(line => line.toolItemId === 'read')?.selected, true);
+});
+
+test('TUI formats elapsed labels and tokenizes code in diffs', () => {
+	assert.equal(formatElapsedTime(12_400), 'Worked for 12s');
+	assert.equal(formatElapsedTime(65_000), 'Worked for 1m 5s');
+	const timedAnswer = transcriptViewportLines([
+		{ ...entry('answer', 'assistant', 'Done.'), durationMs: 12_400 }
+	], 80);
+	assert.equal(timedAnswer.at(-1)?.text, '  Worked for 12s');
+	const tokens = diffSyntaxTokens('+ const answer = "done"; // saved');
+	assert.equal(tokens.some(token => token.kind === 'keyword' && token.text === 'const'), true);
+	assert.equal(tokens.some(token => token.kind === 'string' && token.text === '"done"'), true);
+	assert.equal(tokens.some(token => token.kind === 'comment'), true);
 });
 
 test('TUI exposes active edit tools as editing activity', () => {

@@ -7,7 +7,34 @@ const ENTER_ALTERNATE_SCREEN = '\u001b[?1049h\u001b[?1007h\u001b[?1000h\u001b[?1
 const LEAVE_ALTERNATE_SCREEN = '\u001b[?1006l\u001b[?1000l\u001b[?1007l\u001b[?25h\u001b[?1049l';
 const CLEAR_SCREEN = '\u001b[2J\u001b[H';
 const ENGINE_LOG_PREFIX = '[CleanSlateAgent]';
-const SGR_MOUSE_EVENT = /^\u001b?\[<(\d+);\d+;\d+[Mm]$/;
+const SGR_MOUSE_EVENT = /^\u001b?\[<(\d+);(\d+);(\d+)([Mm])$/;
+
+export interface ITerminalMouseEvent {
+	button: number;
+	x: number;
+	y: number;
+	action: 'press' | 'release' | 'wheel';
+	wheelDirection: -1 | 0 | 1;
+}
+
+export function terminalMouseEvent(input: string): ITerminalMouseEvent | undefined {
+	const match = SGR_MOUSE_EVENT.exec(input);
+	if (!match) {
+		return undefined;
+	}
+	const button = Number(match[1]);
+	const wheel = (button & 64) !== 0;
+	const wheelDirection = wheel
+		? (button & 3) === 0 ? -1 : (button & 3) === 1 ? 1 : 0
+		: 0;
+	return {
+		button: button & 3,
+		x: Number(match[2]),
+		y: Number(match[3]),
+		action: wheel ? 'wheel' : match[4] === 'm' ? 'release' : 'press',
+		wheelDirection
+	};
+}
 
 export function isTerminalMouseEvent(input: string): boolean {
 	return SGR_MOUSE_EVENT.test(input);
@@ -15,19 +42,7 @@ export function isTerminalMouseEvent(input: string): boolean {
 
 /** Returns -1 for wheel up, 1 for wheel down, and 0 for other input. */
 export function terminalMouseWheelDirection(input: string): -1 | 0 | 1 {
-	const match = SGR_MOUSE_EVENT.exec(input);
-	if (!match) {
-		return 0;
-	}
-	const button = Number(match[1]);
-	if ((button & 64) === 0) {
-		return 0;
-	}
-	switch (button & 3) {
-		case 0: return -1;
-		case 1: return 1;
-		default: return 0;
-	}
+	return terminalMouseEvent(input)?.wheelDirection ?? 0;
 }
 
 export function clearInteractiveScreen(output: NodeJS.WriteStream = process.stdout): void {
