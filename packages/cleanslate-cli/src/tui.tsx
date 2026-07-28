@@ -12,6 +12,7 @@ import {
 	createNodeProviderConfiguration
 } from '@slate/sdk';
 import { apiKeyFromEnvironment, ICliArguments, SUPPORTED_PROVIDERS } from './argv.js';
+import { CleanSlateTerminalLogo } from './brand.js';
 import {
 	CliSessionStore,
 	ICliSession,
@@ -664,9 +665,12 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	return (
 		<Box flexDirection="column">
 			<Box borderStyle="round" borderColor={COLORS.accent} paddingX={1} justifyContent="space-between">
-				<Box>
-					<Text color={COLORS.accent} bold>◆ CLEANSLATE</Text>
-					<Text color={COLORS.muted}>  agent terminal</Text>
+				<Box alignItems="center">
+					<CleanSlateTerminalLogo />
+					<Box flexDirection="column">
+						<Text color={COLORS.accent} bold>CLEANSLATE</Text>
+						<Text color={COLORS.muted}>agent terminal</Text>
+					</Box>
 				</Box>
 				<Text color={COLORS.muted}>{args.provider}/{args.model} · {mode}</Text>
 			</Box>

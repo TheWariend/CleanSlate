@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import { CliProvider, SUPPORTED_PROVIDERS } from './argv.js';
+import { CleanSlateTerminalLogo } from './brand.js';
 
 export interface ICliSetupResult {
 	provider: CliProvider;
@@ -162,9 +163,12 @@ export function CleanSlateSetupTui({ initialProvider, onComplete, onCancel }: {
 	const activeField = provider ? fieldsFor(provider)[fieldIndex] : undefined;
 	return (
 		<Box flexDirection="column">
-			<Box borderStyle="round" borderColor={COLORS.accent} paddingX={1}>
-				<Text color={COLORS.accent} bold>◆ CLEANSLATE</Text>
-				<Text color={COLORS.muted}>  first-run setup</Text>
+			<Box borderStyle="round" borderColor={COLORS.accent} paddingX={1} alignItems="center">
+				<CleanSlateTerminalLogo />
+				<Box flexDirection="column">
+					<Text color={COLORS.accent} bold>CLEANSLATE</Text>
+					<Text color={COLORS.muted}>first-run setup</Text>
+				</Box>
 			</Box>
 			<Box flexDirection="column" paddingX={2} paddingY={1}>
 				<Text bold>Connect your model provider</Text>
