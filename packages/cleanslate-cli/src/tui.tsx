@@ -322,7 +322,7 @@ export function transcriptViewportLines(
 			pushTurn(entry, 'user', '❯');
 		} else if (entry.kind === 'assistant') {
 			lines.push({ key: `${entry.id}-space`, kind: 'blank', text: '' });
-			pushTurn(entry, 'assistant', '●');
+			pushTurn(entry, 'assistant', '↳');
 		} else if (entry.kind === 'reasoning') {
 			continue;
 		} else if (entry.kind === 'tool') {
@@ -383,6 +383,10 @@ function TranscriptViewportLine({ line }: { line: ITranscriptViewportLine }) {
 			return <Text> </Text>;
 		case 'user':
 			return <Text color={COLORS.accent} bold>{line.text}</Text>;
+		case 'assistant':
+			return line.text.startsWith('↳ ')
+				? <Text><Text color={COLORS.success} bold>↳ </Text>{line.text.slice(2)}</Text>
+				: <Text>{line.text || ' '}</Text>;
 		case 'reasoning':
 			return <Text color={COLORS.muted}>{line.text}</Text>;
 		case 'tool':

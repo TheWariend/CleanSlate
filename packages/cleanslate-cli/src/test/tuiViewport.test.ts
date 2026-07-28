@@ -31,7 +31,7 @@ test('TUI uses compact turn markers without speaker labels', () => {
 	], 80);
 	const visibleText = lines.map(line => line.text).filter(Boolean);
 
-	assert.deepEqual(visibleText, ['❯ hello', '● Hi! What can I help with?']);
+	assert.deepEqual(visibleText, ['❯ hello', '↳ Hi! What can I help with?']);
 	assert.equal(visibleText.some(line => /^(?:you|cleanslate)\b/i.test(line)), false);
 });
 
