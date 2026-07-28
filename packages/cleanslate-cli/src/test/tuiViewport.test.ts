@@ -68,7 +68,7 @@ test('TUI keeps compact tool activity inline and expands every call on demand', 
 
 	const compact = transcriptViewportLines(tools, 100);
 	assert.deepEqual(compact.map(line => line.text), [
-		'● Searched ×2 · Read ×2 · Edited main.dart +2 -1 · Checked lints · 1 failed',
+		'▸ Searched ×2 · Read ×2 · Edited main.dart +2 -1 · Checked lints · 1 failed',
 		'  main.dart  +2 -1',
 		'  @@ -1,2 +1,3 @@',
 		'     1 - const oldValue = true;',
@@ -84,11 +84,12 @@ test('TUI keeps compact tool activity inline and expands every call on demand', 
 	]);
 
 	const expanded = transcriptViewportLines(tools, 100, true);
-	assert.equal(expanded.length, 14);
-	assert.match(expanded[2].text, /Read\(lib\/main\.dart\)/);
-	assert.match(expanded[4].text, /× Read\(lib\/large\.dart\)/);
-	assert.match(expanded[6].text, /Update\(\/workspace\/lib\/main\.dart\)/);
-	assert.equal(expanded[9].kind, 'diffDeletion');
+	assert.equal(expanded.length, 15);
+	assert.match(expanded[0].text, /^▾ Searched/);
+	assert.match(expanded[3].text, /Read\(lib\/main\.dart\)/);
+	assert.match(expanded[5].text, /× Read\(lib\/large\.dart\)/);
+	assert.match(expanded[7].text, /Update\(\/workspace\/lib\/main\.dart\)/);
+	assert.equal(expanded[10].kind, 'diffDeletion');
 });
 
 test('TUI exposes active edit tools as editing activity', () => {

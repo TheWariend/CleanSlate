@@ -135,6 +135,7 @@ const COMMAND_PALETTE_ITEMS: readonly ICommandPaletteItem[] = [
 	{ id: '/context', label: 'Context', description: 'Show loaded project instructions and attached files' },
 	{ id: '/changes', label: 'Changes', description: 'Show the current Git working tree' },
 	{ id: '/diff', label: 'Diff', description: 'Review current and per-turn changes' },
+	{ id: '/details', label: 'Tool details', description: 'Expand or collapse tool calls and results' },
 	{ id: '/doctor', label: 'Doctor', description: 'Check the CLI, provider, workspace, and integrations' },
 	{ id: '/logout', label: 'Log out', description: 'Remove the saved credential for the active provider' },
 	{ id: '/clear', label: 'Clear', description: 'Clear conversation and transcript' },
@@ -148,7 +149,7 @@ export function commandPaletteSelection(item: ICommandPaletteItem): { value: str
 		: { value: item.id, execute: true };
 }
 
-const FOOTER_HELP = ' enter send · shift+tab mode · ctrl+o tools · esc cancel · ctrl-c exit · ↑/↓/pgup/pgdn scroll · / commands';
+const FOOTER_HELP = ' enter send · shift+tab mode · ctrl+o details · esc cancel · ctrl-c exit · ↑/↓/pgup/pgdn scroll · / commands';
 
 function PromptInput(props: {
 	value: string;
@@ -364,7 +365,7 @@ function compactToolActivity(entries: readonly ICliTranscriptEntry[]): string {
 		failures > 0 ? `${failures} failed` : '',
 		running > 0 ? `${running} running` : ''
 	].filter(Boolean).join(' · ');
-	return `● ${activity}${suffix ? ` · ${suffix}` : ''}`;
+	return `${activity}${suffix ? ` · ${suffix}` : ''}`;
 }
 
 function inlineEditDiffLines(
@@ -460,16 +461,60 @@ export function transcriptViewportLines(
 			});
 		}
 	};
+	const pushExpandedTool = (entry: ICliTranscriptEntry) => {
+		const marker = entry.status === 'running' ? '●' : entry.status === 'failed' ? '×' : '✓';
+		const input = entry.detail && typeof entry.detail === 'object' && 'input' in entry.detail
+			? (entry.detail as { input?: unknown }).input
+			: undefined;
+		const toolInput = input as any;
+		const target = toolInput?.file_path ?? toolInput?.path
+			?? (entry.toolName === 'execute_command' ? toolInput?.command : undefined);
+		const label = ({
+			execute_command: 'Bash',
+			read_file: 'Read',
+			read_file_range: 'Read',
+			apply_edit: 'Update',
+			write_file: 'Write',
+			multi_file_replace: 'Update files',
+			search_workspace: 'Search',
+			grep_search: 'Search',
+			find_by_name: 'Find',
+			list_dir: 'List'
+		} as Record<string, string>)[entry.toolName ?? ''] ?? (entry.toolName ?? 'Tool').replace(/_/g, ' ');
+		const heading = target ? `  ${marker} ${label}(${compact(target, 140)})` : `  ${marker} ${label}`;
+		pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', heading);
+		const result = entry.detail && typeof entry.detail === 'object' && 'result' in entry.detail
+			? (entry.detail as { result?: any }).result
+			: undefined;
+		const resultDetail = typeof result?.output === 'string' && result.output.trim()
+			? result.output
+			: entry.content && entry.content !== 'completed' ? entry.content : '';
+		if (resultDetail) {
+			pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', `    └ ${compact(resultDetail, 800)}`);
+		}
+		lines.push(...inlineEditDiffLines(entry, safeWidth));
+	};
 	for (let entryIndex = 0; entryIndex < entries.length; entryIndex++) {
 		const entry = entries[entryIndex];
-		if (entry.kind === 'tool' && !expandedTools) {
+		if (entry.kind === 'tool') {
 			const toolEntries = [entry];
 			while (entries[entryIndex + 1]?.kind === 'tool') {
 				toolEntries.push(entries[++entryIndex]);
 			}
-			pushWrapped(entry, toolEntries.every(item => item.status === 'failed') ? 'toolError' : 'tool', compactToolActivity(toolEntries));
-			for (const toolEntry of toolEntries) {
-				lines.push(...inlineEditDiffLines(toolEntry, safeWidth));
+			const summaryEntry = { ...entry, id: `${entry.id}-group` };
+			pushWrapped(
+				summaryEntry,
+				toolEntries.every(item => item.status === 'failed') ? 'toolError' : 'tool',
+				`${expandedTools ? '▾' : '▸'} ${compactToolActivity(toolEntries)}`
+			);
+			if (expandedTools) {
+				for (const toolEntry of toolEntries) {
+					pushExpandedTool(toolEntry);
+				}
+			} else {
+				for (const toolEntry of toolEntries) {
+					lines.push(...inlineEditDiffLines(toolEntry, safeWidth));
+				}
 			}
 			continue;
 		}
@@ -481,38 +526,6 @@ export function transcriptViewportLines(
 			pushTurn(entry, 'assistant', '↳');
 		} else if (entry.kind === 'reasoning') {
 			continue;
-		} else if (entry.kind === 'tool') {
-			const marker = entry.status === 'running' ? '●' : entry.status === 'failed' ? '×' : '✓';
-			const input = entry.detail && typeof entry.detail === 'object' && 'input' in entry.detail
-				? (entry.detail as { input?: unknown }).input
-				: undefined;
-			const toolInput = input as any;
-			const target = toolInput?.file_path ?? toolInput?.path
-				?? (entry.toolName === 'execute_command' ? toolInput?.command : undefined);
-			const label = ({
-				execute_command: 'Bash',
-				read_file: 'Read',
-				read_file_range: 'Read',
-				apply_edit: 'Update',
-				write_file: 'Write',
-				multi_file_replace: 'Update files',
-				search_workspace: 'Search',
-				grep_search: 'Search',
-				find_by_name: 'Find',
-				list_dir: 'List'
-			} as Record<string, string>)[entry.toolName ?? ''] ?? (entry.toolName ?? 'Tool').replace(/_/g, ' ');
-			const heading = target ? `${marker} ${label}(${compact(target, 140)})` : `${marker} ${label}`;
-			pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', heading);
-			const result = entry.detail && typeof entry.detail === 'object' && 'result' in entry.detail
-				? (entry.detail as { result?: any }).result
-				: undefined;
-			const resultDetail = typeof result?.output === 'string' && result.output.trim()
-				? result.output
-				: entry.content && entry.content !== 'completed' ? entry.content : '';
-			if (resultDetail) {
-				pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', `  └ ${compact(resultDetail, 800)}`);
-			}
-			lines.push(...inlineEditDiffLines(entry, safeWidth));
 		} else {
 			pushWrapped(entry, entry.kind === 'error' ? 'error' : 'system', `  ${entry.content}`);
 		}
@@ -1164,7 +1177,12 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		if (value === '/help') {
-			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /delete-session <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /plan · shift+tab mode · /permissions read-only|default|full · /context · /changes · /diff · /doctor · /logout · /clear · /exit'));
+			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /delete-session <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /plan · shift+tab mode · /permissions read-only|default|full · /context · /changes · /diff · /details · /doctor · /logout · /clear · /exit'));
+			return;
+		}
+		if (value === '/details') {
+			setShowToolDetails(current => !current);
+			setScrollOffset(0);
 			return;
 		}
 		if (value === '/new') {
