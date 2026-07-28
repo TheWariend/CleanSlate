@@ -5,7 +5,14 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CleanSlateNodeBrowserAutomation } from '../node/cleanSlateNodeBrowserAutomation.js';
+import { CleanSlateNodeBrowserAutomation, resolveNodeBrowserHeadless } from '../node/cleanSlateNodeBrowserAutomation.js';
+
+test('Node browser visibility follows the host default unless explicitly overridden', () => {
+	assert.equal(resolveNodeBrowserHeadless(true, {}), true);
+	assert.equal(resolveNodeBrowserHeadless(false, {}), false);
+	assert.equal(resolveNodeBrowserHeadless(false, { CLEANSLATE_BROWSER_HEADLESS: 'true' }), true);
+	assert.equal(resolveNodeBrowserHeadless(true, { CLEANSLATE_BROWSER_HEADLESS: 'false' }), false);
+});
 
 test('Node browser host opens, inspects and interacts with a real page', {
 	skip: process.env['CLEANSLATE_BROWSER_E2E'] !== '1'

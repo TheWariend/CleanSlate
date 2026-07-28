@@ -56,6 +56,8 @@ export interface ICleanSlateNodeRuntimeOptions {
 	workspaceStorageHome?: string;
 	/** Provider settings, returned verbatim by `configService.getConfiguration`. */
 	configuration: Record<string, any>;
+	/** Whether browser automation should run without a visible browser window. */
+	browserHeadless?: boolean;
 	/**
 	 * Decides whether a command may run. Defaults to refusing everything, so a
 	 * host that forgets to supply a policy fails safe rather than executing
@@ -79,7 +81,7 @@ export function createCleanSlateNodeToolContext(options: ICleanSlateNodeRuntimeO
 	const modelService = new CleanSlateNodeModelService(textFileService);
 	const workspaceContextService = new CleanSlateNodeWorkspaceService(options.rootPath);
 	const commandExecutionService = new CleanSlateNodeCommandService(path.resolve(options.rootPath));
-	const browserAutomationService = new CleanSlateNodeBrowserAutomation();
+	const browserAutomationService = new CleanSlateNodeBrowserAutomation({ headless: options.browserHeadless });
 	const indexService = new CleanSlateNodeIndexService(path.resolve(options.rootPath));
 	const mcpClientService = new CleanSlateNodeMcpClient(path.resolve(options.rootPath), options.configuration.mcpServers);
 	const commandService = new CleanSlateNodeLanguageCommands(path.resolve(options.rootPath));

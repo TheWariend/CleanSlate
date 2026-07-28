@@ -38,6 +38,8 @@ export interface ICleanSlateNodeAgentRuntimeOptions {
 	/** Private host directory for per-workspace state such as edit recovery history. */
 	workspaceStorageHome?: string;
 	configuration: ICleanSlateConfiguration;
+	/** Whether browser automation should run without a visible browser window. */
+	browserHeadless?: boolean;
 	approveCommand?: (request: { command: string; cwd?: string; reason?: string }) => Promise<boolean>;
 	onProgress?: (event: { type: string; [key: string]: any }) => void;
 	onManagedTokenRefresh?: (token: string) => void | Promise<void>;
@@ -196,6 +198,7 @@ export class CleanSlateNodeAgentRuntime {
 			rootPath: this.rootPath,
 			workspaceStorageHome: options.workspaceStorageHome,
 			configuration: options.configuration,
+			browserHeadless: options.browserHeadless,
 			tools: ALL_TOOLS,
 			cleanSlateService,
 			contextService: this.contextService,

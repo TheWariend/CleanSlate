@@ -1162,6 +1162,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		const runtime = new CleanSlateNodeAgentRuntime({
 			rootPath: args.cwd,
 			workspaceStorageHome: getCleanSlateWorkspaceStorageHome(),
+			browserHeadless: false,
 			sessionId: targetSession.id,
 			configuration: createNodeProviderConfiguration({
 				provider: args.provider,

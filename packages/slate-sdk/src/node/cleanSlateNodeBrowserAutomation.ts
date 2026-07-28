@@ -20,6 +20,18 @@ import {
 	ICleanSlateBrowserWaitOptions
 } from '../host/browserAutomation.js';
 
+export interface ICleanSlateNodeBrowserAutomationOptions {
+	headless?: boolean;
+}
+
+export function resolveNodeBrowserHeadless(
+	configuredDefault = true,
+	environment: NodeJS.ProcessEnv = process.env
+): boolean {
+	const environmentValue = environment['CLEANSLATE_BROWSER_HEADLESS'];
+	return environmentValue === undefined ? configuredDefault : environmentValue !== 'false';
+}
+
 export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutomationService {
 	private browser: Browser | undefined;
 	private context: BrowserContext | undefined;
@@ -35,6 +47,8 @@ export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutoma
 	private readonly openEmitter = new Emitter<ICleanSlateBrowserState>();
 	readonly onDidChangeAnnotations = this.annotationEmitter.event;
 	readonly onDidOpenBrowser = this.openEmitter.event;
+
+	constructor(private readonly options: ICleanSlateNodeBrowserAutomationOptions = {}) { }
 
 	async open(url: string): Promise<ICleanSlateBrowserState> {
 		const page = await this.ensurePage();
@@ -334,7 +348,7 @@ export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutoma
 
 	private async ensureContext(): Promise<BrowserContext> {
 		if (!this.context) {
-			const headless = process.env['CLEANSLATE_BROWSER_HEADLESS'] !== 'false';
+			const headless = resolveNodeBrowserHeadless(this.options.headless ?? true);
 			const executablePath = process.env['CLEANSLATE_BROWSER_EXECUTABLE']?.trim();
 			try {
 				this.browser = await chromium.launch({
