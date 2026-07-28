@@ -86,7 +86,8 @@ Run `cleanslate` in a terminal to open the TUI. Useful commands:
 - `/exit` — save and quit
 
 Use Page Up and Page Down for transcript scrollback. Escape cancels the active
-turn. Ctrl-C exits when idle.
+turn. Ctrl-O toggles the detailed tool-activity viewer; the normal transcript
+keeps consecutive calls in a compact summary. Ctrl-C exits when idle.
 
 Typing `/` opens the searchable command palette. Use the arrow keys to select a
 command and Enter to insert it.

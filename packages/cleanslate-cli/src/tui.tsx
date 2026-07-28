@@ -5,7 +5,6 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
-import TextInput from 'ink-text-input';
 import Spinner from 'ink-spinner';
 import {
 	CleanSlateNodeAgentRuntime,
@@ -101,7 +100,83 @@ export function commandPaletteSelection(item: ICommandPaletteItem): { value: str
 		: { value: item.id, execute: true };
 }
 
-const FOOTER_HELP = ' enter send · shift+tab mode · esc cancel · ctrl-c exit · pgup/pgdn scroll · / commands';
+const FOOTER_HELP = ' enter send · shift+tab mode · ctrl+o tools · esc cancel · ctrl-c exit · pgup/pgdn scroll · / commands';
+
+function PromptInput(props: {
+	value: string;
+	focus: boolean;
+	placeholder: string;
+	onChange: (value: string) => void;
+	onSubmit: (value: string) => void;
+}): React.JSX.Element {
+	const { value, focus, placeholder, onChange, onSubmit } = props;
+	const [cursor, setCursor] = useState(value.length);
+
+	useEffect(() => {
+		setCursor(current => Math.min(current, value.length));
+	}, [value]);
+
+	useInput((input, key) => {
+		if ((key.ctrl && (input === 'c' || input === 'o'))
+			|| key.tab
+			|| key.escape
+			|| key.upArrow
+			|| key.downArrow
+			|| key.pageUp
+			|| key.pageDown) {
+			return;
+		}
+		if (key.return) {
+			onSubmit(value);
+			return;
+		}
+		if (key.leftArrow || (key.ctrl && input === 'b')) {
+			setCursor(current => Math.max(0, current - 1));
+			return;
+		}
+		if (key.rightArrow || (key.ctrl && input === 'f')) {
+			setCursor(current => Math.min(value.length, current + 1));
+			return;
+		}
+		if (key.ctrl && input === 'a') {
+			setCursor(0);
+			return;
+		}
+		if (key.ctrl && input === 'e') {
+			setCursor(value.length);
+			return;
+		}
+		if (key.backspace || key.delete) {
+			if (cursor > 0) {
+				onChange(value.slice(0, cursor - 1) + value.slice(cursor));
+				setCursor(current => current - 1);
+			}
+			return;
+		}
+		if (input) {
+			onChange(value.slice(0, cursor) + input + value.slice(cursor));
+			setCursor(current => current + input.length);
+		}
+	}, { isActive: focus });
+
+	if (!value) {
+		return (
+			<Text color={COLORS.muted}>
+				{focus && placeholder
+					? <><Text inverse>{placeholder[0]}</Text>{placeholder.slice(1)}</>
+					: placeholder}
+			</Text>
+		);
+	}
+
+	return (
+		<Text>
+			{value.slice(0, cursor)}
+			{focus && <Text inverse>{cursor < value.length ? value[cursor] : ' '}</Text>}
+			{value.slice(cursor + (focus && cursor < value.length ? 1 : 0))}
+		</Text>
+	);
+}
 
 function CommandPalette({ items, selected }: { items: readonly ICommandPaletteItem[]; selected: number }) {
 	const start = Math.max(0, Math.min(selected - 5, items.length - 10));
@@ -155,6 +230,39 @@ export interface ITranscriptViewportLine {
 	text: string;
 }
 
+const TOOL_ACTIVITY_LABELS: Record<string, string> = {
+	list_dir: 'Listed',
+	find_by_name: 'Searched',
+	search_files: 'Searched',
+	read_file: 'Read',
+	read_file_range: 'Read',
+	read_symbols: 'Inspected symbols',
+	get_definitions: 'Found definitions',
+	find_references: 'Found references',
+	apply_edit: 'Edited',
+	write_file: 'Wrote',
+	execute_command: 'Ran commands'
+};
+
+function compactToolActivity(entries: readonly ICliTranscriptEntry[]): string {
+	const counts = new Map<string, number>();
+	let failures = 0;
+	let running = 0;
+	for (const entry of entries) {
+		const label = TOOL_ACTIVITY_LABELS[entry.toolName ?? '']
+			?? (entry.toolName ?? 'Tool').replace(/_/g, ' ');
+		counts.set(label, (counts.get(label) ?? 0) + 1);
+		failures += entry.status === 'failed' ? 1 : 0;
+		running += entry.status === 'running' ? 1 : 0;
+	}
+	const activity = [...counts].map(([label, count]) => count > 1 ? `${label} ×${count}` : label).join(' · ');
+	const suffix = [
+		failures > 0 ? `${failures} failed` : '',
+		running > 0 ? `${running} running` : ''
+	].filter(Boolean).join(' · ');
+	return `● ${activity}${suffix ? ` · ${suffix}` : ''}`;
+}
+
 function wrapViewportText(value: string, width: number): string[] {
 	const safeWidth = Math.max(1, width);
 	const result: string[] = [];
@@ -177,7 +285,11 @@ function wrapViewportText(value: string, width: number): string[] {
 	return result.length > 0 ? result : [''];
 }
 
-export function transcriptViewportLines(entries: readonly ICliTranscriptEntry[], width: number): ITranscriptViewportLine[] {
+export function transcriptViewportLines(
+	entries: readonly ICliTranscriptEntry[],
+	width: number,
+	expandedTools = false
+): ITranscriptViewportLine[] {
 	const safeWidth = Math.max(8, width);
 	const lines: ITranscriptViewportLine[] = [];
 	const pushWrapped = (entry: ICliTranscriptEntry, kind: TranscriptViewportLineKind, value: string) => {
@@ -195,7 +307,16 @@ export function transcriptViewportLines(entries: readonly ICliTranscriptEntry[],
 			});
 		}
 	};
-	for (const entry of entries) {
+	for (let entryIndex = 0; entryIndex < entries.length; entryIndex++) {
+		const entry = entries[entryIndex];
+		if (entry.kind === 'tool' && !expandedTools) {
+			const toolEntries = [entry];
+			while (entries[entryIndex + 1]?.kind === 'tool') {
+				toolEntries.push(entries[++entryIndex]);
+			}
+			pushWrapped(entry, toolEntries.every(item => item.status === 'failed') ? 'toolError' : 'tool', compactToolActivity(toolEntries));
+			continue;
+		}
 		if (entry.kind === 'user') {
 			lines.push({ key: `${entry.id}-space`, kind: 'blank', text: '' });
 			pushTurn(entry, 'user', '❯');
@@ -206,7 +327,11 @@ export function transcriptViewportLines(entries: readonly ICliTranscriptEntry[],
 			continue;
 		} else if (entry.kind === 'tool') {
 			const marker = entry.status === 'running' ? '●' : entry.status === 'failed' ? '×' : '✓';
-			pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', `${marker} ${entry.toolName ?? 'tool'}  ${entry.content}`);
+			const input = entry.detail && typeof entry.detail === 'object' && 'input' in entry.detail
+				? (entry.detail as { input?: unknown }).input
+				: undefined;
+			const detail = input === undefined ? entry.content : `${entry.content} · ${compact(input, 300)}`;
+			pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', `${marker} ${entry.toolName ?? 'tool'}  ${detail}`);
 		} else {
 			pushWrapped(entry, entry.kind === 'error' ? 'error' : 'system', `  ${entry.content}`);
 		}
@@ -218,9 +343,10 @@ export function visibleTranscriptLines(
 	entries: readonly ICliTranscriptEntry[],
 	width: number,
 	rows: number,
-	scrollOffset = 0
+	scrollOffset = 0,
+	expandedTools = false
 ): ITranscriptViewportLine[] {
-	const lines = transcriptViewportLines(entries, width);
+	const lines = transcriptViewportLines(entries, width, expandedTools);
 	const safeRows = Math.max(1, rows);
 	const maxOffset = Math.max(0, lines.length - safeRows);
 	const offset = Math.max(0, Math.min(maxOffset, scrollOffset));
@@ -375,6 +501,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const [models, setModels] = useState<string[] | undefined>();
 	const [mode, setMode] = useState<'execution' | 'planning'>('execution');
 	const [permissionMode, setPermissionMode] = useState<CliPermissionMode>(args.permissionMode);
+	const [showToolDetails, setShowToolDetails] = useState(false);
 	const [scrollOffset, setScrollOffset] = useState(0);
 	const abortRef = useRef<AbortController | undefined>(undefined);
 	const runtimeRef = useRef<CleanSlateNodeAgentRuntime | undefined>(undefined);
@@ -534,11 +661,15 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 					case 'tool_result':
 						replaceTranscript(entries => {
 							const index = entries.findIndex(entry => entry.kind === 'tool' && entry.id === part.toolCallId);
+							const started = index >= 0 ? entries[index] : undefined;
 							const updated = transcriptEntry('tool', toolSummary(part), {
 								id: part.toolCallId || undefined,
 								toolName: part.toolName,
 								status: part.result?.success === false ? 'failed' : 'completed',
-								detail: part.result
+								detail: {
+									input: started?.detail,
+									result: part.result
+								}
 							});
 							return index >= 0
 								? entries.map((entry, entryIndex) => entryIndex === index ? updated : entry)
@@ -832,7 +963,10 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		const paletteSize = commandItems.length;
-		if (key.tab && key.shift && !running) {
+		if (inputValue === 'o' && key.ctrl) {
+			setShowToolDetails(value => !value);
+			setScrollOffset(0);
+		} else if (key.tab && key.shift && !running) {
 			const nextMode = nextInteractiveMode(mode);
 			setMode(nextMode);
 			setInput('');
@@ -877,15 +1011,22 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const footerRows = Math.max(1, Math.ceil(FOOTER_HELP.length / viewportColumns));
 	const contentRows = Math.max(1, viewportRows - 9 - footerRows - overlayRows);
 	const viewportEntries = useMemo<ICliTranscriptEntry[]>(() => {
+		if (showToolDetails) {
+			const toolEntries = transcript.filter(entry => entry.kind === 'tool');
+			return [
+				transcriptEntry('system', `Tool activity · ${toolEntries.length} call${toolEntries.length === 1 ? '' : 's'} · Ctrl+O return`),
+				...toolEntries
+			];
+		}
 		const entries = [...transcript];
 		if (running && liveText) {
 			entries.push({ id: 'live-answer', kind: 'assistant', content: liveText, timestamp: 0 });
 		}
 		return entries;
-	}, [transcript, running, liveText]);
+	}, [transcript, running, liveText, showToolDetails]);
 	const visibleLines = useMemo(
-		() => visibleTranscriptLines(viewportEntries, contentWidth, contentRows, scrollOffset),
-		[viewportEntries, contentWidth, contentRows, scrollOffset]
+		() => visibleTranscriptLines(viewportEntries, contentWidth, contentRows, scrollOffset, showToolDetails),
+		[viewportEntries, contentWidth, contentRows, scrollOffset, showToolDetails]
 	);
 	const contextStatus = `${contextUsage !== undefined ? `context ${Math.round(contextUsage)}%` : ''}`
 		+ `${contextUsage !== undefined && allowCommandsForSession ? ' · ' : ''}`
@@ -914,7 +1055,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			</Box>
 
 			<Box flexDirection="column" paddingX={1} height={contentRows} overflow="hidden">
-				{visibleLines.length === 0 && (
+				{visibleLines.length === 0 && !showToolDetails && (
 					<>
 						{contentRows >= 1 && <Text bold>What are we building?</Text>}
 						{contentRows >= 2 && <Text color={COLORS.muted}>Describe a task.</Text>}
@@ -933,34 +1074,45 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 
 			{!approval && !showSessions && !models && (
 				<Box borderStyle="round" borderColor={running ? COLORS.muted : COLORS.accent} paddingX={1}>
-					<Text color={COLORS.accent}>❯ </Text>
 					{running
 						? <>
 							<Text color={COLORS.warning}><Spinner type="line" /> {formatActivityStatus(status)}</Text>
 							<Text color={COLORS.muted}> · Esc to cancel</Text>
 						</>
-						: <TextInput
-							value={input}
-							onChange={value => {
-								setInput(value);
-								setCommandSelection(0);
-							}}
-							onSubmit={value => {
-								const selected = commandItems[visibleCommandSelection];
-								if (selected) {
-									const selection = commandPaletteSelection(selected);
-									setCommandSelection(0);
-									if (selection.execute) {
-										void submit(selection.value);
-									} else {
-										setInput(selection.value);
+						: <>
+							<Text color={COLORS.accent}>{showToolDetails ? '' : '❯ '}</Text>
+							<PromptInput
+								value={showToolDetails ? '' : input}
+								focus={!showToolDetails}
+								onChange={value => {
+									if (showToolDetails) {
+										return;
 									}
-									return;
-								}
-								void submit(value);
-							}}
-							placeholder="Ask CleanSlate…"
-						/>}
+									setInput(value);
+									setCommandSelection(0);
+								}}
+								onSubmit={value => {
+									if (showToolDetails) {
+										return;
+									}
+									const selected = commandItems[visibleCommandSelection];
+									if (selected) {
+										const selection = commandPaletteSelection(selected);
+										setCommandSelection(0);
+										if (selection.execute) {
+											void submit(selection.value);
+										} else {
+											setInput(selection.value);
+										}
+										return;
+									}
+									void submit(value);
+								}}
+								placeholder={showToolDetails
+									? 'Tool activity · Ctrl+O return · PgUp/PgDn scroll'
+									: 'Ask CleanSlate…'}
+							/>
+						</>}
 				</Box>
 			)}
 			<Text color={COLORS.muted}>{FOOTER_HELP}</Text>
