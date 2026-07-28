@@ -1,0 +1,28 @@
+{
+  "name": "@cleanslate/cli",
+  "version": "0.1.0",
+  "description": "Run the CleanSlate agent from a terminal.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "cleanslate": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm --prefix ../slate-sdk run build && tsc -p tsconfig.json",
+    "test": "npm run build && node --test \"dist/test/*.test.js\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@slate/sdk": "file:../slate-sdk"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.6.0"
+  }
+}
