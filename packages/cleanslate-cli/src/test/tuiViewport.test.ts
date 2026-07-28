@@ -10,7 +10,6 @@ import {
 	diffSyntaxTokens,
 	formatActivityStatus,
 	formatElapsedTime,
-	isSessionDeleteInput,
 	padTranscriptViewportLines,
 	transcriptToolGroupIds,
 	transcriptToolItemIds,
@@ -21,13 +20,6 @@ import {
 function entry(id: string, kind: ICliTranscriptEntry['kind'], content: string): ICliTranscriptEntry {
 	return { id, kind, content, timestamp: 0 };
 }
-
-test('session deletion accepts both macOS Delete and forward Delete', () => {
-	assert.equal(isSessionDeleteInput('', { backspace: true }), true);
-	assert.equal(isSessionDeleteInput('', { delete: true }), true);
-	assert.equal(isSessionDeleteInput('d', { ctrl: true }), true);
-	assert.equal(isSessionDeleteInput('', {}), false);
-});
 
 test('TUI wraps transcript content into physical terminal rows', () => {
 	const transcript = [

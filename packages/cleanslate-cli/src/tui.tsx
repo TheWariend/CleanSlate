@@ -148,7 +148,7 @@ export function commandPaletteSelection(item: ICommandPaletteItem): { value: str
 		: { value: item.id, execute: true };
 }
 
-const FOOTER_HELP = ' enter send · shift+tab mode · ctrl+j/k tools · ctrl+o details · esc cancel · ctrl-c exit · ↑/↓/pgup/pgdn scroll · / commands';
+const FOOTER_HELP = ' enter send · shift+tab mode · ctrl+o details · esc cancel · ctrl-c exit · ↑/↓/pgup/pgdn scroll · / commands';
 const TRANSCRIPT_FIRST_ROW = 6;
 
 function PromptInput(props: {
@@ -960,7 +960,7 @@ function SessionPicker({ sessions, onSelect, onDelete, onCancel }: {
 		} else if (key.downArrow) {
 			setSelected(value => Math.min(items.length - 1, value + 1));
 			setDeleteArmedId(undefined);
-		} else if (isSessionDeleteInput(input, key)) {
+		} else if (input === 'd' && key.ctrl) {
 			const session = items[selected];
 			if (!session) {
 				return;
@@ -996,20 +996,10 @@ function SessionPicker({ sessions, onSelect, onDelete, onCancel }: {
 				</Text>;
 			})}
 			<Text color={deleteArmedId ? COLORS.danger : COLORS.muted}>
-				{deleteArmedId ? 'Press Ctrl+D or Delete again to permanently delete · Esc cancel' : '↑/↓ select · Enter resume · Ctrl+D/Delete delete · Esc close'}
+				{deleteArmedId ? 'Press Ctrl+D again to permanently delete · Esc cancel' : '↑/↓ select · Enter resume · Ctrl+D delete · Esc close'}
 			</Text>
 		</Box>
 	);
-}
-
-export function isSessionDeleteInput(input: string, key: {
-	ctrl?: boolean;
-	delete?: boolean;
-	backspace?: boolean;
-}): boolean {
-	// macOS labels Backspace as Delete, while forward-delete is reported as
-	// `delete`. The picker has no editable text, so both safely mean removal.
-	return (input === 'd' && key.ctrl === true) || key.delete === true || key.backspace === true;
 }
 
 function ModelPicker({ models, current, onSelect, onCancel }: {
@@ -1107,15 +1097,6 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		itemId.startsWith('group:') ? setExpandedToolGroups(update) : setExpandedToolEntries(update);
 		setScrollOffset(0);
 	};
-	const selectToolItem = (direction: -1 | 1) => {
-		if (toolItemIds.length === 0) {
-			return;
-		}
-		const currentIndex = activeToolItemId ? toolItemIds.indexOf(activeToolItemId) : toolItemIds.length - 1;
-		const nextIndex = Math.max(0, Math.min(toolItemIds.length - 1, currentIndex + direction));
-		setSelectedToolItemId(toolItemIds[nextIndex]);
-	};
-
 	const persist = (nextTranscript?: ICliTranscriptEntry[]) => {
 		const current = sessionRef.current;
 		current.transcript = nextTranscript ?? current.transcript;
@@ -1710,10 +1691,6 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		} else if (inputValue === 'o' && key.ctrl) {
 			toggleToolItem();
-		} else if ((key.ctrl && key.upArrow) || (key.ctrl && inputValue === 'k')) {
-			selectToolItem(-1);
-		} else if ((key.ctrl && key.downArrow) || (key.ctrl && inputValue === 'j')) {
-			selectToolItem(1);
 		} else if (key.tab && key.shift && !running) {
 			const nextMode = nextInteractiveMode(mode);
 			setMode(nextMode);
