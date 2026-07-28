@@ -56,6 +56,11 @@ interface IPendingApproval {
 	resolve: (approved: boolean) => void;
 }
 
+interface IModelTerminationNotice {
+	message: string;
+	mode: 'execution' | 'planning';
+}
+
 const COLORS = {
 	accent: '#d4d4d8',
 	muted: '#71717a',
@@ -63,6 +68,32 @@ const COLORS = {
 	danger: '#ef4444',
 	warning: '#f59e0b'
 };
+
+export function formatModelTerminationMessage(message: string): string {
+	const turnLimit = message.match(/(\d+)-turn agent safety limit/i)?.[1];
+	if (turnLimit) {
+		return `The model reached the ${turnLimit}-turn safety limit before finishing the task.`;
+	}
+	if (/same tool call was repeated/i.test(message)) {
+		return 'The model paused after repeatedly calling the same tool.';
+	}
+	if (/edit-failure recovery/i.test(message)) {
+		return 'The model paused after repeated edit failures.';
+	}
+	return 'The model stopped before completing the task.';
+}
+
+export function ModelTerminationNotice({ message }: { message: string }): React.JSX.Element {
+	return (
+		<Box borderStyle="round" borderColor={COLORS.warning} paddingX={1} flexDirection="column">
+			<Box justifyContent="space-between">
+				<Text color={COLORS.warning} bold>⚠ Model terminated</Text>
+				<Text color={COLORS.success} bold>Enter · Continue</Text>
+			</Box>
+			<Text color={COLORS.muted} wrap="truncate-end">{formatModelTerminationMessage(message)} · Esc dismiss</Text>
+		</Box>
+	);
+}
 
 export interface ICommandPaletteItem {
 	id: string;
@@ -692,6 +723,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const [status, setStatus] = useState('ready');
 	const [contextUsage, setContextUsage] = useState<number | undefined>();
 	const [approval, setApproval] = useState<IPendingApproval | undefined>();
+	const [modelTermination, setModelTermination] = useState<IModelTerminationNotice | undefined>();
 	const [allowCommandsForSession, setAllowCommandsForSession] = useState(false);
 	const allowCommandsRef = useRef(false);
 	const [showSessions, setShowSessions] = useState(false);
@@ -827,8 +859,9 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		pending?.resolve(approved);
 	};
 
-	const runStream = async (stream: AsyncIterable<any>) => {
+	const runStream = async (stream: AsyncIterable<any>, streamMode: 'execution' | 'planning') => {
 		let responseFinished = false;
+		let modelTerminated = false;
 		try {
 			for await (const part of stream) {
 				switch (part.type) {
@@ -842,7 +875,14 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 						liveTurnRef.current.appendReasoning(part.content);
 						break;
 					case 'chat_text':
-						updateLiveText(liveTurnRef.current.appendText(part.content).text);
+						if (part.kind === 'model_terminated_pause') {
+							flushWorkingTurn();
+							setModelTermination({ message: part.content, mode: streamMode });
+							setStatus('paused');
+							modelTerminated = true;
+						} else {
+							updateLiveText(liveTurnRef.current.appendText(part.content).text);
+						}
 						break;
 					case 'reasoning_reset':
 						liveTurnRef.current.resetReasoning();
@@ -891,8 +931,11 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 						break;
 				}
 			}
-			if (!responseFinished) {
+			if (!responseFinished && !modelTerminated) {
 				finishResponse();
+			}
+			if (modelTerminated) {
+				return;
 			}
 			const pendingQuestion = runtimeRef.current?.getPendingQuestion();
 			if (pendingQuestion) {
@@ -920,6 +963,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		append(transcriptEntry('user', task));
+		setModelTermination(undefined);
 		if (sessionRef.current.title === 'New session') {
 			sessionRef.current.title = compact(task, 72);
 			setSession({ ...sessionRef.current });
@@ -931,7 +975,24 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		const pendingQuestion = runtime.getPendingQuestion();
 		await runStream(pendingQuestion
 			? runtime.resumePendingQuestion(task, abort.signal)
-			: requestedMode === 'planning' ? runtime.plan(task, abort.signal) : runtime.run(task, abort.signal));
+			: requestedMode === 'planning' ? runtime.plan(task, abort.signal) : runtime.run(task, abort.signal), requestedMode);
+	};
+
+	const continueAfterModelTermination = async () => {
+		const paused = modelTermination;
+		const runtime = runtimeRef.current;
+		if (!paused || !runtime || running) {
+			return;
+		}
+		setModelTermination(undefined);
+		setRunning(true);
+		setStatus('thinking');
+		const abort = new AbortController();
+		abortRef.current = abort;
+		await runStream(
+			paused.mode === 'planning' ? runtime.plan('continue', abort.signal) : runtime.run('continue', abort.signal),
+			paused.mode
+		);
 	};
 
 	const switchSession = (next: ICliSession) => {
@@ -1174,6 +1235,22 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 
 	useInput((inputValue, key) => {
 		const wheelDirection = terminalMouseWheelDirection(inputValue);
+		if (modelTermination) {
+			if (key.return) {
+				void continueAfterModelTermination();
+			} else if (key.escape) {
+				setModelTermination(undefined);
+				setStatus('ready');
+			} else if (wheelDirection < 0) {
+				setScrollOffset(value => value + 3);
+			} else if (wheelDirection > 0) {
+				setScrollOffset(value => Math.max(0, value - 3));
+			} else if (inputValue === 'c' && key.ctrl) {
+				persist();
+				exit();
+			}
+			return;
+		}
 		if (diffReviews) {
 			const activeReview = diffReviews[diffReviewIndex];
 			if (wheelDirection < 0) {
@@ -1270,7 +1347,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 					? Math.min(10, commandItems.length) + 3
 					: 0;
 	const footerRows = Math.max(1, Math.ceil(FOOTER_HELP.length / viewportColumns));
-	const contentRows = Math.max(1, viewportRows - 9 - footerRows - overlayRows);
+	const contentRows = Math.max(1, viewportRows - 9 - footerRows - overlayRows - (modelTermination ? 1 : 0));
 	const viewportEntries = useMemo<ICliTranscriptEntry[]>(() => {
 		if (showToolDetails) {
 			const toolEntries = transcript.filter(entry => entry.kind === 'tool');
@@ -1341,11 +1418,15 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			{approval && <ApprovalBox approval={approval} decide={decideApproval} />}
 			{showSessions && <SessionPicker sessions={store.list()} onSelect={switchSession} onCancel={() => setShowSessions(false)} />}
 			{models && <ModelPicker models={models} current={args.model} onSelect={switchModel} onCancel={() => setModels(undefined)} />}
-			{!approval && !showSessions && !models && !diffReviews && commandItems.length > 0 && (
+			{!approval && !showSessions && !models && !modelTermination && !diffReviews && commandItems.length > 0 && (
 				<CommandPalette items={commandItems} selected={visibleCommandSelection} />
 			)}
 
-			{!approval && !showSessions && !models && (
+			{!approval && !showSessions && !models && modelTermination && (
+				<ModelTerminationNotice message={modelTermination.message} />
+			)}
+
+			{!approval && !showSessions && !models && !modelTermination && (
 				<Box borderStyle="round" borderColor={running ? COLORS.muted : COLORS.accent} paddingX={1}>
 					{diffReviews
 						? <Text color={COLORS.muted}>←/→ view · ↑/↓ file · j/k scroll · PgUp/PgDn page · Esc close</Text>
