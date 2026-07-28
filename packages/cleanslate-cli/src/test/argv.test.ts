@@ -8,6 +8,11 @@ import { describe, test } from 'node:test';
 import { parseArguments } from '../argv.js';
 
 describe('CLI argv', () => {
+	test('defaults fresh installs to the managed CleanSlate provider', () => {
+		assert.equal(parseArguments([], {}).provider, 'cleanslate');
+		assert.equal(parseArguments([], { OPENAI_API_KEY: 'secret' }).provider, 'openai');
+	});
+
 	test('parses a task and provider settings', () => {
 		const args = parseArguments([
 			'--provider', 'anthropic',

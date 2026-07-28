@@ -12,6 +12,8 @@ export interface ICliSetupResult {
 	provider: CliProvider;
 	model: string;
 	apiKey?: string;
+	managedEmail?: string;
+	managedPassword?: string;
 	baseUrl?: string;
 	bedrockRegion?: string;
 	bedrockProfile?: string;
@@ -35,6 +37,7 @@ const COLORS = {
 };
 
 const PROVIDER_LABELS: Record<CliProvider, string> = {
+	cleanslate: 'CleanSlate',
 	openai: 'OpenAI',
 	azureOpenAI: 'Azure OpenAI',
 	anthropic: 'Anthropic',
@@ -51,6 +54,12 @@ const CREDENTIAL_STORAGE_DESCRIPTION = process.platform === 'darwin'
 	: '~/.cleanslate/credentials.json with owner-only permissions';
 
 function fieldsFor(provider: CliProvider): ISetupField[] {
+	if (provider === 'cleanslate') {
+		return [
+			{ key: 'managedEmail', label: 'CleanSlate account email', placeholder: 'you@example.com' },
+			{ key: 'managedPassword', label: 'CleanSlate account password', placeholder: 'sent securely; never stored', secret: true }
+		];
+	}
 	if (provider === 'bedrock') {
 		return [
 			{ key: 'bedrockRegion', label: 'AWS region', placeholder: 'us-east-1' },
@@ -137,8 +146,10 @@ export function CleanSlateSetupTui({ initialProvider, onComplete, onCancel }: {
 		}
 		onComplete({
 			provider,
-			model: String(nextValues.model),
+			model: nextValues.model ? String(nextValues.model) : '',
 			apiKey: nextValues.apiKey,
+			managedEmail: nextValues.managedEmail,
+			managedPassword: nextValues.managedPassword,
 			baseUrl: nextValues.baseUrl,
 			bedrockRegion: nextValues.bedrockRegion,
 			bedrockProfile: nextValues.bedrockProfile,
@@ -157,7 +168,7 @@ export function CleanSlateSetupTui({ initialProvider, onComplete, onCancel }: {
 			</Box>
 			<Box flexDirection="column" paddingX={2} paddingY={1}>
 				<Text bold>Connect your model provider</Text>
-				<Text color={COLORS.muted}>Your API key is stored in {CREDENTIAL_STORAGE_DESCRIPTION} and is never written to the session transcript.</Text>
+				<Text color={COLORS.muted}>Your provider credential is stored in {CREDENTIAL_STORAGE_DESCRIPTION} and is never written to the session transcript.</Text>
 				{!provider ? (
 					<Box flexDirection="column" marginTop={1}>
 						{SUPPORTED_PROVIDERS.map((candidate, index) => (

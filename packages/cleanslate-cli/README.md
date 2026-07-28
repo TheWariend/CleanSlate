@@ -27,6 +27,11 @@ stored in Keychain; on other platforms they are stored in an owner-only
 credentials file. Run `cleanslate --setup` whenever you want to reconnect or
 change provider credentials.
 
+Choose **CleanSlate** to sign in with your TheWariend account and use the same
+managed models and entitlements as the IDE. The password is sent only to the
+Wariend authentication endpoint and is never stored; the returned session token
+is kept in the operating system credential store.
+
 Common provider examples:
 
 ```sh
@@ -45,6 +50,7 @@ account.
 
 Run `cleanslate` in a terminal to open the TUI. Useful commands:
 
+- `/setup` — change provider, credentials, and model without leaving the TUI
 - `/new` — start a clean session
 - `/sessions` — browse and resume workspace sessions
 - `/resume <id>` — resume a specific session
@@ -54,11 +60,16 @@ Run `cleanslate` in a terminal to open the TUI. Useful commands:
 - `/reasoning <level>` — change reasoning effort without restarting
 - `/mode plan` or `/mode execution` — switch agent phase
 - `/plan <task>` — run one turn with write tools filtered
+- `/fix`, `/explain`, `/test`, `/rewrite`, `/doc`, `/review`, `/optimize`,
+  `/scaffold`, `/migrate` — the IDE agent’s task-specific slash commands
 - `/clear` — clear the visible transcript
 - `/exit` — save and quit
 
 Use Page Up and Page Down for transcript scrollback. Escape cancels the active
 turn. Ctrl-C exits when idle.
+
+Typing `/` opens the searchable command palette. Use the arrow keys to select a
+command and Enter to insert it.
 
 Sessions are isolated by workspace and stored under
 `~/.cleanslate/sessions/`. They include the native provider/tool transcript, so

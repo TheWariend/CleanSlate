@@ -38,6 +38,27 @@ async function* stream(values: any[]): AsyncIterable<any> {
 }
 
 describe('NodeCleanSlateMainService provider streams', () => {
+	test('sends Azure subscription keys to v1-compatible Azure endpoints', async () => {
+		const service = new NodeCleanSlateMainService('/tmp');
+		let clientOptions: any;
+		(service as any).importExternalModule = async () => ({
+			OpenAI: class {
+				constructor(options: any) {
+					clientOptions = options;
+				}
+			}
+		});
+
+		await (service as any).createOpenAICompatibleClient({
+			providerName: 'Azure AI Foundry',
+			apiKey: 'azure-key',
+			baseUrl: 'https://resource.openai.azure.com/openai/v1'
+		});
+
+		assert.equal(clientOptions.baseURL, 'https://resource.openai.azure.com/openai/v1');
+		assert.equal(clientOptions.defaultHeaders['api-key'], 'azure-key');
+	});
+
 	test('accumulates Anthropic tool input and separates reasoning', async () => {
 		const service = new NodeCleanSlateMainService('/tmp');
 		(service as any).createAnthropicClient = async () => ({

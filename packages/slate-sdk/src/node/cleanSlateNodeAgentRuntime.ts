@@ -37,6 +37,8 @@ export interface ICleanSlateNodeAgentRuntimeOptions {
 	configuration: ICleanSlateConfiguration;
 	approveCommand?: (request: { command: string; cwd?: string; reason?: string }) => Promise<boolean>;
 	onProgress?: (event: { type: string; [key: string]: any }) => void;
+	onManagedTokenRefresh?: (token: string) => void | Promise<void>;
+	fetcher?: typeof fetch;
 	logger?: Partial<ICleanSlateLogger>;
 	sessionId?: string;
 }
@@ -52,8 +54,14 @@ export interface ICleanSlateNodeAgentSessionSnapshot {
 class NodeConfigurationService implements ICleanSlateConfigurationService {
 	declare readonly _serviceBrand: undefined;
 	readonly onDidChangeConfiguration = Event.None;
+	private managedAccount: ICleanSlateManagedAccount | undefined;
 
-	constructor(private configuration: ICleanSlateConfiguration) { }
+	constructor(
+		private configuration: ICleanSlateConfiguration,
+		private readonly mainService: NodeCleanSlateMainService,
+		private readonly onManagedTokenRefresh?: (token: string) => void | Promise<void>,
+		private readonly fetcher: typeof fetch = fetch
+	) { }
 
 	getConfiguration(): ICleanSlateConfiguration {
 		return this.configuration;
@@ -65,14 +73,75 @@ class NodeConfigurationService implements ICleanSlateConfigurationService {
 		this.configuration = { ...this.configuration, ...config };
 		return Promise.resolve();
 	}
-	refreshManagedToken(): Promise<string> {
-		return Promise.reject(new Error('Managed CleanSlate authentication is not supported on the Node CLI surface.'));
+	async refreshManagedToken(rejectedToken?: string): Promise<string> {
+		const current = this.configuration.providers?.cleanslate?.apiKey;
+		if (!current) {
+			throw new Error('Sign in to CleanSlate again.');
+		}
+		if (rejectedToken && current !== rejectedToken) {
+			return current;
+		}
+		const runtimeConfig = await this.mainService.getRuntimeConfig();
+		const response = await this.fetcher(`${runtimeConfig.apiBaseUrl}/auth/refresh`, {
+			method: 'POST',
+			headers: { Authorization: `Bearer ${current}`, Accept: 'application/json' }
+		});
+		const body = await this.readJson(response);
+		if (response.status === 401) {
+			throw new Error('Your CleanSlate session expired. Run cleanslate --setup to sign in again.');
+		}
+		if (!response.ok || typeof body?.token !== 'string' || !body.token) {
+			throw new Error(body?.message || `Unable to refresh the CleanSlate session (${response.status}).`);
+		}
+		const token = body.token;
+		this.configuration = {
+			...this.configuration,
+			providers: {
+				...this.configuration.providers,
+				cleanslate: { ...this.configuration.providers?.cleanslate, apiKey: token }
+			}
+		};
+		await this.onManagedTokenRefresh?.(token);
+		return token;
 	}
-	getManagedEntitlements(): Promise<ICleanSlateManagedEntitlements> {
-		return Promise.resolve({});
+	async getManagedEntitlements(): Promise<ICleanSlateManagedEntitlements> {
+		let token = this.configuration.providers?.cleanslate?.apiKey;
+		if (!token) {
+			throw new Error('Sign in to CleanSlate to view your managed models.');
+		}
+		const runtimeConfig = await this.mainService.getRuntimeConfig();
+		const request = () => this.fetcher(`${runtimeConfig.managedAIBaseUrl}/entitlements`, {
+			headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }
+		});
+		let response = await request();
+		if (response.status === 401) {
+			token = await this.refreshManagedToken(token);
+			response = await request();
+		}
+		const body = await this.readJson(response);
+		if (!response.ok || !body?.data) {
+			throw new Error(body?.message || `Unable to load CleanSlate entitlements (${response.status}).`);
+		}
+		const entitlements = body.data as ICleanSlateManagedEntitlements;
+		if (entitlements.account) {
+			this.managedAccount = {
+				email: entitlements.account.email,
+				name: entitlements.account.name,
+				profileImageUrl: entitlements.account.avatar_url
+			};
+		}
+		return entitlements;
 	}
 	getManagedAccount(): ICleanSlateManagedAccount | undefined {
-		return undefined;
+		return this.managedAccount;
+	}
+
+	private async readJson(response: Response): Promise<any> {
+		try {
+			return await response.json();
+		} catch {
+			return {};
+		}
 	}
 }
 
@@ -94,6 +163,7 @@ function createLogger(overrides: Partial<ICleanSlateLogger> = {}): ICleanSlateLo
 export class CleanSlateNodeAgentRuntime {
 	private readonly rootPath: string;
 	private readonly mainService: NodeCleanSlateMainService;
+	private readonly configService: NodeConfigurationService;
 	private readonly headlessRuntime: CleanSlateHeadlessRuntime;
 	private readonly queryRunner: CleanSlateQueryRunner;
 	private readonly cleanSlateService: CleanSlateService;
@@ -109,9 +179,9 @@ export class CleanSlateNodeAgentRuntime {
 	constructor(private readonly options: ICleanSlateNodeAgentRuntimeOptions) {
 		this.rootPath = path.resolve(options.rootPath);
 		this.sessionId = options.sessionId?.trim() || `cli-${process.pid}-${Date.now()}`;
-		const configService = new NodeConfigurationService(options.configuration);
 		this.mainService = new NodeCleanSlateMainService(this.rootPath);
-		const cleanSlateService = new CleanSlateService(configService, this.mainService, createLogger(options.logger));
+		this.configService = new NodeConfigurationService(options.configuration, this.mainService, options.onManagedTokenRefresh, options.fetcher);
+		const cleanSlateService = new CleanSlateService(this.configService, this.mainService, createLogger(options.logger));
 		this.cleanSlateService = cleanSlateService;
 		this.headlessRuntime = new CleanSlateHeadlessRuntime({
 			rootPath: this.rootPath,
@@ -125,7 +195,7 @@ export class CleanSlateNodeAgentRuntime {
 		const toolContext = this.headlessRuntime.getToolContext();
 		toolContext.cleanSlateMainService = this.mainService;
 		toolContext.contextService = this.contextService;
-		const parsingSupport = new CleanSlateAgentParsingSupport(configService);
+		const parsingSupport = new CleanSlateAgentParsingSupport(this.configService);
 		const executionSupport = new CleanSlateAgentExecutionSupport(
 			toolContext.workspaceContextService,
 			toolContext.markerService,
@@ -235,7 +305,7 @@ export class CleanSlateNodeAgentRuntime {
 		phase: AgentPhase,
 		signal?: AbortSignal
 	): AsyncIterable<CleanSlateStreamPart> {
-		const parsingSupport = new CleanSlateAgentParsingSupport(new NodeConfigurationService(this.options.configuration));
+		const parsingSupport = new CleanSlateAgentParsingSupport(this.configService);
 		const budget = new CleanSlateExecutionBudget(parsingSupport.getExecutionLoopSettings().maxTurns);
 		let assistantText = '';
 		for await (const part of this.queryRunner.run(
@@ -326,6 +396,7 @@ export function createNodeProviderConfiguration(options: {
 		planMode: false,
 		maxTurns: options.maxTurns,
 		providers: {
+			...(provider === 'cleanslate' ? { cleanslate: common } : {}),
 			...(provider === 'openai' ? { openai: common } : {}),
 			...(provider === 'azureOpenAI' ? {
 				azureOpenAI: {

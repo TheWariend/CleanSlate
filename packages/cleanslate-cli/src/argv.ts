@@ -3,7 +3,7 @@
  * Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-export const SUPPORTED_PROVIDERS = ['openai', 'azureOpenAI', 'anthropic', 'gemini', 'grok', 'nvidia', 'openrouter', 'custom', 'bedrock'] as const;
+export const SUPPORTED_PROVIDERS = ['cleanslate', 'openai', 'azureOpenAI', 'anthropic', 'gemini', 'grok', 'nvidia', 'openrouter', 'custom', 'bedrock'] as const;
 export type CliProvider = typeof SUPPORTED_PROVIDERS[number];
 
 export interface ICliArguments {
@@ -50,7 +50,10 @@ function inferredProvider(env: NodeJS.ProcessEnv): CliProvider {
 	if (env['ANTHROPIC_API_KEY'] && !env['OPENAI_API_KEY']) {
 		return 'anthropic';
 	}
-	return 'openai';
+	if (env['OPENAI_API_KEY']) {
+		return 'openai';
+	}
+	return 'cleanslate';
 }
 
 export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.env): ICliArguments {
@@ -194,6 +197,7 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 
 export function apiKeyFromEnvironment(provider: CliProvider, env: NodeJS.ProcessEnv): string | undefined {
 	switch (provider) {
+		case 'cleanslate': return env['CLEANSLATE_TOKEN'];
 		case 'openai': return env['OPENAI_API_KEY'];
 		case 'azureOpenAI': return env['AZURE_OPENAI_API_KEY'];
 		case 'anthropic': return env['ANTHROPIC_API_KEY'];
@@ -212,7 +216,7 @@ Open the CleanSlate terminal agent, or run one task non-interactively.
 
 Options:
   -C, --cwd <path>          Workspace root (default: current directory)
-  -p, --provider <name>     openai, azure, anthropic, gemini, grok, nvidia, openrouter, custom, bedrock
+  -p, --provider <name>     cleanslate, openai, azure, anthropic, gemini, grok, nvidia, openrouter, custom, bedrock
   -m, --model <id>          Provider model (or CLEANSLATE_MODEL)
       --api-key <key>       Provider API key (provider environment variables are supported)
       --base-url <url>      Override the provider base URL

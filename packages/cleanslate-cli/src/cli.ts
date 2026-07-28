@@ -17,6 +17,7 @@ import {
 } from '@slate/sdk';
 import { apiKeyFromEnvironment, HELP_TEXT, ICliArguments, parseArguments } from './argv.js';
 import { CliConfigStore, CliCredentialStore, ICliConfig } from './config.js';
+import { signInToCleanSlate } from './managedAuth.js';
 import { CliSessionStore, ICliSession, transcriptEntry } from './sessions.js';
 import { CleanSlateSetupTui, ICliSetupResult } from './setupTui.js';
 import { CleanSlateTui } from './tui.js';
@@ -116,6 +117,25 @@ function applySetupResult(args: ICliArguments, setup: ICliSetupResult): void {
 	args.azureApiVersion = setup.azureApiVersion;
 }
 
+async function completeManagedSetup(args: ICliArguments, setup: ICliSetupResult, credentialStore: CliCredentialStore): Promise<void> {
+	if (!setup.managedEmail || !setup.managedPassword) {
+		throw new Error('CleanSlate account email and password are required.');
+	}
+	process.stderr.write('Signing in to CleanSlate and loading your models…\n');
+	const signedIn = await signInToCleanSlate(setup.managedEmail, setup.managedPassword);
+	credentialStore.set('cleanslate', signedIn.token);
+	const models = (signedIn.entitlements.models ?? []).filter(model => !!model.id?.trim());
+	if (models.length === 0) {
+		throw new Error(signedIn.entitlements.managed_ai
+			? 'Your CleanSlate account currently has no managed models available.'
+			: 'Your account does not have CleanSlate managed-model access. Upgrade the account, then run cleanslate --setup again.');
+	}
+	const preferred = args.model && models.some(model => model.id === args.model) ? args.model : models[0]!.id;
+	setup.apiKey = signedIn.token;
+	setup.model = preferred;
+	process.stderr.write(`Connected to CleanSlate · ${preferred}\n`);
+}
+
 function validateOneShot(args: ICliArguments): void {
 	if (!args.task) {
 		throw new Error('A task is required. Run cleanslate --help for usage.');
@@ -184,6 +204,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 		if (!setup) {
 			return 130;
 		}
+		if (setup.provider === 'cleanslate') {
+			await completeManagedSetup(args, setup, credentialStore);
+		}
 		applySetupResult(args, setup);
 		if (setup.apiKey) {
 			credentialStore.set(setup.provider, setup.apiKey);
@@ -196,16 +219,40 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 	sessionStore.save(initialSession);
 
 	if (useTui) {
-		const app = render(createElement(CleanSlateTui, {
-			args,
-			store: sessionStore,
-			initialSession,
-			initialTask: args.task,
-			onConfigurationChange: changed => configStore.save(configFromArguments(changed)),
-			getCredential: provider => credentialStore.get(provider)
-		}), { exitOnCtrlC: false });
-		await app.waitUntilExit();
-		return 0;
+		let pendingInitialTask = args.task;
+		while (true) {
+			let setupRequested = false;
+			const app = render(createElement(CleanSlateTui, {
+				args,
+				store: sessionStore,
+				initialSession,
+				initialTask: pendingInitialTask,
+				onConfigurationChange: changed => configStore.save(configFromArguments(changed)),
+				getCredential: provider => credentialStore.get(provider),
+				onCredentialChange: (provider, credential) => credentialStore.set(provider, credential),
+				onRequestSetup: () => { setupRequested = true; }
+			}), { exitOnCtrlC: false });
+			await app.waitUntilExit();
+			pendingInitialTask = undefined;
+			if (!setupRequested) {
+				return 0;
+			}
+
+			const setup = await runInteractiveSetup(args.provider);
+			if (setup) {
+				if (setup.provider === 'cleanslate') {
+					await completeManagedSetup(args, setup, credentialStore);
+				}
+				applySetupResult(args, setup);
+				if (setup.apiKey) {
+					credentialStore.set(setup.provider, setup.apiKey);
+				}
+				validateProvider(args);
+				configStore.save(configFromArguments(args));
+				initialSession = sessionStore.create(args.provider, args.model!);
+				sessionStore.save(initialSession);
+			}
+		}
 	}
 
 	validateOneShot(args);
@@ -295,6 +342,7 @@ async function runOneShot(
 			azureApiVersion: args.azureApiVersion,
 			azureDeploymentName: args.model
 		}),
+		onManagedTokenRefresh: token => new CliCredentialStore().set('cleanslate', token),
 		approveCommand: request => requestCommandApproval(request),
 		onProgress: event => {
 			if (event.type === 'command_output' && typeof event.chunk === 'string') {

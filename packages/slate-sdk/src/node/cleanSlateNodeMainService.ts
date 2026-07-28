@@ -77,10 +77,12 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 	}
 
 	getRuntimeConfig(): Promise<ICleanSlateRuntimeConfig> {
+		const apiBaseUrl = this.normalizeEnvValue(process.env['CLEANSLATE_API_BASE_URL']) ?? 'https://api.thewariend.com/api';
+		const authWebUrl = this.normalizeEnvValue(process.env['CLEANSLATE_AUTH_WEB_URL']) ?? 'https://thewariend.com/auth';
 		return Promise.resolve({
-			authWebUrl: 'https://thewariend.com/auth',
-			apiBaseUrl: 'https://api.thewariend.com/api',
-			managedAIBaseUrl: 'https://api.thewariend.com/api/cleanslate',
+			authWebUrl,
+			apiBaseUrl,
+			managedAIBaseUrl: `${apiBaseUrl}/cleanslate`,
 			proCheckoutUrl: 'https://api.thewariend.com/checkout/cleanslate/pro'
 		});
 	}
@@ -1151,10 +1153,13 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 		}
 		const baseURL = this.resolveOpenAICompatibleBaseUrl(options);
 		const managed = this.isCleanSlateManagedProviderName(options.providerName);
+		const azureV1 = options.providerName === 'Azure AI Foundry';
 		return new OpenAI({
 			apiKey: options.apiKey || (this.isCustomProviderName(options.providerName) ? 'cleanslate-custom-api-key' : ''),
 			baseURL,
-			defaultHeaders: managed ? { 'User-Agent': 'CleanSlate/1.0' } : undefined,
+			defaultHeaders: managed
+				? { 'User-Agent': 'CleanSlate/1.0' }
+				: azureV1 ? { 'api-key': options.apiKey } : undefined,
 			...(managed ? { maxRetries: 0 } : {})
 		});
 	}

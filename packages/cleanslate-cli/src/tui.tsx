@@ -26,6 +26,8 @@ interface ITuiProps {
 	initialTask?: string;
 	onConfigurationChange?: (args: ICliArguments) => void;
 	getCredential?: (provider: ICliArguments['provider']) => string | undefined;
+	onCredentialChange?: (provider: ICliArguments['provider'], credential: string) => void;
+	onRequestSetup?: () => void;
 }
 
 interface IApprovalRequest {
@@ -47,6 +49,56 @@ const COLORS = {
 	danger: '#ef4444',
 	warning: '#f59e0b'
 };
+
+interface ICommandPaletteItem {
+	id: string;
+	label: string;
+	description: string;
+}
+
+const COMMAND_PALETTE_ITEMS: readonly ICommandPaletteItem[] = [
+	{ id: '/plan', label: 'Plan mode', description: 'Turn planning mode on' },
+	{ id: '/fix', label: 'Fix', description: 'Fix bugs and root causes' },
+	{ id: '/explain', label: 'Explain', description: 'Explain relevant code' },
+	{ id: '/test', label: 'Test', description: 'Write comprehensive tests' },
+	{ id: '/rewrite', label: 'Rewrite', description: 'Improve code without changing behavior' },
+	{ id: '/doc', label: 'Document', description: 'Add documentation' },
+	{ id: '/review', label: 'Review', description: 'Review bugs, security, and quality' },
+	{ id: '/optimize', label: 'Optimize', description: 'Apply targeted performance improvements' },
+	{ id: '/scaffold', label: 'Scaffold', description: 'Scaffold a complete implementation' },
+	{ id: '/migrate', label: 'Migrate', description: 'Migrate code to a specified target' },
+	{ id: '/setup', label: 'Provider setup', description: 'Change provider, credentials, and model' },
+	{ id: '/models', label: 'Models', description: 'Browse models for the active provider' },
+	{ id: '/model', label: 'Set model', description: 'Switch directly to a model ID' },
+	{ id: '/provider', label: 'Set provider', description: 'Switch using a saved credential' },
+	{ id: '/reasoning', label: 'Reasoning', description: 'Set reasoning effort' },
+	{ id: '/mode', label: 'Mode', description: 'Switch planning or execution mode' },
+	{ id: '/new', label: 'New session', description: 'Start a clean session' },
+	{ id: '/sessions', label: 'Sessions', description: 'Browse saved sessions' },
+	{ id: '/resume', label: 'Resume', description: 'Resume a session by ID' },
+	{ id: '/status', label: 'Status', description: 'Show provider and execution status' },
+	{ id: '/clear', label: 'Clear', description: 'Clear conversation and transcript' },
+	{ id: '/help', label: 'Help', description: 'Show terminal commands' },
+	{ id: '/exit', label: 'Exit', description: 'Save and quit' }
+];
+
+function CommandPalette({ items, selected }: { items: readonly ICommandPaletteItem[]; selected: number }) {
+	const start = Math.max(0, Math.min(selected - 5, items.length - 10));
+	return (
+		<Box borderStyle="round" borderColor={COLORS.accent} flexDirection="column" paddingX={1}>
+			<Text bold>Commands</Text>
+			{items.slice(start, start + 10).map((item, offset) => {
+				const index = start + offset;
+				return <Text key={item.id} inverse={selected === index}>
+					{selected === index ? '› ' : '  '}<Text color={COLORS.cyan}>{item.id}</Text>
+					<Text>  {item.label}</Text>
+					<Text color={COLORS.muted}> — {item.description}</Text>
+				</Text>;
+			})}
+			<Text color={COLORS.muted}>↑/↓ select · enter insert · esc close</Text>
+		</Box>
+	);
+}
 
 function compact(value: unknown, limit = 180): string {
 	const text = typeof value === 'string' ? value : JSON.stringify(value);
@@ -197,13 +249,14 @@ function ModelPicker({ models, current, onSelect, onCancel }: {
 	);
 }
 
-export function CleanSlateTui({ args, store, initialSession, initialTask, onConfigurationChange, getCredential }: ITuiProps) {
+export function CleanSlateTui({ args, store, initialSession, initialTask, onConfigurationChange, getCredential, onCredentialChange, onRequestSetup }: ITuiProps) {
 	const { exit } = useApp();
 	const { stdout } = useStdout();
 	const [session, setSession] = useState(initialSession);
 	const sessionRef = useRef(initialSession);
 	const [transcript, setTranscript] = useState<ICliTranscriptEntry[]>(initialSession.transcript);
 	const [input, setInput] = useState('');
+	const [commandSelection, setCommandSelection] = useState(0);
 	const [running, setRunning] = useState(false);
 	const [status, setStatus] = useState('ready');
 	const [contextUsage, setContextUsage] = useState<number | undefined>();
@@ -217,6 +270,12 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const abortRef = useRef<AbortController | undefined>(undefined);
 	const runtimeRef = useRef<CleanSlateNodeAgentRuntime | undefined>(undefined);
 	const initialTaskStarted = useRef(false);
+	const commandQuery = input.match(/^\/(\S*)$/)?.[1]?.toLowerCase();
+	const commandItems = commandQuery === undefined
+		? []
+		: COMMAND_PALETTE_ITEMS.filter(item =>
+			item.id.slice(1).includes(commandQuery) || item.label.toLowerCase().includes(commandQuery));
+	const visibleCommandSelection = Math.min(commandSelection, Math.max(0, commandItems.length - 1));
 
 	const persist = (nextTranscript?: ICliTranscriptEntry[]) => {
 		const current = sessionRef.current;
@@ -255,6 +314,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				azureApiVersion: args.azureApiVersion,
 				azureDeploymentName: args.model
 			}),
+			onManagedTokenRefresh: token => onCredentialChange?.('cleanslate', token),
 			approveCommand: request => {
 				if (allowCommandsRef.current) {
 					return Promise.resolve(true);
@@ -458,8 +518,14 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			exit();
 			return;
 		}
+		if (value === '/setup') {
+			persist();
+			onRequestSetup?.();
+			exit();
+			return;
+		}
 		if (value === '/help') {
-			append(transcriptEntry('system', '/new · /sessions · /resume <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /mode plan|execution · /plan <task> · /clear · /exit'));
+			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /mode plan|execution · /plan · /fix · /explain · /test · /rewrite · /doc · /review · /optimize · /scaffold · /migrate · /clear · /exit'));
 			return;
 		}
 		if (value === '/new') {
@@ -535,6 +601,11 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			}
 			return;
 		}
+		if (value === '/plan') {
+			setMode('planning');
+			append(transcriptEntry('system', 'Planning mode enabled. Write tools are filtered until the plan is complete.'));
+			return;
+		}
 		if (value.startsWith('/plan ')) {
 			setMode('planning');
 			await executeTask(value.slice('/plan '.length).trim(), 'planning');
@@ -558,7 +629,15 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		if (approval || showSessions || models) {
 			return;
 		}
-		if (key.escape && running) {
+		const paletteSize = commandItems.length;
+		if (paletteSize > 0 && key.upArrow) {
+			setCommandSelection(value => (value - 1 + paletteSize) % paletteSize);
+		} else if (paletteSize > 0 && key.downArrow) {
+			setCommandSelection(value => (value + 1) % paletteSize);
+		} else if (paletteSize > 0 && key.escape) {
+			setInput('');
+			setCommandSelection(0);
+		} else if (key.escape && running) {
 			abortRef.current?.abort();
 			setStatus('cancelling');
 		} else if (inputValue === 'c' && key.ctrl) {
@@ -615,16 +694,35 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			{approval && <ApprovalBox approval={approval} decide={decideApproval} />}
 			{showSessions && <SessionPicker sessions={store.list()} onSelect={switchSession} onCancel={() => setShowSessions(false)} />}
 			{models && <ModelPicker models={models} current={args.model} onSelect={switchModel} onCancel={() => setModels(undefined)} />}
+			{!approval && !showSessions && !models && commandItems.length > 0 && (
+				<CommandPalette items={commandItems} selected={visibleCommandSelection} />
+			)}
 
 			{!approval && !showSessions && !models && (
 				<Box borderStyle="round" borderColor={running ? COLORS.muted : COLORS.cyan} paddingX={1}>
 					<Text color={COLORS.cyan}>❯ </Text>
 					{running
 						? <Text color={COLORS.muted}>Agent is working… press Esc to cancel</Text>
-						: <TextInput value={input} onChange={setInput} onSubmit={value => void submit(value)} placeholder="Ask CleanSlate…" />}
+						: <TextInput
+							value={input}
+							onChange={value => {
+								setInput(value);
+								setCommandSelection(0);
+							}}
+							onSubmit={value => {
+								const selected = commandItems[visibleCommandSelection];
+								if (selected) {
+									setInput(`${selected.id} `);
+									setCommandSelection(0);
+									return;
+								}
+								void submit(value);
+							}}
+							placeholder="Ask CleanSlate…"
+						/>}
 				</Box>
 			)}
-			<Text color={COLORS.muted}> enter send · esc cancel · ctrl-c exit · pgup/pgdn scroll · /sessions · /models · /new</Text>
+			<Text color={COLORS.muted}> enter send · esc cancel · ctrl-c exit · pgup/pgdn scroll · / commands · /setup · /models</Text>
 		</Box>
 	);
 }

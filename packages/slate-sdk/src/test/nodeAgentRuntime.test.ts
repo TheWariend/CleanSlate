@@ -9,6 +9,43 @@ import { Emitter } from '../core/event.js';
 import { CleanSlateNodeAgentRuntime, createNodeProviderConfiguration } from '../node/cleanSlateNodeAgentRuntime.js';
 
 describe('CleanSlateNodeAgentRuntime', () => {
+	test('loads CleanSlate managed models and persists a refreshed account token', async () => {
+		const requests: string[] = [];
+		let refreshedToken: string | undefined;
+		const fetcher = (async (input: string | URL | Request) => {
+			const url = String(input);
+			requests.push(url);
+			if (url.endsWith('/auth/refresh')) {
+				return new Response(JSON.stringify({ token: 'fresh-token' }), {
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				});
+			}
+			const entitlementAttempt = requests.filter(value => value.endsWith('/entitlements')).length;
+			return new Response(entitlementAttempt === 1
+				? JSON.stringify({ message: 'expired' })
+				: JSON.stringify({ data: { models: [{ id: 'managed-model', name: 'Managed Model' }] } }), {
+				status: entitlementAttempt === 1 ? 401 : 200,
+				headers: { 'Content-Type': 'application/json' }
+			});
+		}) as typeof fetch;
+		const runtime = new CleanSlateNodeAgentRuntime({
+			rootPath: process.cwd(),
+			configuration: createNodeProviderConfiguration({
+				provider: 'cleanslate',
+				model: 'managed-model',
+				apiKey: 'expired-token'
+			}),
+			fetcher,
+			onManagedTokenRefresh: token => { refreshedToken = token; }
+		});
+
+		assert.deepEqual(await runtime.getModels(), ['managed-model']);
+		assert.equal(refreshedToken, 'fresh-token');
+		assert.equal(requests.some(url => url.endsWith('/auth/refresh')), true);
+		runtime.dispose();
+	});
+
 	test('the Node host refuses commands when no approval policy is supplied', async () => {
 		const runtime = new CleanSlateNodeAgentRuntime({
 			rootPath: process.cwd(),
