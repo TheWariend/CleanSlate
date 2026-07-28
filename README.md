@@ -30,6 +30,51 @@ Builds are signed and notarized.
 > [!NOTE]
 > Intel macOS, Windows, and Linux aren't published yet. Build from source on those platforms.
 
+### In the terminal
+
+The same agent runs without the editor:
+
+```sh
+npm install -g @cleanslate/cli
+cleanslate
+```
+
+Or try it without installing:
+
+```sh
+npx @cleanslate/cli "fix the failing test"
+```
+
+Node 20 or later. It walks you through provider setup on first run, and works
+against any repository — the full tool set, not a reduced one.
+
+See [packages/cleanslate-cli](packages/cleanslate-cli) for options, slash
+commands, sessions, and MCP configuration.
+
+### Building on the runtime
+
+The engine behind both surfaces is published on its own:
+
+```sh
+npm install @cleanslate/sdk
+```
+
+It carries the execution loop, all 59 tools, the edit engine and a Node host,
+with no editor dependency. A surface supplies host capabilities — a filesystem,
+a way to run commands, optionally diagnostics and a browser — and the runtime
+drives the loop.
+
+See [packages/cleanslate-sdk](packages/cleanslate-sdk).
+
+| Package | Version |
+| ------- | ------- |
+| [`@cleanslate/cli`](https://www.npmjs.com/package/@cleanslate/cli) | ![npm](https://img.shields.io/npm/v/@cleanslate/cli?style=flat-square&label=) |
+| [`@cleanslate/sdk`](https://www.npmjs.com/package/@cleanslate/sdk) | ![npm](https://img.shields.io/npm/v/@cleanslate/sdk?style=flat-square&label=) |
+
+> [!NOTE]
+> Both packages are `0.x`. The host interfaces are still settling, so expect
+> breaking changes between minor versions.
+
 ### Building from source
 
 Requires Node.js 22.21.1 (see [`.nvmrc`](vscode-fork/.nvmrc)).
