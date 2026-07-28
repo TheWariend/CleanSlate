@@ -9,6 +9,7 @@
   },
   "files": [
     "dist/*.js",
+    "!dist/*.test.js",
     "dist/*.js.map",
     "dist/*.d.ts",
     "ARCHITECTURE.md",

@@ -14,6 +14,8 @@
   },
   "files": [
     "dist",
+    "!dist/test",
+    "!dist/**/*.test.*",
     "VENDOR.md",
     "LICENSE",
     "NOTICE",
