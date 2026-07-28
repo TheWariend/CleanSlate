@@ -3,6 +3,7 @@
  * Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { createHash } from 'crypto';
 import * as path from 'path';
 import { URI } from '../core/uri.js';
 import { Emitter } from '../core/event.js';
@@ -22,9 +23,11 @@ import { CleanSlateNodeLanguageCommands } from './cleanSlateNodeLanguageCommands
 export class CleanSlateNodeWorkspaceService {
 
 	private readonly folder: { uri: URI; name: string; index: number; toResource: (relative: string) => URI };
+	private readonly id: string;
 
 	constructor(rootPath: string) {
 		const root = URI.file(path.resolve(rootPath));
+		this.id = `node-${createHash('sha256').update(root.fsPath).digest('hex').slice(0, 32)}`;
 		this.folder = {
 			uri: root,
 			name: path.basename(root.fsPath),
@@ -34,7 +37,7 @@ export class CleanSlateNodeWorkspaceService {
 	}
 
 	getWorkspace(): { folders: IWorkspaceFolder[] } {
-		return { id: this.folder.uri.toString(), folders: [this.folder] } as any;
+		return { id: this.id, folders: [this.folder] } as any;
 	}
 
 	getWorkspaceFolder(resource: URI): IWorkspaceFolder | undefined {
@@ -49,6 +52,8 @@ export class CleanSlateNodeWorkspaceService {
 export interface ICleanSlateNodeRuntimeOptions {
 	/** Directory the agent may read and write. */
 	rootPath: string;
+	/** Private host directory for per-workspace state such as edit recovery history. */
+	workspaceStorageHome?: string;
 	/** Provider settings, returned verbatim by `configService.getConfiguration`. */
 	configuration: Record<string, any>;
 	/**
@@ -99,6 +104,9 @@ export function createCleanSlateNodeToolContext(options: ICleanSlateNodeRuntimeO
 		textFileService,
 		modelService,
 		workspaceContextService,
+		environmentService: options.workspaceStorageHome
+			? { workspaceStorageHome: URI.file(path.resolve(options.workspaceStorageHome)) }
+			: undefined,
 		commandExecutionService,
 		browserAutomationService,
 		codeEditorService: noEditorOpen,

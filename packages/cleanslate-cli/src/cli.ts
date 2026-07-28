@@ -16,7 +16,7 @@ import {
 	createNodeProviderConfiguration
 } from '@slate/sdk';
 import { HELP_TEXT, ICliArguments, parseArguments } from './argv.js';
-import { CliConfigStore, CliCredentialStore, ICliConfig } from './config.js';
+import { CliConfigStore, CliCredentialStore, getCleanSlateWorkspaceStorageHome, ICliConfig } from './config.js';
 import { authenticateCleanSlateInBrowser } from './managedAuth.js';
 import { CliSessionStore, ICliSession, transcriptEntry } from './sessions.js';
 import { CleanSlateModelSetupTui, CleanSlateSetupTui, ICliSetupResult } from './setupTui.js';
@@ -180,6 +180,7 @@ async function loadProviderModels(args: ICliArguments, setup: ICliSetupResult): 
 	process.stderr.write(`Loading available ${setup.provider} models…\n`);
 	const runtime = new CleanSlateNodeAgentRuntime({
 		rootPath: args.cwd,
+		workspaceStorageHome: getCleanSlateWorkspaceStorageHome(),
 		sessionId: `setup-${Date.now().toString(36)}`,
 		configuration: createNodeProviderConfiguration({
 			provider: args.provider,
@@ -451,6 +452,7 @@ async function runOneShot(
 
 	const runtime = new CleanSlateNodeAgentRuntime({
 		rootPath: path.resolve(args.cwd),
+		workspaceStorageHome: getCleanSlateWorkspaceStorageHome(),
 		sessionId: session.id,
 		configuration: createNodeProviderConfiguration({
 			provider: args.provider,

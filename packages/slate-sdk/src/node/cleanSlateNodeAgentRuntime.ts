@@ -35,6 +35,8 @@ import { NodeCleanSlateMainService } from './cleanSlateNodeMainService.js';
 
 export interface ICleanSlateNodeAgentRuntimeOptions {
 	rootPath: string;
+	/** Private host directory for per-workspace state such as edit recovery history. */
+	workspaceStorageHome?: string;
 	configuration: ICleanSlateConfiguration;
 	approveCommand?: (request: { command: string; cwd?: string; reason?: string }) => Promise<boolean>;
 	onProgress?: (event: { type: string; [key: string]: any }) => void;
@@ -192,6 +194,7 @@ export class CleanSlateNodeAgentRuntime {
 		this.cleanSlateService = cleanSlateService;
 		this.headlessRuntime = new CleanSlateHeadlessRuntime({
 			rootPath: this.rootPath,
+			workspaceStorageHome: options.workspaceStorageHome,
 			configuration: options.configuration,
 			tools: ALL_TOOLS,
 			cleanSlateService,

@@ -34,6 +34,10 @@ export function getCleanSlateHome(env: NodeJS.ProcessEnv = process.env): string 
 		: path.join(os.homedir(), '.cleanslate');
 }
 
+export function getCleanSlateWorkspaceStorageHome(env: NodeJS.ProcessEnv = process.env): string {
+	return path.join(getCleanSlateHome(env), 'workspaceStorage');
+}
+
 export class CliConfigStore {
 	private readonly filePath: string;
 

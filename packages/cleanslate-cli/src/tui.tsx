@@ -23,6 +23,7 @@ import {
 	parseCliDiffFile
 } from './workspaceReview.js';
 import { CliPermissionMode, CliPermissionPolicy } from './permissions.js';
+import { getCleanSlateWorkspaceStorageHome } from './config.js';
 import {
 	CliSessionStore,
 	ICliSession,
@@ -757,6 +758,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		const permissionPolicy = new CliPermissionPolicy(activePermissionMode);
 		const runtime = new CleanSlateNodeAgentRuntime({
 			rootPath: args.cwd,
+			workspaceStorageHome: getCleanSlateWorkspaceStorageHome(),
 			sessionId: targetSession.id,
 			configuration: createNodeProviderConfiguration({
 				provider: args.provider,

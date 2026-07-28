@@ -8,7 +8,14 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
-import { CliConfigStore, CliCredentialStore } from '../config.js';
+import { CliConfigStore, CliCredentialStore, getCleanSlateWorkspaceStorageHome } from '../config.js';
+
+test('workspace state is kept under CleanSlate private storage', () => {
+	assert.equal(
+		getCleanSlateWorkspaceStorageHome({ CLEANSLATE_HOME: '/private/cleanslate-home' }),
+		path.join('/private/cleanslate-home', 'workspaceStorage')
+	);
+});
 
 test('configuration and global credentials persist with owner-only permissions', () => {
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cleanslate-config-test-'));
