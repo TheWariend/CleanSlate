@@ -130,7 +130,6 @@ const COMMAND_PALETTE_ITEMS: readonly ICommandPaletteItem[] = [
 	{ id: '/new', label: 'New session', description: 'Start a clean session' },
 	{ id: '/sessions', label: 'Sessions', description: 'Browse saved sessions' },
 	{ id: '/resume', label: 'Resume', description: 'Resume a session by ID', requiresArguments: true },
-	{ id: '/delete-session', label: 'Delete session', description: 'Delete a saved session by ID', requiresArguments: true },
 	{ id: '/status', label: 'Status', description: 'Show provider and execution status' },
 	{ id: '/context', label: 'Context', description: 'Show loaded project instructions and attached files' },
 	{ id: '/changes', label: 'Changes', description: 'Show the current Git working tree' },
@@ -945,33 +944,60 @@ function EditApprovalBox({ approval, decide, maxDiffRows, topRow }: {
 	);
 }
 
-function SessionPicker({ sessions, onSelect, onCancel }: {
+function SessionPicker({ sessions, onSelect, onDelete, onCancel }: {
 	sessions: ICliSession[];
 	onSelect: (session: ICliSession) => void;
+	onDelete: (session: ICliSession) => boolean;
 	onCancel: () => void;
 }) {
+	const [items, setItems] = useState(sessions);
 	const [selected, setSelected] = useState(0);
-	useInput((_input, key) => {
+	const [deleteArmedId, setDeleteArmedId] = useState<string | undefined>();
+	useInput((input, key) => {
 		if (key.upArrow) {
 			setSelected(value => Math.max(0, value - 1));
+			setDeleteArmedId(undefined);
 		} else if (key.downArrow) {
-			setSelected(value => Math.min(sessions.length - 1, value + 1));
-		} else if (key.return && sessions[selected]) {
-			onSelect(sessions[selected]);
+			setSelected(value => Math.min(items.length - 1, value + 1));
+			setDeleteArmedId(undefined);
+		} else if ((input === 'd' && key.ctrl) || key.delete) {
+			const session = items[selected];
+			if (!session) {
+				return;
+			}
+			if (deleteArmedId !== session.id) {
+				setDeleteArmedId(session.id);
+				return;
+			}
+			if (onDelete(session)) {
+				setItems(current => current.filter(item => item.id !== session.id));
+				setSelected(value => Math.max(0, Math.min(value, items.length - 2)));
+			}
+			setDeleteArmedId(undefined);
+		} else if (key.return && items[selected]) {
+			onSelect(items[selected]);
 		} else if (key.escape) {
-			onCancel();
+			if (deleteArmedId) {
+				setDeleteArmedId(undefined);
+			} else {
+				onCancel();
+			}
 		}
 	});
+	const start = Math.max(0, Math.min(selected - 5, items.length - 10));
 	return (
 		<Box borderStyle="round" borderColor={COLORS.accent} flexDirection="column" paddingX={1} marginTop={1}>
 			<Text bold>Sessions</Text>
-			{sessions.length === 0 && <Text color={COLORS.muted}>No saved sessions for this workspace.</Text>}
-			{sessions.slice(0, 10).map((session, index) => (
-				<Text key={session.id} inverse={selected === index}>
+			{items.length === 0 && <Text color={COLORS.muted}>No saved sessions for this workspace.</Text>}
+			{items.slice(start, start + 10).map((session, offset) => {
+				const index = start + offset;
+				return <Text key={session.id} inverse={selected === index} color={deleteArmedId === session.id ? COLORS.danger : undefined}>
 					{selected === index ? '› ' : '  '}{session.title}  <Text color={COLORS.muted}>{new Date(session.updatedAt).toLocaleString()} · {session.model}</Text>
-				</Text>
-			))}
-			<Text color={COLORS.muted}>↑/↓ select · enter resume · esc close</Text>
+				</Text>;
+			})}
+			<Text color={deleteArmedId ? COLORS.danger : COLORS.muted}>
+				{deleteArmedId ? 'Press Ctrl+D or Delete again to permanently delete · Esc cancel' : '↑/↓ select · Enter resume · Ctrl+D/Delete delete · Esc close'}
+			</Text>
 		</Box>
 	);
 }
@@ -1383,6 +1409,15 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		switchSession(next);
 	};
 
+	const deleteSessionFromPicker = (target: ICliSession): boolean => {
+		if (target.id === sessionRef.current.id) {
+			const replacement = store.create(args.provider, args.model!);
+			store.save(replacement);
+			switchSession(replacement);
+		}
+		return store.delete(target.id);
+	};
+
 	const switchModel = (model: string) => {
 		persist();
 		args.model = model;
@@ -1424,7 +1459,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		if (value === '/help') {
-			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /delete-session <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /plan · shift+tab mode · /permissions read-only|default|full · /context · /changes · /diff · /details · /doctor · /logout · /clear · /exit'));
+			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /plan · shift+tab mode · /permissions read-only|default|full · /context · /changes · /diff · /details · /doctor · /logout · /clear · /exit'));
 			return;
 		}
 		if (value === '/details') {
@@ -1442,26 +1477,6 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		if (value.startsWith('/resume ')) {
 			const resumed = store.load(value.slice('/resume '.length).trim());
 			resumed ? switchSession(resumed) : append(transcriptEntry('error', 'Session not found.'));
-			return;
-		}
-		if (value.startsWith('/delete-session ')) {
-			const id = value.slice('/delete-session '.length).trim();
-			if (!id) {
-				append(transcriptEntry('error', 'Use /delete-session <id>.'));
-				return;
-			}
-			if (id === sessionRef.current.id) {
-				append(transcriptEntry('error', 'The active session cannot be deleted. Start or resume another session first.'));
-				return;
-			}
-			if (!store.load(id)) {
-				append(transcriptEntry('error', `Session not found: ${id}.`));
-				return;
-			}
-			const deleted = store.delete(id);
-			append(transcriptEntry(deleted ? 'system' : 'error', deleted
-				? `Deleted session ${id}.`
-				: `Could not delete session ${id}.`));
 			return;
 		}
 		if (value === '/models' || value === '/model') {
@@ -1807,7 +1822,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 
 			{approval && <ApprovalBox approval={approval} decide={decideApproval} topRow={TRANSCRIPT_FIRST_ROW + contentRows + 1} />}
 			{editApproval && <EditApprovalBox approval={editApproval} decide={decideEditApproval} maxDiffRows={editPreviewRows} topRow={TRANSCRIPT_FIRST_ROW + contentRows} />}
-			{showSessions && <SessionPicker sessions={store.list()} onSelect={switchSession} onCancel={() => setShowSessions(false)} />}
+			{showSessions && <SessionPicker sessions={store.list()} onSelect={switchSession} onDelete={deleteSessionFromPicker} onCancel={() => setShowSessions(false)} />}
 			{models && <ModelPicker models={models} current={args.model} onSelect={switchModel} onCancel={() => setModels(undefined)} />}
 			{!approval && !editApproval && !showSessions && !models && !modelTermination && !diffReviews && commandItems.length > 0 && (
 				<CommandPalette items={commandItems} selected={visibleCommandSelection} />
