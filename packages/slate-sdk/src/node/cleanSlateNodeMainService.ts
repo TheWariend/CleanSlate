@@ -611,19 +611,19 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 		return this.unsupported('local embeddings');
 	}
 	executeCommandStream(_options: ICleanSlateCommandExecutionOptions, _token: CancellationToken): Event<ICleanSlateCommandOutputEvent | null> {
-		return this.unsupportedEvent('streaming commands');
+		return this.commandService.executeCommandStream(_options, _token);
 	}
 	startBackgroundCommand(_options: ICleanSlateBackgroundCommandOptions): Promise<ICleanSlateBackgroundCommandResult> {
-		return this.unsupported('background commands');
+		return this.commandService.startBackgroundCommand(_options);
 	}
 	stopBackgroundCommand(_processId: string): Promise<ICleanSlateStopBackgroundCommandResult> {
-		return this.unsupported('background commands');
+		return this.commandService.stopBackgroundCommand(_processId);
 	}
 	getBackgroundCommand(_processId: string): Promise<ICleanSlateBackgroundCommandResult> {
-		return this.unsupported('background commands');
+		return this.commandService.getBackgroundCommand(_processId);
 	}
 	listBackgroundCommands(): Promise<ICleanSlateBackgroundCommandResult[]> {
-		return this.unsupported('background commands');
+		return this.commandService.listBackgroundCommands();
 	}
 	browserPlaywright(_request: ICleanSlatePlaywrightBrowserRequest): Promise<unknown> {
 		return this.unsupported('integrated browser control');
