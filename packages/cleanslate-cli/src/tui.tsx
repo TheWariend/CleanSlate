@@ -210,7 +210,10 @@ export function CleanSlateTui({ args, store, initialSession, initialTask }: ITui
 				apiKey: args.apiKey,
 				baseUrl: args.baseUrl,
 				reasoningLevel: args.reasoningLevel,
-				maxTurns: args.maxTurns
+				maxTurns: args.maxTurns,
+				bedrockRegion: args.bedrockRegion,
+				bedrockCredentialMode: args.bedrockProfile ? 'profile' : 'default',
+				bedrockProfile: args.bedrockProfile
 			}),
 			approveCommand: request => {
 				if (allowCommandsRef.current) {

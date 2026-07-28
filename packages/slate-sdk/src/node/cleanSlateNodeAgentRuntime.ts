@@ -284,6 +284,12 @@ export function createNodeProviderConfiguration(options: {
 	baseUrl?: string;
 	reasoningLevel?: ICleanSlateConfiguration['reasoningLevel'];
 	maxTurns?: number;
+	bedrockRegion?: string;
+	bedrockCredentialMode?: 'default' | 'profile' | 'accessKey';
+	bedrockProfile?: string;
+	bedrockAccessKeyId?: string;
+	bedrockSecretAccessKey?: string;
+	bedrockSessionToken?: string;
 }): ICleanSlateConfiguration {
 	const provider = options.provider;
 	const common = { model: options.model, apiKey: options.apiKey, baseUrl: options.baseUrl };
@@ -296,10 +302,22 @@ export function createNodeProviderConfiguration(options: {
 		providers: {
 			...(provider === 'openai' ? { openai: common } : {}),
 			...(provider === 'anthropic' ? { anthropic: common } : {}),
+			...(provider === 'gemini' ? { gemini: { model: options.model, apiKey: options.apiKey } } : {}),
 			...(provider === 'grok' ? { grok: common } : {}),
 			...(provider === 'nvidia' ? { nvidia: common } : {}),
 			...(provider === 'openrouter' ? { openrouter: common } : {}),
-			...(provider === 'custom' ? { custom: common } : {})
+			...(provider === 'custom' ? { custom: common } : {}),
+			...(provider === 'bedrock' ? {
+				bedrock: {
+					modelId: options.model,
+					region: options.bedrockRegion,
+					credentialMode: options.bedrockCredentialMode ?? 'default',
+					profile: options.bedrockProfile,
+					accessKeyId: options.bedrockAccessKeyId,
+					secretAccessKey: options.bedrockSecretAccessKey,
+					sessionToken: options.bedrockSessionToken
+				}
+			} : {})
 		}
 	};
 }

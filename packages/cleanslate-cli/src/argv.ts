@@ -3,7 +3,7 @@
  * Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-export const SUPPORTED_PROVIDERS = ['openai', 'anthropic', 'grok', 'nvidia', 'openrouter', 'custom'] as const;
+export const SUPPORTED_PROVIDERS = ['openai', 'anthropic', 'gemini', 'grok', 'nvidia', 'openrouter', 'custom', 'bedrock'] as const;
 export type CliProvider = typeof SUPPORTED_PROVIDERS[number];
 
 export interface ICliArguments {
@@ -18,6 +18,8 @@ export interface ICliArguments {
 	reasoningLevel: 'none' | 'low' | 'medium' | 'high';
 	reasoningSpecified: boolean;
 	maxTurns?: number;
+	bedrockRegion?: string;
+	bedrockProfile?: string;
 	tui?: boolean;
 	resume: boolean;
 	sessionId?: string;
@@ -138,6 +140,14 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 				index++;
 				break;
 			}
+			case '--aws-region':
+				result.bedrockRegion = valueAfter(argv, index, arg);
+				index++;
+				break;
+			case '--aws-profile':
+				result.bedrockProfile = valueAfter(argv, index, arg);
+				index++;
+				break;
 			case '--':
 				positionals.push(...argv.slice(index + 1));
 				index = argv.length;
@@ -154,6 +164,8 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 	result.model ??= env['CLEANSLATE_MODEL'] || env[`${result.provider.toUpperCase()}_MODEL`];
 	result.apiKey ??= apiKeyFromEnvironment(result.provider, env);
 	result.baseUrl ??= env['CLEANSLATE_BASE_URL'] || env[`${result.provider.toUpperCase()}_BASE_URL`];
+	result.bedrockRegion ??= env['AWS_REGION'] || env['AWS_DEFAULT_REGION'];
+	result.bedrockProfile ??= env['AWS_PROFILE'];
 	return result;
 }
 
@@ -161,10 +173,12 @@ export function apiKeyFromEnvironment(provider: CliProvider, env: NodeJS.Process
 	switch (provider) {
 		case 'openai': return env['OPENAI_API_KEY'];
 		case 'anthropic': return env['ANTHROPIC_API_KEY'];
+		case 'gemini': return env['GOOGLE_API_KEY'] || env['GEMINI_API_KEY'];
 		case 'grok': return env['XAI_API_KEY'] || env['GROK_API_KEY'];
 		case 'nvidia': return env['NVIDIA_API_KEY'];
 		case 'openrouter': return env['OPENROUTER_API_KEY'];
 		case 'custom': return env['CUSTOM_API_KEY'];
+		case 'bedrock': return undefined;
 	}
 }
 
@@ -174,12 +188,14 @@ Open the CleanSlate terminal agent, or run one task non-interactively.
 
 Options:
   -C, --cwd <path>          Workspace root (default: current directory)
-  -p, --provider <name>     openai, anthropic, grok, nvidia, openrouter, custom
+  -p, --provider <name>     openai, anthropic, gemini, grok, nvidia, openrouter, custom, bedrock
   -m, --model <id>          Provider model (or CLEANSLATE_MODEL)
       --api-key <key>       Provider API key (provider environment variables are supported)
       --base-url <url>      Override the provider base URL
       --reasoning <level>   none, low, medium, high (default: low)
       --max-turns <count>   Bound model turns
+      --aws-region <id>     AWS region for Bedrock (or AWS_REGION)
+      --aws-profile <name>  AWS profile for Bedrock
       --tui                 Force the interactive terminal UI
       --no-tui              Stream one task without the terminal UI
   -r, --resume              Resume the latest workspace session

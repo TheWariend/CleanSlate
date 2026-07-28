@@ -42,6 +42,7 @@ import { CleanSlateNodeCommandService } from './cleanSlateNodeCommandService.js'
 import { CleanSlateAnthropicMessageAdapter } from './cleanSlateAnthropicMessageAdapter.js';
 import { CleanSlateOpenAIMessageAdapter } from './cleanSlateOpenAIMessageAdapter.js';
 import { CleanSlateProviderSchemaNormalizer } from './cleanSlateProviderSchemaNormalizer.js';
+import { normalizeToolName } from '../protocol/cleanSlateProviderMessageTransforms.js';
 
 interface IReasoningTagSplitState {
 	inside: boolean;
@@ -589,17 +590,235 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 	proxyStream(_options: IRequestOptions, _token: CancellationToken): Event<VSBuffer | string | null> {
 		return this.unsupportedEvent('proxy streams');
 	}
-	listGeminiModels(_options: ICleanSlateGeminiListModelsOptions, _token: CancellationToken): Promise<string[]> {
-		return this.unsupported('Gemini model listing');
+	async listGeminiModels(options: ICleanSlateGeminiListModelsOptions, token: CancellationToken): Promise<string[]> {
+		if (!options.apiKey) {
+			throw new Error('Google Gemini API key is required for model listing.');
+		}
+		const client = await this.createGeminiClient(options);
+		const pager = await client.models.list({ config: { pageSize: 100 } });
+		const models: string[] = [];
+		for await (const model of pager as AsyncIterable<any>) {
+			if (token.isCancellationRequested) {
+				break;
+			}
+			const actions = Array.isArray(model?.supportedActions) ? model.supportedActions : [];
+			if (actions.length && !actions.includes('generateContent')) {
+				continue;
+			}
+			const name = typeof model?.name === 'string' ? model.name.replace(/^models\//, '') : undefined;
+			if (name) {
+				models.push(name);
+			}
+		}
+		return Array.from(new Set(models)).sort((a, b) => a.localeCompare(b));
 	}
-	geminiGenerateContentStream(_options: ICleanSlateGeminiGenerateContentOptions, _token: CancellationToken): Event<VSBuffer | string | null> {
-		return this.unsupportedEvent('Gemini streaming');
+	geminiGenerateContentStream(options: ICleanSlateGeminiGenerateContentOptions, token: CancellationToken): Event<VSBuffer | string | null> {
+		const emitter = new Emitter<VSBuffer | string | null>();
+		(async () => {
+			let abort: ReturnType<NodeCleanSlateMainService['createProviderAbortController']> | undefined;
+			try {
+				if (!options.apiKey) {
+					throw new Error('Google Gemini API key is required.');
+				}
+				if (!options.model) {
+					throw new Error('Google Gemini model is required.');
+				}
+				const client = await this.createGeminiClient(options);
+				const googleModule = await this.importExternalModule<any>('@google/genai');
+				const { contents, systemInstruction } = this.toGeminiContents(options.messages);
+				abort = this.createProviderAbortController(token, NodeCleanSlateMainService.PROVIDER_STREAM_IDLE_TIMEOUT_MS);
+				const config: any = {
+					maxOutputTokens: options.maxOutputTokens || 16384,
+					abortSignal: abort.signal,
+					automaticFunctionCalling: { disable: true, ignoreCallHistory: true }
+				};
+				if (options.temperature !== undefined) {
+					config.temperature = options.temperature;
+				}
+				if (options.topP !== undefined) {
+					config.topP = options.topP;
+				}
+				if (options.topK !== undefined) {
+					config.topK = options.topK;
+				}
+				if (options.thinkingConfig) {
+					config.thinkingConfig = options.thinkingConfig;
+				}
+				if (systemInstruction) {
+					config.systemInstruction = systemInstruction;
+				}
+				if (options.options?.tools?.length) {
+					config.tools = [{
+						functionDeclarations: options.options.tools.map(tool => ({
+							name: normalizeToolName(tool.name, 'gemini') ?? tool.name,
+							description: tool.description,
+							parametersJsonSchema: this.providerSchemaNormalizer.normalizeJsonObjectSchema(
+								tool.parametersSchema,
+								{ target: 'gemini', model: options.model }
+							)
+						}))
+					}];
+					const requiredToolName = normalizeToolName(options.options.requiredToolName, 'gemini');
+					config.toolConfig = {
+						functionCallingConfig: {
+							mode: options.options.requiredToolName
+								? (googleModule.FunctionCallingConfigMode?.ANY ?? 'ANY')
+								: (googleModule.FunctionCallingConfigMode?.AUTO ?? 'AUTO'),
+							allowedFunctionNames: requiredToolName ? [requiredToolName] : undefined
+						}
+					};
+				}
+
+				const stream = await client.models.generateContentStream({ model: options.model, contents, config });
+				const pendingToolCalls = new Map<string, { id: string; toolName: string; input: any; thoughtSignature?: string }>();
+				for await (const chunk of stream as AsyncIterable<any>) {
+					abort.touch();
+					if (token.isCancellationRequested) {
+						break;
+					}
+					const thoughtText = this.extractGeminiThoughtText(chunk);
+					if (thoughtText) {
+						this.emitProviderPart(emitter, { type: 'reasoning', content: thoughtText });
+					}
+					const text = chunk?.text;
+					if (typeof text === 'string' && text.length > 0) {
+						this.emitProviderPart(emitter, { type: 'text', content: text });
+					}
+					for (const call of this.extractGeminiFunctionCallParts(chunk)) {
+						this.collectGeminiPendingToolCall(pendingToolCalls, call);
+					}
+				}
+				for (const call of pendingToolCalls.values()) {
+					this.emitProviderPart(emitter, {
+						type: 'tool_call',
+						call: {
+							id: call.id,
+							toolName: call.toolName,
+							input: call.input,
+							providerMetadata: call.thoughtSignature
+								? { gemini: { thoughtSignature: call.thoughtSignature } }
+								: undefined
+						}
+					});
+				}
+			} catch (error) {
+				emitter.fire(`ERROR: ${this.toProviderErrorMessage(error, abort, 'Google Gemini')}`);
+			} finally {
+				abort?.dispose();
+				emitter.fire(null);
+			}
+		})();
+		return emitter.event;
 	}
-	listBedrockFoundationModels(_options: ICleanSlateBedrockListModelsOptions, _token: CancellationToken): Promise<string[]> {
-		return this.unsupported('Bedrock model listing');
+	async listBedrockFoundationModels(options: ICleanSlateBedrockListModelsOptions, token: CancellationToken): Promise<string[]> {
+		if (!options.region) {
+			throw new Error('AWS region is required for Bedrock model listing.');
+		}
+		const { BedrockClient, ListFoundationModelsCommand } = await this.importExternalModule<any>('@aws-sdk/client-bedrock');
+		const client = new BedrockClient(await this.createBedrockClientConfig(options));
+		const abort = this.createProviderAbortController(token, NodeCleanSlateMainService.MODEL_LIST_TIMEOUT_MS);
+		try {
+			const response = await client.send(new ListFoundationModelsCommand({}), { abortSignal: abort.signal });
+			return (response.modelSummaries ?? [])
+				.filter((model: any) => model.modelId && (model.outputModalities ?? []).includes('TEXT'))
+				.map((model: any) => model.modelId)
+				.sort((a: string, b: string) => a.localeCompare(b));
+		} catch (error) {
+			throw new Error(this.toProviderErrorMessage(error, abort, 'AWS Bedrock model listing'));
+		} finally {
+			abort.dispose();
+		}
 	}
-	bedrockConverseStream(_options: ICleanSlateBedrockConverseStreamOptions, _token: CancellationToken): Event<VSBuffer | string | null> {
-		return this.unsupportedEvent('Bedrock streaming');
+	bedrockConverseStream(options: ICleanSlateBedrockConverseStreamOptions, token: CancellationToken): Event<VSBuffer | string | null> {
+		const emitter = new Emitter<VSBuffer | string | null>();
+		(async () => {
+			let abort: ReturnType<NodeCleanSlateMainService['createProviderAbortController']> | undefined;
+			try {
+				if (!options.region) {
+					throw new Error('AWS region is required for Bedrock.');
+				}
+				if (!options.modelId) {
+					throw new Error('Bedrock model ID is required.');
+				}
+				const { BedrockRuntimeClient, ConverseStreamCommand } =
+					await this.importExternalModule<any>('@aws-sdk/client-bedrock-runtime');
+				const client = new BedrockRuntimeClient(await this.createBedrockClientConfig(options));
+				abort = this.createProviderAbortController(token, NodeCleanSlateMainService.PROVIDER_STREAM_IDLE_TIMEOUT_MS);
+				const response = await client.send(
+					new ConverseStreamCommand(this.toProviderConverseRequest(options)),
+					{ abortSignal: abort.signal }
+				);
+				const toolUses = new Map<number, { id: string; name: string; inputJson: string }>();
+				const thinkState: IReasoningTagSplitState = {
+					inside: false,
+					pending: '',
+					sawOpen: false,
+					holdLeading: false
+				};
+				for await (const event of (response.stream ?? []) as AsyncIterable<any>) {
+					abort.touch();
+					if (token.isCancellationRequested) {
+						break;
+					}
+					const start = event.contentBlockStart?.start?.toolUse;
+					if (start) {
+						const index = event.contentBlockStart?.contentBlockIndex ?? toolUses.size;
+						toolUses.set(index, {
+							id: start.toolUseId ?? `tool_${index}`,
+							name: start.name ?? '',
+							inputJson: ''
+						});
+						continue;
+					}
+					const delta = event.contentBlockDelta?.delta;
+					if (typeof delta?.text === 'string' && delta.text.length > 0) {
+						const split = this.splitInlineReasoningTags(delta.text, thinkState);
+						if (split.reasoning) {
+							this.emitProviderPart(emitter, { type: 'reasoning', content: split.reasoning });
+						}
+						if (split.text) {
+							this.emitProviderPart(emitter, { type: 'text', content: split.text });
+						}
+					}
+					if (typeof delta?.reasoningContent?.text === 'string' && delta.reasoningContent.text.length > 0) {
+						this.emitProviderPart(emitter, { type: 'reasoning', content: delta.reasoningContent.text });
+					}
+					if (delta?.toolUse?.input) {
+						const index = event.contentBlockDelta?.contentBlockIndex ?? 0;
+						const existing = toolUses.get(index) ?? { id: `tool_${index}`, name: '', inputJson: '' };
+						existing.inputJson += delta.toolUse.input;
+						toolUses.set(index, existing);
+					}
+					const stopIndex = event.contentBlockStop?.contentBlockIndex;
+					if (stopIndex !== undefined) {
+						const toolUse = toolUses.get(stopIndex);
+						if (toolUse?.name) {
+							this.emitProviderPart(emitter, {
+								type: 'tool_call',
+								call: {
+									id: toolUse.id,
+									toolName: toolUse.name,
+									input: this.parseToolInput(toolUse.inputJson)
+								}
+							});
+							toolUses.delete(stopIndex);
+						}
+					}
+				}
+				if (thinkState.pending) {
+					this.emitProviderPart(emitter, {
+						type: thinkState.inside ? 'reasoning' : 'text',
+						content: thinkState.pending
+					});
+				}
+			} catch (error) {
+				emitter.fire(`ERROR: ${this.toProviderErrorMessage(error, abort, 'AWS Bedrock')}`);
+			} finally {
+				abort?.dispose();
+				emitter.fire(null);
+			}
+		})();
+		return emitter.event;
 	}
 	webSearch(_options: ICleanSlateWebSearchOptions, _token: CancellationToken): Promise<ICleanSlateWebSearchResponse> {
 		return this.unsupported('web search');
@@ -657,6 +876,255 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 	}
 	removeArchivedThreadSession(_workspaceId: string, _sessionId: string): Promise<void> {
 		return this.unsupported('thread persistence');
+	}
+
+	private async createGeminiClient(options: ICleanSlateGeminiListModelsOptions): Promise<any> {
+		const googleModule = await this.importExternalModule<any>('@google/genai');
+		const GoogleGenAI = googleModule.GoogleGenAI;
+		if (!GoogleGenAI) {
+			throw new Error('Google GenAI SDK is installed but did not expose a GoogleGenAI client.');
+		}
+		return new GoogleGenAI({ apiKey: options.apiKey });
+	}
+
+	private toGeminiContents(messages: any[]): { contents: any[]; systemInstruction?: any } {
+		const systemParts: any[] = [];
+		const contents: any[] = [];
+		for (let index = 0; index < messages.length; index++) {
+			const message = messages[index];
+			if (message.role === 'system') {
+				systemParts.push(...this.toGeminiParts(message.content));
+				continue;
+			}
+			if (message.role === 'tool') {
+				const parts: any[] = [];
+				while (index < messages.length && messages[index].role === 'tool') {
+					const toolMessage = messages[index];
+					parts.push({ text: this.toGeminiToolResultTranscriptText(toolMessage) });
+					index++;
+				}
+				index--;
+				contents.push({ role: 'user', parts });
+				continue;
+			}
+			const parts = this.toGeminiParts(message.content);
+			if (message.role === 'assistant' && message.toolCalls?.length) {
+				for (let toolIndex = 0; toolIndex < message.toolCalls.length; toolIndex++) {
+					const toolCall = message.toolCalls[toolIndex];
+					parts.push({
+						text: [
+							`Tool call (${toolCall.id || `call_${index}_${toolIndex}`}): ${toolCall.toolName || 'tool'}`,
+							`Arguments: ${this.safeStringifyForTranscript(toolCall.input ?? {})}`
+						].join('\n')
+					});
+				}
+			}
+			if (parts.length) {
+				contents.push({ role: message.role === 'assistant' ? 'model' : 'user', parts });
+			}
+		}
+		return {
+			contents,
+			systemInstruction: systemParts.length ? { role: 'user', parts: systemParts } : undefined
+		};
+	}
+
+	private toGeminiToolResultTranscriptText(toolMessage: any): string {
+		return [
+			`Tool result (${toolMessage.toolCallId || 'tool_result'}): ${toolMessage.toolName || 'tool'}`,
+			this.messageContentToText(toolMessage.content)
+		].filter(part => typeof part === 'string' && part.trim().length > 0).join('\n');
+	}
+
+	private safeStringifyForTranscript(value: any): string {
+		try {
+			return JSON.stringify(value);
+		} catch {
+			return String(value);
+		}
+	}
+
+	private extractGeminiThoughtText(chunk: any): string | undefined {
+		let thought = '';
+		for (const candidate of Array.isArray(chunk?.candidates) ? chunk.candidates : []) {
+			for (const part of Array.isArray(candidate?.content?.parts) ? candidate.content.parts : []) {
+				if (part?.thought === true && typeof part.text === 'string') {
+					thought += part.text;
+				}
+			}
+		}
+		return thought || undefined;
+	}
+
+	private extractGeminiFunctionCallParts(chunk: any): Array<{ id?: string; name?: string; args?: any; thoughtSignature?: string }> {
+		const calls: Array<{ id?: string; name?: string; args?: any; thoughtSignature?: string }> = [];
+		for (const candidate of Array.isArray(chunk?.candidates) ? chunk.candidates : []) {
+			for (const part of Array.isArray(candidate?.content?.parts) ? candidate.content.parts : []) {
+				if (part?.functionCall) {
+					calls.push({
+						...part.functionCall,
+						thoughtSignature: typeof part.thoughtSignature === 'string' ? part.thoughtSignature : undefined
+					});
+				}
+			}
+		}
+		return calls.length > 0 ? calls : (Array.isArray(chunk?.functionCalls) ? chunk.functionCalls : []);
+	}
+
+	private collectGeminiPendingToolCall(
+		pendingToolCalls: Map<string, { id: string; toolName: string; input: any; thoughtSignature?: string }>,
+		call: { id?: string; name?: string; args?: any; thoughtSignature?: string }
+	): void {
+		const toolName = typeof call?.name === 'string' ? call.name : '';
+		if (!toolName) {
+			return;
+		}
+		const input = call.args && typeof call.args === 'object' ? call.args : {};
+		const providerId = typeof call.id === 'string' && call.id.length > 0 ? call.id : undefined;
+		const key = providerId ? `${providerId}:${toolName}` : `semantic:${toolName}:${JSON.stringify(input)}`;
+		const existing = pendingToolCalls.get(key);
+		pendingToolCalls.set(key, {
+			id: providerId ?? existing?.id ?? `call_${toolName}_${pendingToolCalls.size}`,
+			toolName,
+			input,
+			thoughtSignature: call.thoughtSignature || existing?.thoughtSignature
+		});
+	}
+
+	private toGeminiParts(content: any): any[] {
+		if (typeof content === 'string') {
+			return content.trim() ? [{ text: content }] : [];
+		}
+		if (!Array.isArray(content)) {
+			return [];
+		}
+		return content.map(part => {
+			if (part?.type === 'text') {
+				return { text: part.text ?? '' };
+			}
+			if (part?.type === 'image_url' && part.image_url?.url) {
+				const match = String(part.image_url.url).match(/^data:(image\/[a-zA-Z0-9.\-+]+);base64,(.*)$/);
+				if (match) {
+					return { inlineData: { mimeType: match[1], data: match[2] } };
+				}
+			}
+			return null;
+		}).filter(Boolean);
+	}
+
+	private async createBedrockClientConfig(options: ICleanSlateBedrockListModelsOptions): Promise<any> {
+		const config: any = { region: options.region };
+		if (options.credentialMode === 'accessKey') {
+			if (!options.accessKeyId || !options.secretAccessKey) {
+				throw new Error('Bedrock access key ID and secret access key are required for manual credential mode.');
+			}
+			config.credentials = {
+				accessKeyId: options.accessKeyId,
+				secretAccessKey: options.secretAccessKey,
+				sessionToken: options.sessionToken || undefined
+			};
+		} else if (options.credentialMode === 'profile') {
+			if (!options.profile) {
+				throw new Error('AWS profile name is required for Bedrock profile credential mode.');
+			}
+			const { fromIni } = await this.importExternalModule<any>('@aws-sdk/credential-provider-ini');
+			config.credentials = fromIni({ profile: options.profile });
+		} else {
+			const { defaultProvider } = await this.importExternalModule<any>('@aws-sdk/credential-provider-node');
+			config.credentials = defaultProvider();
+		}
+		return config;
+	}
+
+	private toProviderConverseRequest(options: ICleanSlateBedrockConverseStreamOptions): any {
+		const system: Array<{ text: string }> = [];
+		const messages: any[] = [];
+		for (let index = 0; index < options.messages.length; index++) {
+			const message = options.messages[index];
+			const text = this.messageContentToText(message.content);
+			if (message.role === 'system') {
+				if (text) {
+					system.push({ text });
+				}
+				continue;
+			}
+			if (message.role === 'tool') {
+				const content: any[] = [];
+				while (index < options.messages.length && options.messages[index].role === 'tool') {
+					const toolMessage = options.messages[index];
+					content.push({
+						toolResult: {
+							toolUseId: toolMessage.toolCallId || `tool_${index}`,
+							content: [{ text: this.messageContentToText(toolMessage.content) }]
+						}
+					});
+					index++;
+				}
+				index--;
+				messages.push({ role: 'user', content });
+				continue;
+			}
+			const content: any[] = [];
+			if (text) {
+				content.push({ text });
+			}
+			if (message.role === 'assistant' && message.toolCalls?.length) {
+				for (const [toolIndex, toolCall] of message.toolCalls.entries()) {
+					content.push({
+						toolUse: {
+							toolUseId: toolCall.id || `tool_${index}_${toolIndex}`,
+							name: normalizeToolName(toolCall.toolName, 'bedrock') ?? toolCall.toolName,
+							input: toolCall.input ?? {}
+						}
+					});
+				}
+			}
+			if (content.length) {
+				messages.push({ role: message.role === 'assistant' ? 'assistant' : 'user', content });
+			}
+		}
+		const request: any = {
+			modelId: options.modelId,
+			messages,
+			inferenceConfig: { maxTokens: options.maxOutputTokens || 16384 }
+		};
+		if (options.temperature !== undefined) {
+			request.inferenceConfig.temperature = options.temperature;
+		}
+		if (options.topP !== undefined) {
+			request.inferenceConfig.topP = options.topP;
+		}
+		if (options.additionalModelRequestFields) {
+			request.additionalModelRequestFields = options.additionalModelRequestFields;
+		}
+		if (system.length) {
+			request.system = system;
+		}
+		const hasToolBlocks = messages.some(message =>
+			message.content?.some((block: any) => block?.toolUse || block?.toolResult)
+		);
+		if (options.options?.tools?.length) {
+			request.toolConfig = {
+				tools: options.options.tools.map(tool => ({
+					toolSpec: {
+						name: normalizeToolName(tool.name, 'bedrock') ?? tool.name,
+						description: tool.description,
+						inputSchema: {
+							json: this.providerSchemaNormalizer.normalizeJsonObjectSchema(
+								tool.parametersSchema,
+								{ target: 'bedrock', model: options.modelId }
+							)
+						}
+					}
+				})),
+				toolChoice: options.options.requiredToolName
+					? { tool: { name: normalizeToolName(options.options.requiredToolName, 'bedrock') ?? options.options.requiredToolName } }
+					: undefined
+			};
+		} else if (hasToolBlocks) {
+			request.toolConfig = { tools: [] };
+		}
+		return request;
 	}
 
 	private async createOpenAICompatibleClient(options: ICleanSlateOpenAICompatibleListModelsOptions): Promise<any> {
@@ -785,6 +1253,20 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 			return `${operation} did not receive provider activity for ${Math.round(abort.timeoutMs / 1000)} seconds. Check the endpoint, API version, deployment/model name, credentials, and network.`;
 		}
 		return error instanceof Error ? error.message : String(error);
+	}
+
+	private messageContentToText(content: any): string {
+		if (typeof content === 'string') {
+			return content;
+		}
+		if (Array.isArray(content)) {
+			return content
+				.filter(part => part?.type === 'text')
+				.map(part => part.text ?? '')
+				.filter(text => text.length > 0)
+				.join('\n');
+		}
+		return '';
 	}
 
 	private parseToolInput(inputJson: string): any {

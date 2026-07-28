@@ -28,6 +28,11 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
+    "@aws-sdk/client-bedrock": "^3.1096.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1096.0",
+    "@aws-sdk/credential-provider-ini": "^3.973.7",
+    "@aws-sdk/credential-provider-node": "^3.972.73",
+    "@google/genai": "^2.13.0",
     "@vscode/tree-sitter-wasm": "^0.1.4",
     "openai": "^6.49.0"
   },

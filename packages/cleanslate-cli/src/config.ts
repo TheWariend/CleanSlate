@@ -15,6 +15,8 @@ export interface ICliConfig {
 	baseUrl?: string;
 	reasoningLevel?: 'none' | 'low' | 'medium' | 'high';
 	maxTurns?: number;
+	bedrockRegion?: string;
+	bedrockProfile?: string;
 }
 
 export function getCleanSlateHome(env: NodeJS.ProcessEnv = process.env): string {

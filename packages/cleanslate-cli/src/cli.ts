@@ -69,11 +69,14 @@ function validateProvider(args: ICliArguments): void {
 	if (!args.model) {
 		throw new Error('A model is required. Pass --model once; CleanSlate remembers it for future sessions.');
 	}
-	if (args.provider !== 'custom' && !args.apiKey) {
+	if (args.provider !== 'custom' && args.provider !== 'bedrock' && !args.apiKey) {
 		throw new Error(`An API key is required for ${args.provider}. Pass --api-key or set the provider API-key environment variable.`);
 	}
 	if (args.provider === 'custom' && !args.baseUrl) {
 		throw new Error('Custom provider requires --base-url or CLEANSLATE_BASE_URL.');
+	}
+	if (args.provider === 'bedrock' && !args.bedrockRegion) {
+		throw new Error('Bedrock requires --aws-region, AWS_REGION, or AWS_DEFAULT_REGION.');
 	}
 }
 
@@ -170,6 +173,8 @@ function applyStoredConfig(args: ICliArguments, config: ICliConfig): void {
 		args.reasoningLevel = config.reasoningLevel;
 	}
 	args.maxTurns ??= config.maxTurns;
+	args.bedrockRegion ??= config.bedrockRegion;
+	args.bedrockProfile ??= config.bedrockProfile;
 }
 
 function configFromArguments(args: ICliArguments): ICliConfig {
@@ -179,7 +184,9 @@ function configFromArguments(args: ICliArguments): ICliConfig {
 		model: args.model,
 		baseUrl: args.baseUrl,
 		reasoningLevel: args.reasoningLevel,
-		maxTurns: args.maxTurns
+		maxTurns: args.maxTurns,
+		bedrockRegion: args.bedrockRegion,
+		bedrockProfile: args.bedrockProfile
 	};
 }
 
@@ -223,7 +230,10 @@ async function runOneShot(
 			apiKey: args.apiKey,
 			baseUrl: args.baseUrl,
 			reasoningLevel: args.reasoningLevel,
-			maxTurns: args.maxTurns
+			maxTurns: args.maxTurns,
+			bedrockRegion: args.bedrockRegion,
+			bedrockCredentialMode: args.bedrockProfile ? 'profile' : 'default',
+			bedrockProfile: args.bedrockProfile
 		}),
 		approveCommand: request => requestCommandApproval(request),
 		onProgress: event => {

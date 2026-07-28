@@ -122,4 +122,70 @@ describe('NodeCleanSlateMainService provider streams', () => {
 			{ type: 'tool_call', call: { id: 'call-1', toolName: 'read_file', input: { path: 'README.md' } } }
 		]);
 	});
+
+	test('streams Gemini reasoning, text and native tool calls', async () => {
+		const service = new NodeCleanSlateMainService('/tmp');
+		(service as any).createGeminiClient = async () => ({
+			models: {
+				generateContentStream: async () => stream([
+					{ candidates: [{ content: { parts: [{ thought: true, text: 'thinking' }] } }] },
+					{ text: 'answer' },
+					{ candidates: [{ content: { parts: [{ functionCall: { id: 'call-1', name: 'read_file', args: { path: 'README.md' } } }] } }] }
+				])
+			}
+		});
+
+		const parts = await collectFrames(service.geminiGenerateContentStream({
+			apiKey: 'test',
+			model: 'gemini-test',
+			messages: [{ role: 'user', content: 'work' }]
+		}, CancellationToken.None));
+
+		assert.deepEqual(parts, [
+			{ type: 'reasoning', content: 'thinking' },
+			{ type: 'text', content: 'answer' },
+			{ type: 'tool_call', call: { id: 'call-1', toolName: 'read_file', input: { path: 'README.md' } } }
+		]);
+	});
+
+	test('streams Bedrock reasoning, text and accumulated tool input', async () => {
+		const service = new NodeCleanSlateMainService('/tmp');
+		(service as any).createBedrockClientConfig = async () => ({ region: 'test' });
+		(service as any).importExternalModule = async (specifier: string) => {
+			if (specifier === '@aws-sdk/client-bedrock-runtime') {
+				return {
+					ConverseStreamCommand: class {
+						constructor(readonly input: any) { }
+					},
+					BedrockRuntimeClient: class {
+						async send() {
+							return {
+								stream: stream([
+									{ contentBlockDelta: { delta: { reasoningContent: { text: 'thinking' } } } },
+									{ contentBlockDelta: { delta: { text: 'answer' } } },
+									{ contentBlockStart: { contentBlockIndex: 0, start: { toolUse: { toolUseId: 'call-1', name: 'read_file' } } } },
+									{ contentBlockDelta: { contentBlockIndex: 0, delta: { toolUse: { input: '{"path":"README.md"}' } } } },
+									{ contentBlockStop: { contentBlockIndex: 0 } }
+								])
+							};
+						}
+					}
+				};
+			}
+			throw new Error(`Unexpected module: ${specifier}`);
+		};
+
+		const parts = await collectFrames(service.bedrockConverseStream({
+			region: 'test',
+			modelId: 'bedrock-test',
+			credentialMode: 'default',
+			messages: [{ role: 'user', content: 'work' }]
+		}, CancellationToken.None));
+
+		assert.deepEqual(parts, [
+			{ type: 'reasoning', content: 'thinking' },
+			{ type: 'text', content: 'answer' },
+			{ type: 'tool_call', call: { id: 'call-1', toolName: 'read_file', input: { path: 'README.md' } } }
+		]);
+	});
 });
