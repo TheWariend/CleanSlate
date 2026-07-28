@@ -5,6 +5,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
+import Spinner from 'ink-spinner';
 import {
 	CleanSlateNodeAgentRuntime,
 	createNodeProviderConfiguration
@@ -1592,7 +1593,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 						? <Text color={COLORS.muted}>←/→ view · ↑/↓ file · j/k scroll · PgUp/PgDn page · Esc close</Text>
 						: running
 						? <>
-							<Text><Text color={COLORS.success}>✻</Text><Text color={COLORS.muted}> {formatActivityStatus(status)}</Text></Text>
+							<Text color={COLORS.warning}><Spinner type="line" /> {formatActivityStatus(status)}</Text>
 							<Text color={COLORS.muted}> · Esc to cancel</Text>
 						</>
 						: <>
