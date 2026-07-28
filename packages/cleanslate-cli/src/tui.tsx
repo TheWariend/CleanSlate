@@ -960,7 +960,7 @@ function SessionPicker({ sessions, onSelect, onDelete, onCancel }: {
 		} else if (key.downArrow) {
 			setSelected(value => Math.min(items.length - 1, value + 1));
 			setDeleteArmedId(undefined);
-		} else if ((input === 'd' && key.ctrl) || key.delete) {
+		} else if (isSessionDeleteInput(input, key)) {
 			const session = items[selected];
 			if (!session) {
 				return;
@@ -1000,6 +1000,16 @@ function SessionPicker({ sessions, onSelect, onDelete, onCancel }: {
 			</Text>
 		</Box>
 	);
+}
+
+export function isSessionDeleteInput(input: string, key: {
+	ctrl?: boolean;
+	delete?: boolean;
+	backspace?: boolean;
+}): boolean {
+	// macOS labels Backspace as Delete, while forward-delete is reported as
+	// `delete`. The picker has no editable text, so both safely mean removal.
+	return (input === 'd' && key.ctrl === true) || key.delete === true || key.backspace === true;
 }
 
 function ModelPicker({ models, current, onSelect, onCancel }: {
