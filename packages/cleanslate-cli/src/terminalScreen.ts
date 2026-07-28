@@ -3,8 +3,8 @@
  * Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-const ENTER_ALTERNATE_SCREEN = '\u001b[?1049h\u001b[2J\u001b[H';
-const LEAVE_ALTERNATE_SCREEN = '\u001b[?25h\u001b[?1049l';
+const ENTER_ALTERNATE_SCREEN = '\u001b[?1049h\u001b[?1007h\u001b[2J\u001b[H';
+const LEAVE_ALTERNATE_SCREEN = '\u001b[?1007l\u001b[?25h\u001b[?1049l';
 const CLEAR_SCREEN = '\u001b[2J\u001b[H';
 const ENGINE_LOG_PREFIX = '[CleanSlateAgent]';
 

@@ -106,7 +106,7 @@ export function commandPaletteSelection(item: ICommandPaletteItem): { value: str
 		: { value: item.id, execute: true };
 }
 
-const FOOTER_HELP = ' enter send · shift+tab mode · ctrl+o tools · esc cancel · ctrl-c exit · pgup/pgdn scroll · / commands';
+const FOOTER_HELP = ' enter send · shift+tab mode · ctrl+o tools · esc cancel · ctrl-c exit · ↑/↓/pgup/pgdn scroll · / commands';
 
 function PromptInput(props: {
 	value: string;
@@ -1140,6 +1140,10 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				persist();
 				exit();
 			}
+		} else if (key.upArrow) {
+			setScrollOffset(value => value + 3);
+		} else if (key.downArrow) {
+			setScrollOffset(value => Math.max(0, value - 3));
 		} else if (key.pageUp) {
 			setScrollOffset(value => value + Math.max(5, Math.floor((stdout.rows ?? 30) / 2)));
 		} else if (key.pageDown) {

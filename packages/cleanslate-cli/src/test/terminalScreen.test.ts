@@ -20,11 +20,13 @@ test('interactive TUI uses an alternate screen and restores terminal state', () 
 	const leave = enterInteractiveScreen(stream);
 
 	assert.match(output, /\u001b\[\?1049h/);
+	assert.match(output, /\u001b\[\?1007h/);
 	assert.notEqual(console.log, originalLog);
 	clearInteractiveScreen(stream);
 	assert.match(output, /\u001b\[2J\u001b\[H/);
 
 	leave();
 	assert.equal(console.log, originalLog);
+	assert.match(output, /\u001b\[\?1007l/);
 	assert.match(output, /\u001b\[\?1049l/);
 });
