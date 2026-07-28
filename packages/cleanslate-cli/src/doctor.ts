@@ -9,11 +9,12 @@ import { spawnSync } from 'node:child_process';
 import type { ICliArguments } from './argv.js';
 import type { CliCredentialStore } from './config.js';
 import { CliProjectContext } from './projectContext.js';
+import { displayPath } from './displayPath.js';
 
 export function cliDoctorReport(args: ICliArguments, credentials: CliCredentialStore): string {
 	const checks: Array<[string, boolean, string]> = [];
 	checks.push(['Node.js', Number(process.versions.node.split('.')[0]) >= 20, process.version]);
-	checks.push(['Workspace', fs.existsSync(args.cwd) && fs.statSync(args.cwd).isDirectory(), args.cwd]);
+	checks.push(['Workspace', fs.existsSync(args.cwd) && fs.statSync(args.cwd).isDirectory(), displayPath(args.cwd)]);
 	checks.push(['Provider', !!args.provider, `${args.provider}/${args.model ?? 'model not set'}`]);
 	const needsKey = args.provider !== 'bedrock' && args.provider !== 'custom';
 	const credential = needsKey ? credentials.get(args.provider) : undefined;

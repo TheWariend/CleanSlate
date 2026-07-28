@@ -27,6 +27,8 @@ import { createEditPreview, ICliEditPreview } from './editPreview.js';
 import { CliPermissionMode, CliPermissionPolicy } from './permissions.js';
 import { getCleanSlateWorkspaceStorageHome } from './config.js';
 import { isTerminalMouseEvent, terminalMouseEvent, terminalMouseWheelDirection } from './terminalScreen.js';
+import { displayPath } from './displayPath.js';
+import { useTerminalSize } from './useTerminalSize.js';
 import {
 	CliSessionStore,
 	ICliSession,
@@ -1053,6 +1055,7 @@ function ModelPicker({ models, current, onSelect, onCancel }: {
 export function CleanSlateTui({ args, store, initialSession, initialTask, onConfigurationChange, getCredential, onCredentialChange, onCredentialRemove, onDoctor, onRequestSetup }: ITuiProps) {
 	const { exit } = useApp();
 	const { stdout } = useStdout();
+	const terminalSize = useTerminalSize(stdout);
 	const [session, setSession] = useState(initialSession);
 	const sessionRef = useRef(initialSession);
 	const [transcript, setTranscript] = useState<ICliTranscriptEntry[]>(initialSession.transcript);
@@ -1699,9 +1702,9 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			} else if (inputValue === 'j') {
 				setDiffScrollOffset(value => value + 1);
 			} else if (key.pageUp) {
-				setDiffScrollOffset(value => Math.max(0, value - Math.max(5, Math.floor((stdout.rows ?? 30) / 2))));
+				setDiffScrollOffset(value => Math.max(0, value - Math.max(5, Math.floor(terminalSize.rows / 2))));
 			} else if (key.pageDown) {
-				setDiffScrollOffset(value => value + Math.max(5, Math.floor((stdout.rows ?? 30) / 2)));
+				setDiffScrollOffset(value => value + Math.max(5, Math.floor(terminalSize.rows / 2)));
 			}
 			return;
 		}
@@ -1752,14 +1755,14 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		} else if (key.downArrow) {
 			setScrollOffset(value => Math.max(0, value - 3));
 		} else if (key.pageUp) {
-			setScrollOffset(value => value + Math.max(5, Math.floor((stdout.rows ?? 30) / 2)));
+			setScrollOffset(value => value + Math.max(5, Math.floor(terminalSize.rows / 2)));
 		} else if (key.pageDown) {
-			setScrollOffset(value => Math.max(0, value - Math.max(5, Math.floor((stdout.rows ?? 30) / 2))));
+			setScrollOffset(value => Math.max(0, value - Math.max(5, Math.floor(terminalSize.rows / 2))));
 		}
 	});
 
-	const viewportRows = Math.max(1, stdout.rows ?? 30);
-	const viewportColumns = Math.max(20, stdout.columns ?? 80);
+	const viewportRows = terminalSize.rows;
+	const viewportColumns = terminalSize.columns;
 	const contentWidth = Math.max(8, viewportColumns - 2);
 	const editPreviewRows = Math.max(3, Math.min(14, viewportRows - 16));
 	const overlayRows = approval
@@ -1812,7 +1815,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				</Box>
 				<Box justifyContent="space-between">
 					<Box flexGrow={1} flexShrink={1}>
-						<Text color={COLORS.muted} wrap="truncate-middle">{session.title} · {session.id.slice(0, 8)} · {args.cwd}</Text>
+						<Text color={COLORS.muted} wrap="truncate-middle">{session.title} · {session.id.slice(0, 8)} · {displayPath(args.cwd)}</Text>
 					</Box>
 					{contextStatus && <Text color={COLORS.muted}> {contextStatus}</Text>}
 				</Box>
