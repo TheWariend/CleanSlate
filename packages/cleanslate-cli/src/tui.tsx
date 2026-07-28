@@ -65,7 +65,6 @@ export interface ICommandPaletteItem {
 
 const COMMAND_PALETTE_ITEMS: readonly ICommandPaletteItem[] = [
 	{ id: '/plan', label: 'Plan mode', description: 'Turn planning mode on' },
-	{ id: '/execute', label: 'Exit plan mode', description: 'Return to normal execution' },
 	{ id: '/fix', label: 'Fix', description: 'Fix bugs and root causes', requiresArguments: true },
 	{ id: '/explain', label: 'Explain', description: 'Explain relevant code', requiresArguments: true },
 	{ id: '/test', label: 'Test', description: 'Write comprehensive tests', requiresArguments: true },
@@ -80,7 +79,6 @@ const COMMAND_PALETTE_ITEMS: readonly ICommandPaletteItem[] = [
 	{ id: '/model', label: 'Set model', description: 'Switch directly to a model ID', requiresArguments: true },
 	{ id: '/provider', label: 'Set provider', description: 'Switch using a saved credential', requiresArguments: true },
 	{ id: '/reasoning', label: 'Reasoning', description: 'Set reasoning effort', requiresArguments: true },
-	{ id: '/mode', label: 'Mode', description: 'Switch planning or execution mode', requiresArguments: true },
 	{ id: '/permissions', label: 'Permissions', description: 'Switch read-only, default, or full mode', requiresArguments: true },
 	{ id: '/new', label: 'New session', description: 'Start a clean session' },
 	{ id: '/sessions', label: 'Sessions', description: 'Browse saved sessions' },
@@ -103,7 +101,7 @@ export function commandPaletteSelection(item: ICommandPaletteItem): { value: str
 		: { value: item.id, execute: true };
 }
 
-const FOOTER_HELP = ' enter send · esc cancel · ctrl-c exit · pgup/pgdn scroll · / commands · /setup · /models';
+const FOOTER_HELP = ' enter send · shift+tab mode · esc cancel · ctrl-c exit · pgup/pgdn scroll · / commands';
 
 function CommandPalette({ items, selected }: { items: readonly ICommandPaletteItem[]; selected: number }) {
 	const start = Math.max(0, Math.min(selected - 5, items.length - 10));
@@ -249,6 +247,10 @@ export function formatHeaderModeLabel(mode: 'execution' | 'planning'): string {
 	return mode === 'planning' ? 'PLAN' : '';
 }
 
+export function nextInteractiveMode(mode: 'execution' | 'planning'): 'execution' | 'planning' {
+	return mode === 'planning' ? 'execution' : 'planning';
+}
+
 function TranscriptViewportLine({ line }: { line: ITranscriptViewportLine }) {
 	switch (line.kind) {
 		case 'blank':
@@ -383,7 +385,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const commandItems = commandQuery === undefined
 		? []
 		: COMMAND_PALETTE_ITEMS.filter(item =>
-			(mode === 'planning' ? item.id !== '/plan' : item.id !== '/execute')
+			(mode !== 'planning' || item.id !== '/plan')
 			&& (item.id.slice(1).includes(commandQuery) || item.label.toLowerCase().includes(commandQuery)));
 	const visibleCommandSelection = Math.min(commandSelection, Math.max(0, commandItems.length - 1));
 
@@ -658,7 +660,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		if (value === '/help') {
-			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /delete-session <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /plan · /execute · /permissions read-only|default|full · /context · /changes · /diff · /doctor · /logout · /clear · /exit'));
+			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /delete-session <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /plan · shift+tab mode · /permissions read-only|default|full · /context · /changes · /diff · /doctor · /logout · /clear · /exit'));
 			return;
 		}
 		if (value === '/new') {
@@ -754,11 +756,6 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			}
 			return;
 		}
-		if (value === '/execute') {
-			setMode('execution');
-			append(transcriptEntry('system', 'Planning mode disabled.'));
-			return;
-		}
 		if (value === '/permissions') {
 			append(transcriptEntry('system', `Permission mode: ${permissionMode}. Use /permissions read-only|default|full.`));
 			return;
@@ -835,7 +832,12 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		const paletteSize = commandItems.length;
-		if (paletteSize > 0 && key.upArrow) {
+		if (key.tab && key.shift && !running) {
+			const nextMode = nextInteractiveMode(mode);
+			setMode(nextMode);
+			setInput('');
+			setCommandSelection(0);
+		} else if (paletteSize > 0 && key.upArrow) {
 			setCommandSelection(value => (value - 1 + paletteSize) % paletteSize);
 		} else if (paletteSize > 0 && key.downArrow) {
 			setCommandSelection(value => (value + 1) % paletteSize);

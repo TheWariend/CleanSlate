@@ -73,9 +73,8 @@ Run `cleanslate` in a terminal to open the TUI. Useful commands:
 - `/provider <name> <model>` — switch provider and model using environment credentials
 - `/reasoning <level>` — change reasoning effort without restarting
 - `/permissions read-only|default|full` — choose the host-enforced tool policy
-- `/mode plan` or `/mode execution` — switch agent phase
 - `/plan <task>` — run one turn with write tools filtered
-- `/execute` — leave plan mode and return to normal execution
+- `Shift+Tab` — enter or leave plan mode
 - `/fix`, `/explain`, `/test`, `/rewrite`, `/doc`, `/review`, `/optimize`,
   `/scaffold`, `/migrate` — the IDE agent’s task-specific slash commands
 - `/clear` — clear the visible transcript
