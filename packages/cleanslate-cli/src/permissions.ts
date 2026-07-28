@@ -46,4 +46,8 @@ export class CliPermissionPolicy {
 	allowsCommandWithoutPrompt(): boolean {
 		return this.mode === 'full';
 	}
+
+	requiresToolApproval(request: { category?: string }): boolean {
+		return this.mode === 'default' && (request.category === 'edit' || request.category === 'creation');
+	}
 }

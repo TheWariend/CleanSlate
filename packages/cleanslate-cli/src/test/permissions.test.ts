@@ -21,4 +21,12 @@ test('full mode permits tools and commands without an interactive prompt', () =>
 	const policy = new CliPermissionPolicy('full');
 	assert.equal(policy.allowsTool({ toolName: 'apply_edit', category: 'edit' }), true);
 	assert.equal(policy.allowsCommandWithoutPrompt(), true);
+	assert.equal(policy.requiresToolApproval({ category: 'edit' }), false);
+});
+
+test('default mode asks before mutations but not reads', () => {
+	const policy = new CliPermissionPolicy('default');
+	assert.equal(policy.requiresToolApproval({ category: 'edit' }), true);
+	assert.equal(policy.requiresToolApproval({ category: 'creation' }), true);
+	assert.equal(policy.requiresToolApproval({ category: 'discovery' }), false);
 });

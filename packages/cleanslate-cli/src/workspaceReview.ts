@@ -13,6 +13,8 @@ export type CliDiffScope = 'staged' | 'unstaged' | 'untracked' | 'turn';
 export interface ICliDiffLine {
 	kind: CliDiffLineKind;
 	text: string;
+	oldLine?: number;
+	newLine?: number;
 }
 
 export interface ICliDiffFile {
@@ -109,7 +111,28 @@ function minimizeReplacementBlocks(lines: ICliDiffLine[]): ICliDiffLine[] {
 }
 
 export function parseCliDiffFile(filePath: string, scope: CliDiffScope, rawDiff: string): ICliDiffFile {
-	const lines = minimizeReplacementBlocks(rawDiff.split('\n').map(text => ({ kind: diffLineKind(text), text })));
+	const lines: ICliDiffLine[] = minimizeReplacementBlocks(rawDiff.split('\n').map(text => ({ kind: diffLineKind(text), text })));
+	let oldLine: number | undefined;
+	let newLine: number | undefined;
+	for (const line of lines) {
+		if (line.kind === 'hunk') {
+			const match = line.text.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+			oldLine = match ? Number(match[1]) : undefined;
+			newLine = match ? Number(match[2]) : undefined;
+			continue;
+		}
+		if (oldLine === undefined || newLine === undefined || line.kind === 'header') {
+			continue;
+		}
+		if (line.kind === 'deletion') {
+			line.oldLine = oldLine++;
+		} else if (line.kind === 'addition') {
+			line.newLine = newLine++;
+		} else {
+			line.oldLine = oldLine++;
+			line.newLine = newLine++;
+		}
+	}
 	return {
 		path: filePath,
 		scope,
@@ -117,6 +140,16 @@ export function parseCliDiffFile(filePath: string, scope: CliDiffScope, rawDiff:
 		deletions: lines.filter(line => line.kind === 'deletion').length,
 		lines
 	};
+}
+
+export function formatCliDiffLine(line: ICliDiffLine): string {
+	if (line.kind === 'hunk' || line.kind === 'header') {
+		return line.text;
+	}
+	const number = line.kind === 'deletion' ? line.oldLine : line.newLine;
+	const marker = line.kind === 'addition' ? '+' : line.kind === 'deletion' ? '-' : ' ';
+	const content = /^[ +\-]/.test(line.text) ? line.text.slice(1) : line.text;
+	return `${number === undefined ? '    ' : String(number).padStart(4)} ${marker} ${content}`;
 }
 
 function createReview(label: string, files: ICliDiffFile[], branch?: string): ICliDiffReview {

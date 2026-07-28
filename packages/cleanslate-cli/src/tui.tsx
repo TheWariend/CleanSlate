@@ -20,8 +20,10 @@ import {
 	ICliDiffFile,
 	ICliDiffReview,
 	ICliDiffLine,
+	formatCliDiffLine,
 	parseCliDiffFile
 } from './workspaceReview.js';
+import { createEditPreview, ICliEditPreview } from './editPreview.js';
 import { CliPermissionMode, CliPermissionPolicy } from './permissions.js';
 import { getCleanSlateWorkspaceStorageHome } from './config.js';
 import { isTerminalMouseEvent, terminalMouseWheelDirection } from './terminalScreen.js';
@@ -53,6 +55,12 @@ interface IApprovalRequest {
 
 interface IPendingApproval {
 	request: IApprovalRequest;
+	resolve: (approved: boolean) => void;
+}
+
+interface IPendingEditApproval {
+	request: { toolName: string; category?: string; input: unknown };
+	preview?: ICliEditPreview;
 	resolve: (approved: boolean) => void;
 }
 
@@ -390,7 +398,7 @@ function inlineEditDiffLines(
 				: line.kind === 'hunk'
 					? 'diffHunk'
 					: 'diffContext';
-		for (const [wrapIndex, text] of wrapViewportText(`  ${line.text}`, safeWidth).entries()) {
+		for (const [wrapIndex, text] of wrapViewportText(`  ${formatCliDiffLine(line)}`, safeWidth).entries()) {
 			lines.push({
 				key: `${entry.id}-inline-diff-${index}-${wrapIndex}`,
 				kind,
@@ -478,8 +486,33 @@ export function transcriptViewportLines(
 			const input = entry.detail && typeof entry.detail === 'object' && 'input' in entry.detail
 				? (entry.detail as { input?: unknown }).input
 				: undefined;
-			const detail = input === undefined ? entry.content : `${entry.content} · ${compact(input, 300)}`;
-			pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', `${marker} ${entry.toolName ?? 'tool'}  ${detail}`);
+			const toolInput = input as any;
+			const target = toolInput?.file_path ?? toolInput?.path
+				?? (entry.toolName === 'execute_command' ? toolInput?.command : undefined);
+			const label = ({
+				execute_command: 'Bash',
+				read_file: 'Read',
+				read_file_range: 'Read',
+				apply_edit: 'Update',
+				write_file: 'Write',
+				multi_file_replace: 'Update files',
+				search_workspace: 'Search',
+				grep_search: 'Search',
+				find_by_name: 'Find',
+				list_dir: 'List'
+			} as Record<string, string>)[entry.toolName ?? ''] ?? (entry.toolName ?? 'Tool').replace(/_/g, ' ');
+			const heading = target ? `${marker} ${label}(${compact(target, 140)})` : `${marker} ${label}`;
+			pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', heading);
+			const result = entry.detail && typeof entry.detail === 'object' && 'result' in entry.detail
+				? (entry.detail as { result?: any }).result
+				: undefined;
+			const resultDetail = typeof result?.output === 'string' && result.output.trim()
+				? result.output
+				: entry.content && entry.content !== 'completed' ? entry.content : '';
+			if (resultDetail) {
+				pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', `  └ ${compact(resultDetail, 800)}`);
+			}
+			lines.push(...inlineEditDiffLines(entry, safeWidth));
 		} else {
 			pushWrapped(entry, entry.kind === 'error' ? 'error' : 'system', `  ${entry.content}`);
 		}
@@ -555,9 +588,9 @@ function TranscriptViewportLine({ line }: { line: ITranscriptViewportLine }) {
 		case 'error':
 			return <Text color={COLORS.danger}>{line.text}</Text>;
 		case 'diffAddition':
-			return <Text color={COLORS.success}>{line.text}</Text>;
+			return <Text color="#bbf7d0" backgroundColor="#153f2a">{line.text}</Text>;
 		case 'diffDeletion':
-			return <Text color={COLORS.danger}>{line.text}</Text>;
+			return <Text color="#fecaca" backgroundColor="#4a2028">{line.text}</Text>;
 		case 'diffHunk':
 			return <Text color={COLORS.warning}>{line.text}</Text>;
 		case 'diffHeader':
@@ -579,17 +612,18 @@ export function visibleDiffLines(file: ICliDiffFile, rows: number, scrollOffset:
 }
 
 function DiffLine({ line }: { line: ICliDiffLine }) {
+	const formatted = formatCliDiffLine(line);
 	switch (line.kind) {
 		case 'addition':
-			return <Text color={COLORS.success} wrap="truncate-end">{line.text || '+'}</Text>;
+			return <Text color="#bbf7d0" backgroundColor="#153f2a" wrap="truncate-end">{formatted || '+'}</Text>;
 		case 'deletion':
-			return <Text color={COLORS.danger} wrap="truncate-end">{line.text || '-'}</Text>;
+			return <Text color="#fecaca" backgroundColor="#4a2028" wrap="truncate-end">{formatted || '-'}</Text>;
 		case 'hunk':
-			return <Text color={COLORS.warning} wrap="truncate-end">{line.text}</Text>;
+			return <Text color={COLORS.warning} wrap="truncate-end">{formatted}</Text>;
 		case 'header':
-			return <Text color={COLORS.muted} wrap="truncate-end">{line.text}</Text>;
+			return <Text color={COLORS.muted} wrap="truncate-end">{formatted}</Text>;
 		default:
-			return <Text wrap="truncate-end">{line.text || ' '}</Text>;
+			return <Text color={COLORS.muted} wrap="truncate-end">{formatted || ' '}</Text>;
 	}
 }
 
@@ -642,6 +676,48 @@ function ApprovalBox({ approval, decide }: { approval: IPendingApproval; decide:
 			<Text color={COLORS.muted}>{approval.request.cwd}</Text>
 			<Text bold>{approval.request.command}</Text>
 			<Text><Text color={COLORS.success}>[y]</Text> once  <Text color={COLORS.accent}>[a]</Text> allow commands this session  <Text color={COLORS.danger}>[n]</Text> deny</Text>
+		</Box>
+	);
+}
+
+function EditApprovalBox({ approval, decide, maxDiffRows }: {
+	approval: IPendingEditApproval;
+	decide: (approved: boolean, session?: boolean) => void;
+	maxDiffRows: number;
+}) {
+	const [selected, setSelected] = useState(0);
+	useInput((input, key) => {
+		if (key.upArrow) {
+			setSelected(value => Math.max(0, value - 1));
+		} else if (key.downArrow) {
+			setSelected(value => Math.min(2, value + 1));
+		} else if (input === 'y') {
+			decide(true);
+		} else if (input === 'a') {
+			decide(true, true);
+		} else if (input === 'n' || key.escape) {
+			decide(false);
+		} else if (key.return) {
+			decide(selected !== 2, selected === 1);
+		}
+	});
+	const previewFiles = approval.preview?.files ?? [];
+	const diffRows = previewFiles.flatMap(file => [
+		{ kind: 'header' as const, text: `Edit file · ${file.path}  +${file.additions} -${file.deletions}` },
+		...file.lines.filter(line => line.kind !== 'header' && line.text !== '')
+	]).slice(0, Math.max(1, maxDiffRows));
+	const target = (approval.request.input as any)?.file_path ?? (approval.request.input as any)?.path;
+	return (
+		<Box borderStyle="round" borderColor={COLORS.accent} flexDirection="column" paddingX={1}>
+			<Text color={COLORS.accent} bold>{target ? `Edit ${String(target).split(/[\\/]/).at(-1)}` : 'Apply workspace edit'}</Text>
+			{diffRows.length > 0
+				? diffRows.map((line, index) => <DiffLine key={`${index}-${line.kind}-${line.text}`} line={line} />)
+				: <Text color={COLORS.muted}>{compact(approval.request.input, 300)}</Text>}
+			<Text bold>Apply this edit?</Text>
+			<Text inverse={selected === 0}>{selected === 0 ? '› ' : '  '}1. Yes</Text>
+			<Text inverse={selected === 1}>{selected === 1 ? '› ' : '  '}2. Yes, allow all edits this session</Text>
+			<Text inverse={selected === 2}>{selected === 2 ? '› ' : '  '}3. No</Text>
+			<Text color={COLORS.muted}>↑/↓ select · enter confirm · esc deny</Text>
 		</Box>
 	);
 }
@@ -723,9 +799,12 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const [status, setStatus] = useState('ready');
 	const [contextUsage, setContextUsage] = useState<number | undefined>();
 	const [approval, setApproval] = useState<IPendingApproval | undefined>();
+	const [editApproval, setEditApproval] = useState<IPendingEditApproval | undefined>();
 	const [modelTermination, setModelTermination] = useState<IModelTerminationNotice | undefined>();
 	const [allowCommandsForSession, setAllowCommandsForSession] = useState(false);
 	const allowCommandsRef = useRef(false);
+	const [allowEditsForSession, setAllowEditsForSession] = useState(false);
+	const allowEditsRef = useRef(false);
 	const [showSessions, setShowSessions] = useState(false);
 	const [models, setModels] = useState<string[] | undefined>();
 	const [mode, setMode] = useState<'execution' | 'planning'>('execution');
@@ -814,7 +893,26 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				type: 'image_url',
 				image_url: { url: attachment.dataUrl }
 			})),
-			approveTool: request => permissionPolicy.allowsTool(request),
+			approveTool: request => {
+				if (!permissionPolicy.allowsTool(request)) {
+					return false;
+				}
+				if (!permissionPolicy.requiresToolApproval(request) || allowEditsRef.current) {
+					return true;
+				}
+				let preview: ICliEditPreview | undefined;
+				try {
+					preview = createEditPreview(args.cwd, request);
+				} catch {
+					// Approval remains available with the structured tool input when a
+					// local preview cannot be computed safely.
+				}
+				return new Promise<boolean>(resolve => setEditApproval({
+					request,
+					preview,
+					resolve
+				}));
+			},
 			approveCommand: request => {
 				if (permissionPolicy.allowsCommandWithoutPrompt() || allowCommandsRef.current) {
 					return Promise.resolve(true);
@@ -856,6 +954,16 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		}
 		const pending = approval;
 		setApproval(undefined);
+		pending?.resolve(approved);
+	};
+
+	const decideEditApproval = (approved: boolean, forSession = false) => {
+		if (forSession && approved) {
+			allowEditsRef.current = true;
+			setAllowEditsForSession(true);
+		}
+		const pending = editApproval;
+		setEditApproval(undefined);
 		pending?.resolve(approved);
 	};
 
@@ -1003,6 +1111,8 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		setShowSessions(false);
 		setAllowCommandsForSession(false);
 		allowCommandsRef.current = false;
+		setAllowEditsForSession(false);
+		allowEditsRef.current = false;
 		createRuntime(next);
 		setStatus('resumed');
 	};
@@ -1039,7 +1149,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const submit = async (raw: string) => {
 		const value = raw.trim();
 		setInput('');
-		if (!value || running || approval) {
+		if (!value || running || approval || editApproval) {
 			return;
 		}
 		if (value === '/exit' || value === '/quit') {
@@ -1161,6 +1271,10 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				return;
 			}
 			setPermissionMode(requested);
+			setAllowEditsForSession(false);
+			allowEditsRef.current = false;
+			setAllowCommandsForSession(false);
+			allowCommandsRef.current = false;
 			args.permissionMode = requested;
 			args.permissionSpecified = true;
 			createRuntime(sessionRef.current, requested);
@@ -1287,7 +1401,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			}
 			return;
 		}
-		if (approval || showSessions || models) {
+		if (approval || editApproval || showSessions || models) {
 			return;
 		}
 		const paletteSize = commandItems.length;
@@ -1337,39 +1451,37 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const viewportRows = Math.max(1, stdout.rows ?? 30);
 	const viewportColumns = Math.max(20, stdout.columns ?? 80);
 	const contentWidth = Math.max(8, viewportColumns - 2);
+	const editPreviewRows = Math.max(3, Math.min(14, viewportRows - 16));
 	const overlayRows = approval
 		? 7
-		: showSessions
-			? Math.min(10, store.list().length) + 3
-			: models
-				? Math.min(10, models.length) + 3
-				: !diffReviews && commandItems.length > 0
-					? Math.min(10, commandItems.length) + 3
-					: 0;
+		: editApproval
+			? editPreviewRows + 7
+			: showSessions
+				? Math.min(10, store.list().length) + 3
+				: models
+					? Math.min(10, models.length) + 3
+					: !diffReviews && commandItems.length > 0
+						? Math.min(10, commandItems.length) + 3
+						: 0;
 	const footerRows = Math.max(1, Math.ceil(FOOTER_HELP.length / viewportColumns));
 	const contentRows = Math.max(1, viewportRows - 9 - footerRows - overlayRows - (modelTermination ? 1 : 0));
 	const viewportEntries = useMemo<ICliTranscriptEntry[]>(() => {
-		if (showToolDetails) {
-			const toolEntries = transcript.filter(entry => entry.kind === 'tool');
-			return [
-				transcriptEntry('system', `Tool activity · ${toolEntries.length} call${toolEntries.length === 1 ? '' : 's'} · Ctrl+O return`),
-				...toolEntries
-			];
-		}
 		const entries = [...transcript];
 		if (running && liveText) {
 			entries.push({ id: 'live-answer', kind: 'assistant', content: liveText, timestamp: 0 });
 		}
 		return entries;
-	}, [transcript, running, liveText, showToolDetails]);
+	}, [transcript, running, liveText]);
 	const visibleLines = useMemo(
 		() => visibleTranscriptLines(viewportEntries, contentWidth, contentRows, scrollOffset, showToolDetails),
 		[viewportEntries, contentWidth, contentRows, scrollOffset, showToolDetails]
 	);
 	const activeDiffReview = diffReviews?.[Math.min(diffReviewIndex, diffReviews.length - 1)];
-	const contextStatus = `${contextUsage !== undefined ? `context ${Math.round(contextUsage)}%` : ''}`
-		+ `${contextUsage !== undefined && allowCommandsForSession ? ' · ' : ''}`
-		+ `${allowCommandsForSession ? 'commands allowed' : ''}`;
+	const contextStatus = [
+		contextUsage !== undefined ? `context ${Math.round(contextUsage)}%` : '',
+		allowCommandsForSession ? 'commands allowed' : '',
+		allowEditsForSession ? 'edits allowed' : ''
+	].filter(Boolean).join(' · ');
 	const headerModeLabel = formatHeaderModeLabel(mode);
 
 	return (
@@ -1416,17 +1528,18 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			</Box>
 
 			{approval && <ApprovalBox approval={approval} decide={decideApproval} />}
+			{editApproval && <EditApprovalBox approval={editApproval} decide={decideEditApproval} maxDiffRows={editPreviewRows} />}
 			{showSessions && <SessionPicker sessions={store.list()} onSelect={switchSession} onCancel={() => setShowSessions(false)} />}
 			{models && <ModelPicker models={models} current={args.model} onSelect={switchModel} onCancel={() => setModels(undefined)} />}
-			{!approval && !showSessions && !models && !modelTermination && !diffReviews && commandItems.length > 0 && (
+			{!approval && !editApproval && !showSessions && !models && !modelTermination && !diffReviews && commandItems.length > 0 && (
 				<CommandPalette items={commandItems} selected={visibleCommandSelection} />
 			)}
 
-			{!approval && !showSessions && !models && modelTermination && (
+			{!approval && !editApproval && !showSessions && !models && modelTermination && (
 				<ModelTerminationNotice message={modelTermination.message} />
 			)}
 
-			{!approval && !showSessions && !models && !modelTermination && (
+			{!approval && !editApproval && !showSessions && !models && !modelTermination && (
 				<Box borderStyle="round" borderColor={running ? COLORS.muted : COLORS.accent} paddingX={1}>
 					{diffReviews
 						? <Text color={COLORS.muted}>←/→ view · ↑/↓ file · j/k scroll · PgUp/PgDn page · Esc close</Text>
@@ -1436,21 +1549,15 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 							<Text color={COLORS.muted}> · Esc to cancel</Text>
 						</>
 						: <>
-							<Text color={COLORS.accent}>{showToolDetails ? '' : '❯ '}</Text>
+							<Text color={COLORS.accent}>❯ </Text>
 							<PromptInput
-								value={showToolDetails ? '' : input}
-								focus={!showToolDetails && !diffReviews}
+								value={input}
+								focus={!diffReviews}
 								onChange={value => {
-									if (showToolDetails) {
-										return;
-									}
 									setInput(value);
 									setCommandSelection(0);
 								}}
 								onSubmit={value => {
-									if (showToolDetails) {
-										return;
-									}
 									const selected = commandItems[visibleCommandSelection];
 									if (selected) {
 										const selection = commandPaletteSelection(selected);
@@ -1464,9 +1571,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 									}
 									void submit(value);
 								}}
-								placeholder={showToolDetails
-									? 'Tool activity · Ctrl+O return · PgUp/PgDn scroll'
-									: 'Ask CleanSlate…'}
+								placeholder="Ask CleanSlate…"
 							/>
 						</>}
 				</Box>

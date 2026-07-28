@@ -10,7 +10,7 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import type { ICliTranscriptEntry } from '../sessions.js';
-import { CliWorkspaceReview, cliTurnDiffReviews, parseCliDiffFile } from '../workspaceReview.js';
+import { CliWorkspaceReview, cliTurnDiffReviews, formatCliDiffLine, parseCliDiffFile } from '../workspaceReview.js';
 
 function git(root: string, args: string[]): void {
 	const result = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
@@ -84,6 +84,7 @@ test('workspace review reconstructs per-turn edit diffs from saved tool results'
 	assert.match(reviews[0].label, /remove the footer/);
 	assert.equal(reviews[0].deletions, 1);
 	assert.equal(reviews[0].files[0].lines.at(-1)?.kind, 'deletion');
+	assert.equal(formatCliDiffLine(reviews[0].files[0].lines.at(-1)!), '   2 - Developed by The Wariend');
 });
 
 test('workspace review minimizes unchanged lines inside edit replacement blocks', () => {
