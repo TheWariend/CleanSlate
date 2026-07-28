@@ -15,6 +15,13 @@ CleanSlate is a fork of Visual Studio Code. The full license text is retained
 in vscode-fork/LICENSE.txt. CleanSlate is not affiliated with, endorsed by, or
 sponsored by Microsoft.
 
+@slate/sdk additionally vendors a set of base modules from Visual Studio Code
+into packages/slate-sdk/src/core/, so that the runtime can be consumed without
+an editor build. Each vendored file retains its original Microsoft copyright
+header and names its source path. The full list, the modules that were
+reimplemented instead of copied, and the reasons, are in
+packages/slate-sdk/VENDOR.md.
+
 --------------------------------------------------------------------------------
 
 opencode
