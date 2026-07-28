@@ -11,7 +11,7 @@ import {
 	CleanSlateNodeAgentRuntime,
 	createNodeProviderConfiguration
 } from '@slate/sdk';
-import { ICliArguments } from './argv.js';
+import { apiKeyFromEnvironment, ICliArguments, SUPPORTED_PROVIDERS } from './argv.js';
 import {
 	CliSessionStore,
 	ICliSession,
@@ -458,7 +458,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		if (value === '/help') {
-			append(transcriptEntry('system', '/new · /sessions · /resume <id> · /models · /model <id> · /mode plan|execution · /plan <task> · /clear · /exit'));
+			append(transcriptEntry('system', '/new · /sessions · /resume <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /mode plan|execution · /plan <task> · /clear · /exit'));
 			return;
 		}
 		if (value === '/new') {
@@ -480,6 +480,45 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		}
 		if (value.startsWith('/model ')) {
 			switchModel(value.slice('/model '.length).trim());
+			return;
+		}
+		if (value.startsWith('/provider ')) {
+			const [providerName, ...modelParts] = value.slice('/provider '.length).trim().split(/\s+/);
+			const provider = providerName?.toLowerCase() === 'azure' || providerName?.toLowerCase() === 'azureopenai'
+				? 'azureOpenAI'
+				: providerName?.toLowerCase();
+			const model = modelParts.join(' ').trim();
+			if (!SUPPORTED_PROVIDERS.includes(provider as any) || !model) {
+				append(transcriptEntry('error', `Use /provider <name> <model>. Providers: ${SUPPORTED_PROVIDERS.join(', ')}`));
+				return;
+			}
+			const apiKey = apiKeyFromEnvironment(provider as any, process.env);
+			if (provider !== 'bedrock' && provider !== 'custom' && !apiKey) {
+				append(transcriptEntry('error', `Set the ${provider} API-key environment variable before switching providers.`));
+				return;
+			}
+			persist();
+			args.provider = provider as any;
+			args.model = model;
+			args.apiKey = apiKey;
+			sessionRef.current.provider = provider;
+			sessionRef.current.model = model;
+			setSession({ ...sessionRef.current });
+			createRuntime(sessionRef.current);
+			onConfigurationChange?.(args);
+			append(transcriptEntry('system', `Switched to ${provider}/${model}.`));
+			return;
+		}
+		if (value.startsWith('/reasoning ')) {
+			const reasoning = value.slice('/reasoning '.length).trim();
+			if (!['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(reasoning)) {
+				append(transcriptEntry('error', 'Reasoning must be none, minimal, low, medium, high, xhigh, or max.'));
+				return;
+			}
+			args.reasoningLevel = reasoning as ICliArguments['reasoningLevel'];
+			createRuntime(sessionRef.current);
+			onConfigurationChange?.(args);
+			append(transcriptEntry('system', `Reasoning level set to ${reasoning}.`));
 			return;
 		}
 		if (value.startsWith('/mode ')) {
@@ -505,7 +544,10 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		if (value === '/clear') {
+			runtimeRef.current?.clearConversation();
+			sessionRef.current.runtimeSnapshot = undefined;
 			replaceTranscript(() => []);
+			setContextUsage(undefined);
 			return;
 		}
 		await executeTask(value);

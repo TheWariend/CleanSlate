@@ -55,6 +55,8 @@ Run `cleanslate` in a terminal to open the TUI. Useful commands:
 - `/resume <id>` — resume a specific session
 - `/models` — fetch and select a provider model
 - `/model <id>` — switch directly to a model
+- `/provider <name> <model>` — switch provider and model using environment credentials
+- `/reasoning <level>` — change reasoning effort without restarting
 - `/mode plan` or `/mode execution` — switch agent phase
 - `/plan <task>` — run one turn with write tools filtered
 - `/clear` — clear the visible transcript
