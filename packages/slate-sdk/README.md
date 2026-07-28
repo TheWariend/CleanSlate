@@ -22,12 +22,37 @@ Node 20 or later.
 
 - **The execution loop** — turn management, budgets, an evidence ledger, and the
   completion boundary that decides when a task is actually finished.
-- **The tools** — reading, searching, editing, running commands, browser
-  automation, MCP, skills.
+- **59 tools**, listed below.
 - **The edit engine** — exact-string matching with anchors, version guards and
   atomic multi-file application.
 - **A Node host** — filesystem-backed text models and child-process commands, so
   the runtime works with no editor present.
+
+## The tools
+
+`ALL_TOOLS` exports 59 tools. Availability depends on what the host provides —
+a surface with no browser has no browser tools.
+
+| Group | Count | Tools |
+| --- | --- | --- |
+| Discovery | 12 | `read_file`, `read_file_range`, `semantic_search`, `search_workspace`, `search_codebase`, `find_by_name`, `grep_search`, `web_search`, `web_fetch`, `list_dir`, `read_lints`, `find_references` |
+| Browser | 26 | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_type`, `browser_key`, `browser_scroll`, `browser_screenshot`, `browser_diagnostics`, tab and annotation control, … |
+| System | 8 | `spawn_worker`, `list_skills`, `mcp_list_tools`, `mcp_call_tool`, `read_reference`, `update_todo`, `ask_question`, `submit_artifact` |
+| Edit | 4 | `apply_edit`, `multi_file_replace`, `write_file`, `file_history_rewind` |
+| Execution | 4 | `execute_command`, `start_background_command`, `read_background_command`, `stop_background_command` |
+| Symbols | 3 | `read_symbols`, `get_definitions`, `undo_edit` |
+| Context | 1 | `get_open_files` |
+| Creation | 1 | `create_multiple_files` |
+
+```js
+import { ALL_TOOLS, getToolByName } from '@slate/sdk';
+
+ALL_TOOLS.length;                  // 59
+getToolByName('multi_file_replace');
+```
+
+Every command-running tool passes through the host's approval gate first, which
+refuses by default.
 
 ## Shape
 
