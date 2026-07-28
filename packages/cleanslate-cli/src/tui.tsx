@@ -24,6 +24,7 @@ import {
 } from './workspaceReview.js';
 import { CliPermissionMode, CliPermissionPolicy } from './permissions.js';
 import { getCleanSlateWorkspaceStorageHome } from './config.js';
+import { isTerminalMouseEvent, terminalMouseWheelDirection } from './terminalScreen.js';
 import {
 	CliSessionStore,
 	ICliSession,
@@ -125,7 +126,8 @@ function PromptInput(props: {
 	}, [value]);
 
 	useInput((input, key) => {
-		if ((key.ctrl && (input === 'c' || input === 'o'))
+		if (isTerminalMouseEvent(input)
+			|| (key.ctrl && (input === 'c' || input === 'o'))
 			|| key.tab
 			|| key.escape
 			|| key.upArrow
@@ -1171,9 +1173,14 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	};
 
 	useInput((inputValue, key) => {
+		const wheelDirection = terminalMouseWheelDirection(inputValue);
 		if (diffReviews) {
 			const activeReview = diffReviews[diffReviewIndex];
-			if (key.escape || inputValue === 'q') {
+			if (wheelDirection < 0) {
+				setDiffScrollOffset(value => Math.max(0, value - 3));
+			} else if (wheelDirection > 0) {
+				setDiffScrollOffset(value => value + 3);
+			} else if (key.escape || inputValue === 'q') {
 				setDiffReviews(undefined);
 				setDiffReviewIndex(0);
 				setDiffFileIndex(0);
@@ -1207,7 +1214,13 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		const paletteSize = commandItems.length;
-		if (inputValue === 'o' && key.ctrl) {
+		if (wheelDirection < 0) {
+			setScrollOffset(value => value + 3);
+		} else if (wheelDirection > 0) {
+			setScrollOffset(value => Math.max(0, value - 3));
+		} else if (isTerminalMouseEvent(inputValue)) {
+			return;
+		} else if (inputValue === 'o' && key.ctrl) {
 			setShowToolDetails(value => !value);
 			setScrollOffset(0);
 		} else if (key.tab && key.shift && !running) {
