@@ -25,3 +25,13 @@ test('final answer chunks remain live and finish in the answer lane', () => {
 	assert.deepEqual(buffer.appendText('is complete.'), { reasoning: '', text: 'The fix is complete.' });
 	assert.deepEqual(buffer.finish(), { reasoning: '', answer: 'The fix is complete.' });
 });
+
+test('commentary and final answer phases keep a visible paragraph boundary', () => {
+	const buffer = new LiveTurnBuffer();
+	buffer.appendText('I found the matching footer.', 'commentary');
+	assert.deepEqual(
+		buffer.appendText('Removed it successfully.', 'final_answer'),
+		{ reasoning: '', text: 'I found the matching footer.\n\nRemoved it successfully.' }
+	);
+	assert.equal(buffer.finish().answer, 'I found the matching footer.\n\nRemoved it successfully.');
+});

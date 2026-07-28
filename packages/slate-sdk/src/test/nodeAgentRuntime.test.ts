@@ -72,7 +72,7 @@ describe('CleanSlateNodeAgentRuntime', () => {
 		(runtime as any).mainService.openAICompatibleChatStream = () => {
 			const emitter = new Emitter<any>();
 			setTimeout(() => {
-				emitter.fire('data: {"type":"text","content":"All done."}\n\n');
+				emitter.fire('data: {"type":"text","content":"All done.","phase":"final_answer"}\n\n');
 				emitter.fire(null);
 			}, 0);
 			return emitter.event;
@@ -84,7 +84,7 @@ describe('CleanSlateNodeAgentRuntime', () => {
 		}
 
 		assert.equal(runtime.getAvailableToolCount(), 59);
-		assert.equal(parts.some(part => part.type === 'chat_text' && part.content === 'All done.'), true);
+		assert.equal(parts.some(part => part.type === 'chat_text' && part.content === 'All done.' && part.kind === 'final_answer'), true);
 		assert.equal(parts.some(part => part.type === 'task_complete'), true);
 		runtime.dispose();
 	});

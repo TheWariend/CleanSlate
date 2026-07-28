@@ -356,7 +356,13 @@ export class CleanSlateExecutionQueryEngine {
                     // Every normal text block renders, even when a tool call
                     // follows it. Phase is presentation metadata, never
                     // permission for the host to discard assistant text.
-                    yield { type: 'chat_text', content: part.content };
+                    yield {
+                        type: 'chat_text',
+                        content: part.content,
+                        kind: part.phase === 'commentary'
+                            ? 'commentary'
+                            : part.phase === 'final_answer' ? 'final_answer' : 'assistant'
+                    };
                 } else if (part.type === 'tool_call') {
                     const streamedToolCall = this.parseStreamedToolCall(part.call, toolCallLedger);
                     if (streamedToolCall) {

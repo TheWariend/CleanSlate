@@ -14,7 +14,7 @@ export type CleanSlateStreamPart =
     | { type: 'text'; content: string }
     | { type: 'reasoning'; content: string }
     | { type: 'reasoning_reset' }
-    | { type: 'chat_text'; content: string; kind?: 'assistant' | 'model_terminated_pause' }
+    | { type: 'chat_text'; content: string; kind?: 'assistant' | 'commentary' | 'final_answer' | 'model_terminated_pause' }
     | { type: 'chat_text_reset' }
     | { type: 'transport_status'; status: ICleanSlateTransportStatus }
     | { type: 'tool_start'; toolName: string; input: any; toolCallId?: string }

@@ -14,7 +14,7 @@ import {
 	terminalMouseWheelDirection
 } from '../terminalScreen.js';
 
-test('interactive TUI uses an alternate screen and restores terminal state', () => {
+test('interactive TUI preserves mouse selection while using an alternate screen', () => {
 	let output = '';
 	const events = new EventEmitter();
 	const stream = Object.assign(events, {
@@ -29,8 +29,10 @@ test('interactive TUI uses an alternate screen and restores terminal state', () 
 
 	assert.match(output, /\u001b\[\?1049h/);
 	assert.match(output, /\u001b\[\?1007h/);
-	assert.match(output, /\u001b\[\?1000h/);
-	assert.match(output, /\u001b\[\?1006h/);
+	assert.doesNotMatch(output, /\u001b\[\?1000h/);
+	assert.doesNotMatch(output, /\u001b\[\?1006h/);
+	assert.match(output, /\u001b\[\?1000l/);
+	assert.match(output, /\u001b\[\?1006l/);
 	assert.notEqual(console.log, originalLog);
 	clearInteractiveScreen(stream);
 	assert.match(output, /\u001b\[2J\u001b\[H/);

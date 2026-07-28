@@ -886,7 +886,7 @@ function ApprovalBox({ approval, decide, topRow }: {
 			{approval.request.reason && <Text>{approval.request.reason}</Text>}
 			<Text color={COLORS.muted}>{approval.request.cwd}</Text>
 			<Text bold>{approval.request.command}</Text>
-			<Text><Text color={COLORS.success}>[y]</Text> once  <Text color={COLORS.accent}>[a]</Text> allow commands this session  <Text color={COLORS.danger}>[n]</Text> deny  <Text color={COLORS.muted}>· click an option</Text></Text>
+			<Text><Text color={COLORS.success}>[y]</Text> once  <Text color={COLORS.accent}>[a]</Text> allow commands this session  <Text color={COLORS.danger}>[n]</Text> deny</Text>
 		</Box>
 	);
 }
@@ -955,7 +955,7 @@ function EditApprovalBox({ approval, decide, maxDiffRows, topRow }: {
 			<Text inverse={selected === 0}>{selected === 0 ? '› ' : '  '}1. Yes</Text>
 			<Text inverse={selected === 1}>{selected === 1 ? '› ' : '  '}2. Yes, allow all edits this session</Text>
 			<Text inverse={selected === 2}>{selected === 2 ? '› ' : '  '}3. No</Text>
-			<Text color={COLORS.muted}>↑/↓ select · j/k diff · enter confirm · click choose · esc deny</Text>
+			<Text color={COLORS.muted}>↑/↓ select · j/k diff · enter confirm · esc deny</Text>
 		</Box>
 	);
 }
@@ -1284,7 +1284,10 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 							setStatus('paused');
 							modelTerminated = true;
 						} else {
-							updateLiveText(liveTurnRef.current.appendText(part.content).text);
+							const phase = part.kind === 'commentary' || part.kind === 'final_answer'
+								? part.kind
+								: 'assistant';
+							updateLiveText(liveTurnRef.current.appendText(part.content, phase).text);
 						}
 						break;
 					case 'reasoning_reset':
