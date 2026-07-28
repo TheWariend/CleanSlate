@@ -142,7 +142,7 @@ function toolSummary(part: any): string {
 	return result?.success === false ? 'failed' : 'completed';
 }
 
-export type TranscriptViewportLineKind = 'blank' | 'user' | 'assistantLabel' | 'assistant' | 'reasoning' | 'tool' | 'toolError' | 'system' | 'error';
+export type TranscriptViewportLineKind = 'blank' | 'user' | 'assistant' | 'reasoning' | 'tool' | 'toolError' | 'system' | 'error';
 
 export interface ITranscriptViewportLine {
 	key: string;
@@ -180,14 +180,23 @@ export function transcriptViewportLines(entries: readonly ICliTranscriptEntry[],
 			lines.push({ key: `${entry.id}-${kind}-${index}`, kind, text });
 		}
 	};
+	const pushTurn = (entry: ICliTranscriptEntry, kind: 'user' | 'assistant', marker: string) => {
+		const continuationIndent = ' '.repeat(marker.length + 1);
+		for (const [index, text] of wrapViewportText(entry.content, Math.max(1, safeWidth - continuationIndent.length)).entries()) {
+			lines.push({
+				key: `${entry.id}-${kind}-${index}`,
+				kind,
+				text: `${index === 0 ? `${marker} ` : continuationIndent}${text}`
+			});
+		}
+	};
 	for (const entry of entries) {
 		if (entry.kind === 'user') {
 			lines.push({ key: `${entry.id}-space`, kind: 'blank', text: '' });
-			pushWrapped(entry, 'user', `you  ${entry.content}`);
+			pushTurn(entry, 'user', '❯');
 		} else if (entry.kind === 'assistant') {
 			lines.push({ key: `${entry.id}-space`, kind: 'blank', text: '' });
-			lines.push({ key: `${entry.id}-label`, kind: 'assistantLabel', text: 'cleanslate' });
-			pushWrapped(entry, 'assistant', entry.content || ' ');
+			pushTurn(entry, 'assistant', '●');
 		} else if (entry.kind === 'reasoning') {
 			continue;
 		} else if (entry.kind === 'tool') {
@@ -239,8 +248,6 @@ function TranscriptViewportLine({ line }: { line: ITranscriptViewportLine }) {
 			return <Text> </Text>;
 		case 'user':
 			return <Text color={COLORS.cyan} bold>{line.text}</Text>;
-		case 'assistantLabel':
-			return <Text color={COLORS.accent} bold>{line.text}</Text>;
 		case 'reasoning':
 			return <Text color={COLORS.muted}>{line.text}</Text>;
 		case 'tool':

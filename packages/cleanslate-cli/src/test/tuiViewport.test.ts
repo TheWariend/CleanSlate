@@ -24,6 +24,17 @@ test('TUI wraps transcript content into physical terminal rows', () => {
 	assert.match(lines.at(-1)?.text ?? '', /word-79/);
 });
 
+test('TUI uses compact turn markers without speaker labels', () => {
+	const lines = transcriptViewportLines([
+		entry('user', 'user', 'hello'),
+		entry('assistant', 'assistant', 'Hi! What can I help with?')
+	], 80);
+	const visibleText = lines.map(line => line.text).filter(Boolean);
+
+	assert.deepEqual(visibleText, ['❯ hello', '● Hi! What can I help with?']);
+	assert.equal(visibleText.some(line => /^(?:you|cleanslate)\b/i.test(line)), false);
+});
+
 test('TUI viewport never renders more rows than its content budget', () => {
 	const transcript = [
 		entry('assistant', 'assistant', Array.from({ length: 200 }, (_, index) => `token-${index}`).join(' '))
