@@ -442,13 +442,18 @@ function wrapViewportText(value: string, width: number): string[] {
 export function transcriptViewportLines(
 	entries: readonly ICliTranscriptEntry[],
 	width: number,
-	expandedToolGroupId?: string
+	showToolDetails = false
 ): ITranscriptViewportLine[] {
 	const safeWidth = Math.max(8, width);
 	const lines: ITranscriptViewportLine[] = [];
-	const pushWrapped = (entry: ICliTranscriptEntry, kind: TranscriptViewportLineKind, value: string) => {
+	const pushWrapped = (
+		entry: ICliTranscriptEntry,
+		kind: TranscriptViewportLineKind,
+		value: string,
+		segment = 'content'
+	) => {
 		for (const [index, text] of wrapViewportText(value, safeWidth).entries()) {
-			lines.push({ key: `${entry.id}-${kind}-${index}`, kind, text });
+			lines.push({ key: `${entry.id}-${segment}-${kind}-${index}`, kind, text });
 		}
 	};
 	const pushTurn = (entry: ICliTranscriptEntry, kind: 'user' | 'assistant', marker: string) => {
@@ -482,7 +487,7 @@ export function transcriptViewportLines(
 			list_dir: 'List'
 		} as Record<string, string>)[entry.toolName ?? ''] ?? (entry.toolName ?? 'Tool').replace(/_/g, ' ');
 		const heading = target ? `  ${marker} ${label}(${compact(target, 140)})` : `  ${marker} ${label}`;
-		pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', heading);
+		pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', heading, 'heading');
 		const result = entry.detail && typeof entry.detail === 'object' && 'result' in entry.detail
 			? (entry.detail as { result?: any }).result
 			: undefined;
@@ -490,7 +495,7 @@ export function transcriptViewportLines(
 			? result.output
 			: entry.content && entry.content !== 'completed' ? entry.content : '';
 		if (resultDetail) {
-			pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', `    └ ${compact(resultDetail, 800)}`);
+			pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', `    └ ${compact(resultDetail, 800)}`, 'result');
 		}
 		lines.push(...inlineEditDiffLines(entry, safeWidth));
 	};
@@ -501,18 +506,17 @@ export function transcriptViewportLines(
 			while (entries[entryIndex + 1]?.kind === 'tool') {
 				toolEntries.push(entries[++entryIndex]);
 			}
-			const expanded = expandedToolGroupId === entry.id;
-			const summaryEntry = { ...entry, id: `${entry.id}-group` };
-			pushWrapped(
-				summaryEntry,
-				toolEntries.every(item => item.status === 'failed') ? 'toolError' : 'tool',
-				`${expanded ? '▾' : '▸'} ${compactToolActivity(toolEntries)}`
-			);
-			if (expanded) {
+			if (showToolDetails) {
 				for (const toolEntry of toolEntries) {
 					pushExpandedTool(toolEntry);
 				}
 			} else {
+				const summaryEntry = { ...entry, id: `${entry.id}-group` };
+				pushWrapped(
+					summaryEntry,
+					toolEntries.every(item => item.status === 'failed') ? 'toolError' : 'tool',
+					`● ${compactToolActivity(toolEntries)}`
+				);
 				for (const toolEntry of toolEntries) {
 					lines.push(...inlineEditDiffLines(toolEntry, safeWidth));
 				}
@@ -539,9 +543,9 @@ export function visibleTranscriptLines(
 	width: number,
 	rows: number,
 	scrollOffset = 0,
-	expandedToolGroupId?: string
+	showToolDetails = false
 ): ITranscriptViewportLine[] {
-	const lines = transcriptViewportLines(entries, width, expandedToolGroupId);
+	const lines = transcriptViewportLines(entries, width, showToolDetails);
 	const safeRows = Math.max(1, rows);
 	const maxOffset = Math.max(0, lines.length - safeRows);
 	const offset = Math.max(0, Math.min(maxOffset, scrollOffset));
@@ -561,25 +565,6 @@ export function padTranscriptViewportLines(
 		text: ''
 	}));
 	return [...blanks, ...visible];
-}
-
-export function latestToolGroupId(entries: readonly ICliTranscriptEntry[]): string | undefined {
-	let latest: string | undefined;
-	let previousWasTool = false;
-	for (const entry of entries) {
-		if (entry.kind === 'tool' && !previousWasTool) {
-			latest = entry.id;
-		}
-		previousWasTool = entry.kind === 'tool';
-	}
-	return latest;
-}
-
-export function toggleLatestToolGroup(
-	current: string | undefined,
-	entries: readonly ICliTranscriptEntry[]
-): string | undefined {
-	return current !== undefined ? undefined : latestToolGroupId(entries);
 }
 
 export function formatActivityStatus(status: string): string {
@@ -857,7 +842,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const [models, setModels] = useState<string[] | undefined>();
 	const [mode, setMode] = useState<'execution' | 'planning'>('execution');
 	const [permissionMode, setPermissionMode] = useState<CliPermissionMode>(args.permissionMode);
-	const [expandedToolGroupId, setExpandedToolGroupId] = useState<string | undefined>();
+	const [showToolDetails, setShowToolDetails] = useState(false);
 	const [diffReviews, setDiffReviews] = useState<ICliDiffReview[] | undefined>();
 	const [diffReviewIndex, setDiffReviewIndex] = useState(0);
 	const [diffFileIndex, setDiffFileIndex] = useState(0);
@@ -1048,11 +1033,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 						updateLiveText(liveTurnRef.current.resetText().text);
 						break;
 					case 'tool_start':
-						const previousWasTool = sessionRef.current.transcript.at(-1)?.kind === 'tool';
-						const flushedWorkingTurn = flushWorkingTurn();
-						if (!previousWasTool || flushedWorkingTurn) {
-							setExpandedToolGroupId(undefined);
-						}
+						flushWorkingTurn();
 						append(transcriptEntry('tool', compact(part.input), {
 							id: part.toolCallId || undefined,
 							toolName: part.toolName,
@@ -1123,7 +1104,6 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		if (!runtime) {
 			return;
 		}
-		setExpandedToolGroupId(undefined);
 		append(transcriptEntry('user', task));
 		setModelTermination(undefined);
 		if (sessionRef.current.title === 'New session') {
@@ -1162,7 +1142,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		sessionRef.current = next;
 		setSession(next);
 		setTranscript(next.transcript);
-		setExpandedToolGroupId(undefined);
+		setShowToolDetails(false);
 		setShowSessions(false);
 		setAllowCommandsForSession(false);
 		allowCommandsRef.current = false;
@@ -1223,7 +1203,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		if (value === '/details') {
-			setExpandedToolGroupId(current => toggleLatestToolGroup(current, transcript));
+			setShowToolDetails(current => !current);
 			setScrollOffset(0);
 			return;
 		}
@@ -1382,7 +1362,6 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			setDiffReviewIndex(0);
 			setDiffFileIndex(0);
 			setDiffScrollOffset(0);
-			setExpandedToolGroupId(undefined);
 			return;
 		}
 		if (value === '/doctor') {
@@ -1472,7 +1451,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		} else if (isTerminalMouseEvent(inputValue)) {
 			return;
 		} else if (inputValue === 'o' && key.ctrl) {
-			setExpandedToolGroupId(current => toggleLatestToolGroup(current, transcript));
+			setShowToolDetails(current => !current);
 			setScrollOffset(0);
 		} else if (key.tab && key.shift && !running) {
 			const nextMode = nextInteractiveMode(mode);
@@ -1533,8 +1512,8 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		return entries;
 	}, [transcript, running, liveText]);
 	const visibleLines = useMemo(
-		() => visibleTranscriptLines(viewportEntries, contentWidth, contentRows, scrollOffset, expandedToolGroupId),
-		[viewportEntries, contentWidth, contentRows, scrollOffset, expandedToolGroupId]
+		() => visibleTranscriptLines(viewportEntries, contentWidth, contentRows, scrollOffset, showToolDetails),
+		[viewportEntries, contentWidth, contentRows, scrollOffset, showToolDetails]
 	);
 	const renderedLines = useMemo(
 		() => visibleLines.length > 0 ? padTranscriptViewportLines(visibleLines, contentRows) : [],

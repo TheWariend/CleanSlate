@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ICliTranscriptEntry } from '../sessions.js';
-import { formatActivityStatus, padTranscriptViewportLines, toggleLatestToolGroup, transcriptViewportLines, visibleTranscriptLines } from '../tui.js';
+import { formatActivityStatus, padTranscriptViewportLines, transcriptViewportLines, visibleTranscriptLines } from '../tui.js';
 
 function entry(id: string, kind: ICliTranscriptEntry['kind'], content: string): ICliTranscriptEntry {
 	return { id, kind, content, timestamp: 0 };
@@ -68,7 +68,7 @@ test('TUI keeps compact tool activity inline and expands every call on demand', 
 
 	const compact = transcriptViewportLines(tools, 100);
 	assert.deepEqual(compact.map(line => line.text), [
-		'▸ Searched ×2 · Read ×2 · Edited main.dart +2 -1 · Checked lints · 1 failed',
+		'● Searched ×2 · Read ×2 · Edited main.dart +2 -1 · Checked lints · 1 failed',
 		'  main.dart  +2 -1',
 		'  @@ -1,2 +1,3 @@',
 		'     1 - const oldValue = true;',
@@ -83,28 +83,28 @@ test('TUI keeps compact tool activity inline and expands every call on demand', 
 		'diffAddition'
 	]);
 
-	const expanded = transcriptViewportLines(tools, 100, tools[0].id);
-	assert.equal(expanded.length, 15);
-	assert.match(expanded[0].text, /^▾ Searched/);
-	assert.match(expanded[3].text, /Read\(lib\/main\.dart\)/);
-	assert.match(expanded[5].text, /× Read\(lib\/large\.dart\)/);
-	assert.match(expanded[7].text, /Update\(\/workspace\/lib\/main\.dart\)/);
-	assert.equal(expanded[10].kind, 'diffDeletion');
+	const expanded = transcriptViewportLines(tools, 100, true);
+	assert.equal(expanded.length, 14);
+	assert.equal(new Set(expanded.map(line => line.key)).size, expanded.length);
+	assert.match(expanded[2].text, /Read\(lib\/main\.dart\)/);
+	assert.match(expanded[4].text, /× Read\(lib\/large\.dart\)/);
+	assert.match(expanded[6].text, /Update\(\/workspace\/lib\/main\.dart\)/);
+	assert.equal(expanded[9].kind, 'diffDeletion');
 });
 
-test('TUI expands only the selected tool group', () => {
+test('TUI details mode expands tool groups without reordering the transcript', () => {
 	const transcript: ICliTranscriptEntry[] = [
 		{ ...entry('old-read', 'tool', 'old.dart'), toolName: 'read_file', status: 'completed' },
 		entry('answer', 'assistant', 'Done with the first task.'),
 		{ ...entry('new-read', 'tool', 'new.dart'), toolName: 'read_file', status: 'completed' }
 	];
 
-	const expanded = transcriptViewportLines(transcript, 100, 'new-read').map(line => line.text);
-	assert.equal(expanded.filter(line => line.includes('✓ Read')).length, 1);
-	assert.match(expanded[0], /^▸ Read/);
-	assert.equal(expanded.some(line => line === '  ✓ Read'), true);
-	assert.equal(toggleLatestToolGroup('old-read', transcript), undefined);
-	assert.equal(toggleLatestToolGroup(undefined, transcript), 'new-read');
+	const expanded = transcriptViewportLines(transcript, 100, true).map(line => line.text);
+	assert.equal(expanded.filter(line => line.includes('✓ Read')).length, 2);
+	assert.equal(expanded[0], '  ✓ Read');
+	assert.equal(expanded[2], '');
+	assert.equal(expanded[3], '↳ Done with the first task.');
+	assert.equal(expanded[4], '  ✓ Read');
 });
 
 test('TUI exposes active edit tools as editing activity', () => {
