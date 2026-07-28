@@ -83,13 +83,26 @@ test('TUI keeps compact tool activity inline and expands every call on demand', 
 		'diffAddition'
 	]);
 
-	const expanded = transcriptViewportLines(tools, 100, true);
+	const expanded = transcriptViewportLines(tools, 100, tools[0].id);
 	assert.equal(expanded.length, 15);
 	assert.match(expanded[0].text, /^▾ Searched/);
 	assert.match(expanded[3].text, /Read\(lib\/main\.dart\)/);
 	assert.match(expanded[5].text, /× Read\(lib\/large\.dart\)/);
 	assert.match(expanded[7].text, /Update\(\/workspace\/lib\/main\.dart\)/);
 	assert.equal(expanded[10].kind, 'diffDeletion');
+});
+
+test('TUI expands only the selected tool group', () => {
+	const transcript: ICliTranscriptEntry[] = [
+		{ ...entry('old-read', 'tool', 'old.dart'), toolName: 'read_file', status: 'completed' },
+		entry('answer', 'assistant', 'Done with the first task.'),
+		{ ...entry('new-read', 'tool', 'new.dart'), toolName: 'read_file', status: 'completed' }
+	];
+
+	const expanded = transcriptViewportLines(transcript, 100, 'new-read').map(line => line.text);
+	assert.equal(expanded.filter(line => line.includes('✓ Read')).length, 1);
+	assert.match(expanded[0], /^▸ Read/);
+	assert.equal(expanded.some(line => line === '  ✓ Read'), true);
 });
 
 test('TUI exposes active edit tools as editing activity', () => {
