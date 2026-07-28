@@ -6,7 +6,7 @@ the IDE UI or maintain a second agent implementation.
 ## Boundaries
 
 - `@slate/sdk` owns model transports, structured conversation state, execution
-  phases, tool protocols, edit safety, and the 59-tool registry.
+  phases, tool protocols, edit safety, and the shared tool registry.
 - `projectContext.ts` owns deterministic project instructions and explicit
   workspace-contained `@file` attachments.
 - `permissions.ts` owns host policy. The model cannot bypass this layer.

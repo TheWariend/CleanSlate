@@ -1,6 +1,6 @@
 # CleanSlate CLI
 
-CleanSlate is the terminal surface for the same native agent engine and 59-tool
+CleanSlate is the terminal surface for the same native agent engine and tool
 registry used by the CleanSlate IDE. It runs directly against a repository
 without building or launching the VS Code fork.
 

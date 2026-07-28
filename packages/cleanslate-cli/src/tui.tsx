@@ -889,7 +889,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				{visibleLines.length === 0 && (
 					<>
 						{contentRows >= 1 && <Text bold>What are we building?</Text>}
-						{contentRows >= 2 && <Text color={COLORS.muted}>Describe a task. CleanSlate has all 59 IDE-agent tools in this workspace.</Text>}
+						{contentRows >= 2 && <Text color={COLORS.muted}>Describe a task.</Text>}
 						{contentRows >= 3 && <Text color={COLORS.muted}>Type /help for commands.</Text>}
 					</>
 				)}

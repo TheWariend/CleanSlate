@@ -165,7 +165,7 @@ function createLogger(overrides: Partial<ICleanSlateLogger> = {}): ICleanSlateLo
 }
 
 /**
- * Wires CleanSlate's existing execution loop to the Node host and all 59 tools.
+ * Wires CleanSlate's existing execution loop to the Node host and complete tool registry.
  */
 export class CleanSlateNodeAgentRuntime {
 	private readonly rootPath: string;
