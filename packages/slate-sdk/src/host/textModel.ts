@@ -60,8 +60,28 @@ export interface IModelHost {
 	getModel(resource: URI): ISlateTextModel | null;
 }
 
-/** Persisting a model back to wherever it came from. */
+/** Reading a file as text, bypassing any open model. */
+export interface ITextFileContent {
+	value: string;
+	encoding?: string;
+	mtime?: number;
+	size?: number;
+}
+
+/**
+ * Persisting a model back to wherever it came from, and reading text directly.
+ *
+ * `files` exposes the host's model registry — the editor keeps loaded text
+ * files there, and tools consult it to find a model without forcing a load.
+ */
 export interface ITextFileHost {
 	save(resource: URI, options?: unknown): Promise<unknown>;
-	create?(operations: readonly { resource: URI; value: string; options?: { overwrite?: boolean } }[]): Promise<unknown>;
+	create(operations: readonly { resource: URI; value: string; options?: { overwrite?: boolean } }[]): Promise<unknown>;
+	read(resource: URI, options?: { acceptTextOnly?: boolean; encoding?: string }): Promise<ITextFileContent>;
+	files: {
+		get(resource: URI): { textEditorModel?: ISlateTextModel | null; isResolved?(): boolean } | undefined;
+		/** Loads the file into a model, so language features attach to it. */
+		resolve(resource: URI, options?: unknown): Promise<{ textEditorModel?: ISlateTextModel | null }>;
+		onDidResolve?: unknown;
+	};
 }

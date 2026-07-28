@@ -63,15 +63,17 @@ export function toFileOperationResult(error: unknown): FileOperationResult {
 }
 
 export interface IFileStat {
+	/** Always present — every entry a host reports has a location and a name. */
+	resource: URI;
+	name: string;
 	mtime: number;
 	size?: number;
 	ctime?: number;
 	etag?: string;
 	isDirectory?: boolean;
 	isFile?: boolean;
+	/** Present only when the entry is a directory that was resolved. */
 	children?: readonly IFileStat[];
-	resource?: URI;
-	name?: string;
 }
 
 export interface IFileContent {
@@ -86,5 +88,6 @@ export interface IFileHost {
 	writeFile(resource: URI, content: VSBuffer): Promise<unknown>;
 	del(resource: URI, options?: { useTrash?: boolean; recursive?: boolean }): Promise<void>;
 	createFolder(resource: URI): Promise<unknown>;
-	resolve?(resource: URI, options?: { resolveMetadata?: boolean }): Promise<IFileStat>;
+	/** Stats a path, listing children when it is a directory. */
+	resolve(resource: URI, options?: { resolveMetadata?: boolean }): Promise<IFileStat>;
 }

@@ -18,7 +18,7 @@ export interface IWorkspaceFolder {
 	name?: string;
 	index?: number;
 	/** Resolves a workspace-relative path against this folder. */
-	toResource?(relativePath: string): URI;
+	toResource(relativePath: string): URI;
 }
 
 export interface IWorkspace {
@@ -67,6 +67,8 @@ export interface ITextQuery {
 	previewOptions?: { matchLines?: number; charsPerLine?: number };
 	afterContext?: number;
 	beforeContext?: number;
+	/** Lines of context to return either side of a match. */
+	surroundingContext?: number;
 }
 
 export interface ISearchRange {
