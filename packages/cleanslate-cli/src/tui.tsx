@@ -50,41 +50,42 @@ interface IPendingApproval {
 
 const COLORS = {
 	accent: '#d4d4d8',
-	cyan: '#22d3ee',
 	muted: '#71717a',
 	success: '#22c55e',
 	danger: '#ef4444',
 	warning: '#f59e0b'
 };
 
-interface ICommandPaletteItem {
+export interface ICommandPaletteItem {
 	id: string;
 	label: string;
 	description: string;
+	requiresArguments?: boolean;
 }
 
 const COMMAND_PALETTE_ITEMS: readonly ICommandPaletteItem[] = [
 	{ id: '/plan', label: 'Plan mode', description: 'Turn planning mode on' },
-	{ id: '/fix', label: 'Fix', description: 'Fix bugs and root causes' },
-	{ id: '/explain', label: 'Explain', description: 'Explain relevant code' },
-	{ id: '/test', label: 'Test', description: 'Write comprehensive tests' },
-	{ id: '/rewrite', label: 'Rewrite', description: 'Improve code without changing behavior' },
-	{ id: '/doc', label: 'Document', description: 'Add documentation' },
-	{ id: '/review', label: 'Review', description: 'Review bugs, security, and quality' },
-	{ id: '/optimize', label: 'Optimize', description: 'Apply targeted performance improvements' },
-	{ id: '/scaffold', label: 'Scaffold', description: 'Scaffold a complete implementation' },
-	{ id: '/migrate', label: 'Migrate', description: 'Migrate code to a specified target' },
+	{ id: '/execute', label: 'Exit plan mode', description: 'Return to normal execution' },
+	{ id: '/fix', label: 'Fix', description: 'Fix bugs and root causes', requiresArguments: true },
+	{ id: '/explain', label: 'Explain', description: 'Explain relevant code', requiresArguments: true },
+	{ id: '/test', label: 'Test', description: 'Write comprehensive tests', requiresArguments: true },
+	{ id: '/rewrite', label: 'Rewrite', description: 'Improve code without changing behavior', requiresArguments: true },
+	{ id: '/doc', label: 'Document', description: 'Add documentation', requiresArguments: true },
+	{ id: '/review', label: 'Review', description: 'Review bugs, security, and quality', requiresArguments: true },
+	{ id: '/optimize', label: 'Optimize', description: 'Apply targeted performance improvements', requiresArguments: true },
+	{ id: '/scaffold', label: 'Scaffold', description: 'Scaffold a complete implementation', requiresArguments: true },
+	{ id: '/migrate', label: 'Migrate', description: 'Migrate code to a specified target', requiresArguments: true },
 	{ id: '/setup', label: 'Provider setup', description: 'Change provider, credentials, and model' },
 	{ id: '/models', label: 'Models', description: 'Browse models for the active provider' },
-	{ id: '/model', label: 'Set model', description: 'Switch directly to a model ID' },
-	{ id: '/provider', label: 'Set provider', description: 'Switch using a saved credential' },
-	{ id: '/reasoning', label: 'Reasoning', description: 'Set reasoning effort' },
-	{ id: '/mode', label: 'Mode', description: 'Switch planning or execution mode' },
-	{ id: '/permissions', label: 'Permissions', description: 'Switch read-only, default, or full mode' },
+	{ id: '/model', label: 'Set model', description: 'Switch directly to a model ID', requiresArguments: true },
+	{ id: '/provider', label: 'Set provider', description: 'Switch using a saved credential', requiresArguments: true },
+	{ id: '/reasoning', label: 'Reasoning', description: 'Set reasoning effort', requiresArguments: true },
+	{ id: '/mode', label: 'Mode', description: 'Switch planning or execution mode', requiresArguments: true },
+	{ id: '/permissions', label: 'Permissions', description: 'Switch read-only, default, or full mode', requiresArguments: true },
 	{ id: '/new', label: 'New session', description: 'Start a clean session' },
 	{ id: '/sessions', label: 'Sessions', description: 'Browse saved sessions' },
-	{ id: '/resume', label: 'Resume', description: 'Resume a session by ID' },
-	{ id: '/delete-session', label: 'Delete session', description: 'Delete a saved session by ID' },
+	{ id: '/resume', label: 'Resume', description: 'Resume a session by ID', requiresArguments: true },
+	{ id: '/delete-session', label: 'Delete session', description: 'Delete a saved session by ID', requiresArguments: true },
 	{ id: '/status', label: 'Status', description: 'Show provider and execution status' },
 	{ id: '/context', label: 'Context', description: 'Show loaded project instructions and attached files' },
 	{ id: '/changes', label: 'Changes', description: 'Show the current Git working tree' },
@@ -96,6 +97,12 @@ const COMMAND_PALETTE_ITEMS: readonly ICommandPaletteItem[] = [
 	{ id: '/exit', label: 'Exit', description: 'Save and quit' }
 ];
 
+export function commandPaletteSelection(item: ICommandPaletteItem): { value: string; execute: boolean } {
+	return item.requiresArguments
+		? { value: `${item.id} `, execute: false }
+		: { value: item.id, execute: true };
+}
+
 const FOOTER_HELP = ' enter send · esc cancel · ctrl-c exit · pgup/pgdn scroll · / commands · /setup · /models';
 
 function CommandPalette({ items, selected }: { items: readonly ICommandPaletteItem[]; selected: number }) {
@@ -106,12 +113,12 @@ function CommandPalette({ items, selected }: { items: readonly ICommandPaletteIt
 			{items.slice(start, start + 10).map((item, offset) => {
 				const index = start + offset;
 				return <Text key={item.id} inverse={selected === index}>
-					{selected === index ? '› ' : '  '}<Text color={COLORS.cyan}>{item.id}</Text>
+					{selected === index ? '› ' : '  '}<Text color={COLORS.accent}>{item.id}</Text>
 					<Text>  {item.label}</Text>
 					<Text color={COLORS.muted}> — {item.description}</Text>
 				</Text>;
 			})}
-			<Text color={COLORS.muted}>↑/↓ select · enter insert · esc close</Text>
+			<Text color={COLORS.muted}>↑/↓ select · enter choose · esc close</Text>
 		</Box>
 	);
 }
@@ -247,7 +254,7 @@ function TranscriptViewportLine({ line }: { line: ITranscriptViewportLine }) {
 		case 'blank':
 			return <Text> </Text>;
 		case 'user':
-			return <Text color={COLORS.cyan} bold>{line.text}</Text>;
+			return <Text color={COLORS.accent} bold>{line.text}</Text>;
 		case 'reasoning':
 			return <Text color={COLORS.muted}>{line.text}</Text>;
 		case 'tool':
@@ -278,7 +285,7 @@ function ApprovalBox({ approval, decide }: { approval: IPendingApproval; decide:
 			{approval.request.reason && <Text>{approval.request.reason}</Text>}
 			<Text color={COLORS.muted}>{approval.request.cwd}</Text>
 			<Text bold>{approval.request.command}</Text>
-			<Text><Text color={COLORS.success}>[y]</Text> once  <Text color={COLORS.cyan}>[a]</Text> allow commands this session  <Text color={COLORS.danger}>[n]</Text> deny</Text>
+			<Text><Text color={COLORS.success}>[y]</Text> once  <Text color={COLORS.accent}>[a]</Text> allow commands this session  <Text color={COLORS.danger}>[n]</Text> deny</Text>
 		</Box>
 	);
 }
@@ -335,7 +342,7 @@ function ModelPicker({ models, current, onSelect, onCancel }: {
 	});
 	const start = Math.max(0, Math.min(selected - 5, models.length - 10));
 	return (
-		<Box borderStyle="round" borderColor={COLORS.cyan} flexDirection="column" paddingX={1} marginTop={1}>
+		<Box borderStyle="round" borderColor={COLORS.accent} flexDirection="column" paddingX={1} marginTop={1}>
 			<Text bold>Models · {models.length}</Text>
 			{models.slice(start, start + 10).map((model, offset) => {
 				const index = start + offset;
@@ -376,7 +383,8 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const commandItems = commandQuery === undefined
 		? []
 		: COMMAND_PALETTE_ITEMS.filter(item =>
-			item.id.slice(1).includes(commandQuery) || item.label.toLowerCase().includes(commandQuery));
+			(mode === 'planning' ? item.id !== '/plan' : item.id !== '/execute')
+			&& (item.id.slice(1).includes(commandQuery) || item.label.toLowerCase().includes(commandQuery)));
 	const visibleCommandSelection = Math.min(commandSelection, Math.max(0, commandItems.length - 1));
 
 	const persist = (nextTranscript?: ICliTranscriptEntry[]) => {
@@ -650,7 +658,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		if (value === '/help') {
-			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /delete-session <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /mode plan|execution · /permissions read-only|default|full · /context · /changes · /diff · /doctor · /logout · /clear · /exit'));
+			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /delete-session <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /plan · /execute · /permissions read-only|default|full · /context · /changes · /diff · /doctor · /logout · /clear · /exit'));
 			return;
 		}
 		if (value === '/new') {
@@ -744,6 +752,11 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			} else {
 				append(transcriptEntry('error', 'Use /mode plan or /mode execution.'));
 			}
+			return;
+		}
+		if (value === '/execute') {
+			setMode('execution');
+			append(transcriptEntry('system', 'Planning mode disabled.'));
 			return;
 		}
 		if (value === '/permissions') {
@@ -917,8 +930,8 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			)}
 
 			{!approval && !showSessions && !models && (
-				<Box borderStyle="round" borderColor={running ? COLORS.muted : COLORS.cyan} paddingX={1}>
-					<Text color={COLORS.cyan}>❯ </Text>
+				<Box borderStyle="round" borderColor={running ? COLORS.muted : COLORS.accent} paddingX={1}>
+					<Text color={COLORS.accent}>❯ </Text>
 					{running
 						? <>
 							<Text color={COLORS.warning}><Spinner type="line" /> {formatActivityStatus(status)}</Text>
@@ -933,8 +946,13 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 							onSubmit={value => {
 								const selected = commandItems[visibleCommandSelection];
 								if (selected) {
-									setInput(`${selected.id} `);
+									const selection = commandPaletteSelection(selected);
 									setCommandSelection(0);
+									if (selection.execute) {
+										void submit(selection.value);
+									} else {
+										setInput(selection.value);
+									}
 									return;
 								}
 								void submit(value);

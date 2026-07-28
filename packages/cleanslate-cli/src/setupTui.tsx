@@ -30,7 +30,6 @@ interface ISetupField {
 
 const COLORS = {
 	accent: '#d4d4d8',
-	cyan: '#22d3ee',
 	muted: '#71717a',
 	success: '#22c55e'
 };
@@ -183,7 +182,7 @@ export function CleanSlateSetupTui({ initialProvider, onComplete, onCancel }: {
 							<Text key={field.key} color={COLORS.muted}>✓ {field.label}</Text>
 						))}
 						<Box marginTop={1}>
-							<Text color={COLORS.cyan}>{activeField!.label}  </Text>
+							<Text color={COLORS.accent}>{activeField!.label}  </Text>
 							<TextInput
 								value={value}
 								onChange={setValue}
@@ -263,7 +262,7 @@ export function CleanSlateModelSetupTui({ provider, models, current, onComplete,
 								: uniqueModels.length === 0 ? 'The provider returned no model catalog. Enter a model ID.' : 'Enter a model ID manually.'}
 						</Text>
 						<Box>
-							<Text color={COLORS.cyan}>{provider === 'azureOpenAI' ? 'Deployment name  ' : 'Model ID  '}</Text>
+							<Text color={COLORS.accent}>{provider === 'azureOpenAI' ? 'Deployment name  ' : 'Model ID  '}</Text>
 							<TextInput value={manualModel} onChange={setManualModel} onSubmit={finish} placeholder={current || (provider === 'azureOpenAI' ? 'your Azure deployment' : 'provider model ID')} />
 						</Box>
 						{error && <Text color="red">{error}</Text>}
