@@ -32,6 +32,8 @@ Builds are signed and notarized.
 
 ### In the terminal
 
+![CleanSlate CLI](assets/screenshot-cli.png)
+
 The same agent runs without the editor:
 
 ```sh
