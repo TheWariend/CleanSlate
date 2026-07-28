@@ -48,9 +48,7 @@ const PROVIDER_LABELS: Record<CliProvider, string> = {
 	bedrock: 'AWS Bedrock'
 };
 
-const CREDENTIAL_STORAGE_DESCRIPTION = process.platform === 'darwin'
-	? 'macOS Keychain'
-	: '~/.cleanslate/credentials.json with owner-only permissions';
+const CREDENTIAL_STORAGE_DESCRIPTION = '~/.cleanslate/auth.json with owner-only permissions';
 
 function fieldsFor(provider: CliProvider): ISetupField[] {
 	if (provider === 'bedrock') {
@@ -62,8 +60,8 @@ function fieldsFor(provider: CliProvider): ISetupField[] {
 	if (provider === 'azureOpenAI') {
 		return [
 			{ key: 'azureEndpoint', label: 'Azure endpoint', placeholder: 'https://resource.openai.azure.com' },
-			{ key: 'apiKey', label: 'Azure API key', placeholder: `stored in ${CREDENTIAL_STORAGE_DESCRIPTION}`, secret: true },
-			{ key: 'azureApiVersion', label: 'API version', placeholder: 'leave blank for default', optional: true }
+			{ key: 'azureApiVersion', label: 'API version', placeholder: 'leave blank for default', optional: true },
+			{ key: 'apiKey', label: 'Azure API key', placeholder: `stored in ${CREDENTIAL_STORAGE_DESCRIPTION}`, secret: true }
 		];
 	}
 	if (provider === 'custom') {

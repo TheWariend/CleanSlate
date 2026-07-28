@@ -33,7 +33,7 @@ export class LiveTurnBuffer {
 	}
 
 	flushWorking(): string {
-		const working = `${this.reasoning}${this.reasoning && this.text ? '\n\n' : ''}${this.text}`.trim();
+		const working = this.text.trim();
 		this.clear();
 		return working;
 	}

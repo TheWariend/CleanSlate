@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
-import { CliProvider } from './argv.js';
+import { apiKeyFromEnvironment, CliPermissionMode, CliProvider } from './argv.js';
 
 export interface ICliConfig {
 	version: 1;
@@ -16,6 +16,7 @@ export interface ICliConfig {
 	baseUrl?: string;
 	reasoningLevel?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 	maxTurns?: number;
+	permissionMode?: CliPermissionMode;
 	bedrockRegion?: string;
 	bedrockProfile?: string;
 	azureEndpoint?: string;
@@ -57,37 +58,67 @@ export class CliConfigStore {
 	}
 }
 
-const KEYCHAIN_SERVICE = 'com.wariend.cleanslate.cli';
+interface IStoredApiCredential {
+	type: 'api';
+	key: string;
+}
 
 export class CliCredentialStore {
-	private readonly fallbackPath: string;
+	private readonly authPath: string;
+	private readonly legacyPath: string;
+	private readonly migrateMacKeychain: boolean;
 
-	constructor(
-		homePath: string = getCleanSlateHome(),
-		private readonly platform: NodeJS.Platform = process.platform,
-		private readonly runProcess: typeof spawnSync = spawnSync
-	) {
-		this.fallbackPath = path.join(homePath, 'credentials.json');
+	constructor(homePath?: string) {
+		const resolvedHome = homePath ?? getCleanSlateHome();
+		this.authPath = path.join(resolvedHome, 'auth.json');
+		this.legacyPath = path.join(resolvedHome, 'credentials.json');
+		this.migrateMacKeychain = homePath === undefined && process.platform === 'darwin';
 	}
 
 	get(provider: CliProvider): string | undefined {
-		if (this.platform === 'darwin') {
-			const result = this.runProcess('/usr/bin/security', [
+		try {
+			const values = JSON.parse(fs.readFileSync(this.authPath, 'utf8'));
+			const credential = values?.[provider];
+			const value = credential?.type === 'api' ? credential.key : credential;
+			if (typeof value === 'string' && value.trim()) {
+				return value;
+			}
+		} catch { /* no current credential file */ }
+		try {
+			const legacy = JSON.parse(fs.readFileSync(this.legacyPath, 'utf8'));
+			const value = legacy?.[provider];
+			if (typeof value === 'string' && value.trim()) {
+				this.set(provider, value);
+				return value;
+			}
+		} catch { /* no legacy credential */ }
+		if (this.migrateMacKeychain) {
+			const result = spawnSync('/usr/bin/security', [
 				'find-generic-password',
-				'-s', KEYCHAIN_SERVICE,
+				'-s', 'com.wariend.cleanslate.cli',
 				'-a', provider,
 				'-w'
 			], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
 			const value = result.status === 0 ? result.stdout.trim() : '';
-			return value || undefined;
+			if (value) {
+				this.set(provider, value);
+				return value;
+			}
 		}
-		try {
-			const values = JSON.parse(fs.readFileSync(this.fallbackPath, 'utf8'));
-			const value = values?.[provider];
-			return typeof value === 'string' && value.trim() ? value : undefined;
-		} catch {
-			return undefined;
+		return undefined;
+	}
+
+	resolve(
+		provider: CliProvider,
+		explicitCredential: string | undefined,
+		credentialSpecified: boolean,
+		env: NodeJS.ProcessEnv = process.env
+	): string | undefined {
+		if (credentialSpecified && explicitCredential) {
+			this.set(provider, explicitCredential);
+			return explicitCredential;
 		}
+		return this.get(provider) ?? apiKeyFromEnvironment(provider, env);
 	}
 
 	set(provider: CliProvider, credential: string): void {
@@ -95,27 +126,64 @@ export class CliCredentialStore {
 		if (!value) {
 			return;
 		}
-		if (this.platform === 'darwin') {
-			const result = this.runProcess('/usr/bin/security', [
-				'add-generic-password',
-				'-U',
-				'-s', KEYCHAIN_SERVICE,
-				'-a', provider,
-				'-w', value
-			], { encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] });
-			if (result.status !== 0) {
-				throw new Error(`Could not save the API key in macOS Keychain: ${result.stderr.trim()}`);
-			}
-			return;
-		}
-		let values: Record<string, string> = {};
+		let values: Record<string, IStoredApiCredential> = {};
 		try {
-			values = JSON.parse(fs.readFileSync(this.fallbackPath, 'utf8'));
+			const stored = JSON.parse(fs.readFileSync(this.authPath, 'utf8'));
+			if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+				values = stored;
+			}
 		} catch { /* first credential */ }
-		values[provider] = value;
-		fs.mkdirSync(path.dirname(this.fallbackPath), { recursive: true, mode: 0o700 });
-		const temporary = `${this.fallbackPath}.${process.pid}.tmp`;
+		values[provider] = { type: 'api', key: value };
+		fs.mkdirSync(path.dirname(this.authPath), { recursive: true, mode: 0o700 });
+		const temporary = `${this.authPath}.${process.pid}.tmp`;
 		fs.writeFileSync(temporary, `${JSON.stringify(values, null, 2)}\n`, { mode: 0o600 });
-		fs.renameSync(temporary, this.fallbackPath);
+		fs.renameSync(temporary, this.authPath);
+		fs.chmodSync(this.authPath, 0o600);
+	}
+
+	list(): CliProvider[] {
+		try {
+			const values = JSON.parse(fs.readFileSync(this.authPath, 'utf8'));
+			return Object.keys(values).filter((provider): provider is CliProvider =>
+				['cleanslate', 'openai', 'azureOpenAI', 'anthropic', 'gemini', 'grok', 'nvidia', 'openrouter', 'custom', 'bedrock'].includes(provider)
+			);
+		} catch {
+			return [];
+		}
+	}
+
+	remove(provider: CliProvider): boolean {
+		let removed = false;
+		try {
+			const values = JSON.parse(fs.readFileSync(this.authPath, 'utf8')) as Record<string, IStoredApiCredential>;
+			if (values?.[provider]) {
+				delete values[provider];
+				const temporary = `${this.authPath}.${process.pid}.tmp`;
+				fs.writeFileSync(temporary, `${JSON.stringify(values, null, 2)}\n`, { mode: 0o600 });
+				fs.renameSync(temporary, this.authPath);
+				fs.chmodSync(this.authPath, 0o600);
+				removed = true;
+			}
+		} catch { /* no current credential */ }
+		try {
+			const legacy = JSON.parse(fs.readFileSync(this.legacyPath, 'utf8')) as Record<string, string>;
+			if (legacy?.[provider]) {
+				delete legacy[provider];
+				const temporary = `${this.legacyPath}.${process.pid}.tmp`;
+				fs.writeFileSync(temporary, `${JSON.stringify(legacy, null, 2)}\n`, { mode: 0o600 });
+				fs.renameSync(temporary, this.legacyPath);
+				fs.chmodSync(this.legacyPath, 0o600);
+				removed = true;
+			}
+		} catch { /* no legacy credential */ }
+		if (this.migrateMacKeychain) {
+			const result = spawnSync('/usr/bin/security', [
+				'delete-generic-password',
+				'-s', 'com.wariend.cleanslate.cli',
+				'-a', provider
+			], { stdio: 'ignore' });
+			removed ||= result.status === 0;
+		}
+		return removed;
 	}
 }

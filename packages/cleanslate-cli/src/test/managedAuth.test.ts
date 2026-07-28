@@ -89,3 +89,17 @@ test('browser authentication opens TheWariend and polls the one-time device exch
 		'https://api.example.test/api/cleanslate/entitlements'
 	]);
 });
+
+test('browser authentication explains a missing server device-auth route', async () => {
+	const fetcher = (async () => Response.json({
+		message: 'The route api/auth/device could not be found.'
+	}, { status: 404 })) as typeof fetch;
+
+	await assert.rejects(
+		() => authenticateCleanSlateInBrowser({
+			env: { CLEANSLATE_API_BASE_URL: 'https://api.example.test/api' },
+			fetcher
+		}),
+		/server is missing the device-auth routes/
+	);
+});

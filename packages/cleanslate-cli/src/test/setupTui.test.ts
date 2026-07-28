@@ -17,5 +17,5 @@ test('provider setup loads a model picker after collecting provider configuratio
 		);
 	}
 	assert.deepEqual(providerSetupFieldKeys('nvidia'), ['apiKey']);
-	assert.deepEqual(providerSetupFieldKeys('azureOpenAI'), ['azureEndpoint', 'apiKey', 'azureApiVersion']);
+	assert.deepEqual(providerSetupFieldKeys('azureOpenAI'), ['azureEndpoint', 'azureApiVersion', 'apiKey']);
 });

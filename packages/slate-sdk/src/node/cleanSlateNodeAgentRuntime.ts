@@ -21,7 +21,8 @@ import {
 	ICleanSlateLogger,
 	ICleanSlateManagedAccount,
 	ICleanSlateManagedEntitlements,
-	ICleanSlatePendingAgentInteraction
+	ICleanSlatePendingAgentInteraction,
+	IChatMessagePart
 } from '../protocol/cleanSlateAI.js';
 import { CleanSlateService } from '../protocol/cleanSlateService.js';
 import { CleanSlateTaskSessionService, ICleanSlateTaskSessionSnapshot } from '../services/cleanSlateTaskSessionService.js';
@@ -41,6 +42,12 @@ export interface ICleanSlateNodeAgentRuntimeOptions {
 	fetcher?: typeof fetch;
 	logger?: Partial<ICleanSlateLogger>;
 	sessionId?: string;
+	/** Deterministic host context such as project instructions and @mentioned files. */
+	additionalContext?: string | ((task: string) => string | Promise<string>);
+	/** Host-owned permission policy evaluated before every native tool. */
+	approveTool?: (request: { toolName: string; category?: string; input: unknown }) => boolean | Promise<boolean>;
+	/** Multimodal parts explicitly attached by the host for a user turn. */
+	resolveAttachments?: (task: string) => IChatMessagePart[] | Promise<IChatMessagePart[]>;
 }
 
 export interface ICleanSlateNodeAgentSessionSnapshot {
@@ -190,6 +197,7 @@ export class CleanSlateNodeAgentRuntime {
 			cleanSlateService,
 			contextService: this.contextService,
 			approveCommand: options.approveCommand,
+			approveTool: options.approveTool,
 			onProgress: options.onProgress
 		});
 		const toolContext = this.headlessRuntime.getToolContext();
@@ -236,9 +244,14 @@ export class CleanSlateNodeAgentRuntime {
 		}
 		const mode = phase === AgentPhase.PLANNING ? 'Planning' : 'Execution';
 		const parsed = parseSlashCommand(objective, mode);
+		const promptText = `[CONTEXT]\n${await this.buildPromptContext(objective)}\n\nUser Request: ${parsed.userMessage}`;
+		const attachments = await this.options.resolveAttachments?.(objective) ?? [];
+		const userContent = attachments.length > 0
+			? [{ type: 'text' as const, text: promptText }, ...attachments]
+			: promptText;
 		const seedMessages = [
 			{ role: 'system' as const, content: parsed.systemInstruction },
-			{ role: 'user' as const, content: `[CONTEXT]\n${this.buildPromptContext()}\n\nUser Request: ${parsed.userMessage}` }
+			{ role: 'user' as const, content: userContent }
 		];
 		const messages = this.agentSession.hasMessages()
 			? this.agentSession.continueWithTurn(seedMessages, { objective, mode, phase })
@@ -347,11 +360,15 @@ export class CleanSlateNodeAgentRuntime {
 		void (context.mcpClientService as { dispose?: () => Promise<void> }).dispose?.();
 	}
 
-	private buildPromptContext(): string {
+	private async buildPromptContext(task = ''): Promise<string> {
+		const additional = typeof this.options.additionalContext === 'function'
+			? await this.options.additionalContext(task)
+			: this.options.additionalContext;
 		return [
 			`Workspace root: ${this.rootPath}`,
-			'This is a headless Node workspace. Use the available file, search, edit, and command tools to inspect and work in this repository.'
-		].join('\n');
+			'This is a headless Node workspace. Use the available file, search, edit, and command tools to inspect and work in this repository.',
+			additional?.trim()
+		].filter(Boolean).join('\n\n');
 	}
 
 	private workspaceIsEmpty(): boolean {

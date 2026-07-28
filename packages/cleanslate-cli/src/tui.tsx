@@ -14,6 +14,9 @@ import {
 import { apiKeyFromEnvironment, ICliArguments, SUPPORTED_PROVIDERS } from './argv.js';
 import { CleanSlateTerminalLogo } from './brand.js';
 import { LiveTurnBuffer } from './liveTurn.js';
+import { CliProjectContext } from './projectContext.js';
+import { CliWorkspaceReview } from './workspaceReview.js';
+import { CliPermissionMode, CliPermissionPolicy } from './permissions.js';
 import {
 	CliSessionStore,
 	ICliSession,
@@ -29,6 +32,8 @@ interface ITuiProps {
 	onConfigurationChange?: (args: ICliArguments) => void;
 	getCredential?: (provider: ICliArguments['provider']) => string | undefined;
 	onCredentialChange?: (provider: ICliArguments['provider'], credential: string) => void;
+	onCredentialRemove?: (provider: ICliArguments['provider']) => boolean;
+	onDoctor?: () => string;
 	onRequestSetup?: () => void;
 }
 
@@ -75,14 +80,23 @@ const COMMAND_PALETTE_ITEMS: readonly ICommandPaletteItem[] = [
 	{ id: '/provider', label: 'Set provider', description: 'Switch using a saved credential' },
 	{ id: '/reasoning', label: 'Reasoning', description: 'Set reasoning effort' },
 	{ id: '/mode', label: 'Mode', description: 'Switch planning or execution mode' },
+	{ id: '/permissions', label: 'Permissions', description: 'Switch read-only, default, or full mode' },
 	{ id: '/new', label: 'New session', description: 'Start a clean session' },
 	{ id: '/sessions', label: 'Sessions', description: 'Browse saved sessions' },
 	{ id: '/resume', label: 'Resume', description: 'Resume a session by ID' },
+	{ id: '/delete-session', label: 'Delete session', description: 'Delete a saved session by ID' },
 	{ id: '/status', label: 'Status', description: 'Show provider and execution status' },
+	{ id: '/context', label: 'Context', description: 'Show loaded project instructions and attached files' },
+	{ id: '/changes', label: 'Changes', description: 'Show the current Git working tree' },
+	{ id: '/diff', label: 'Diff', description: 'Review staged and unstaged changes' },
+	{ id: '/doctor', label: 'Doctor', description: 'Check the CLI, provider, workspace, and integrations' },
+	{ id: '/logout', label: 'Log out', description: 'Remove the saved credential for the active provider' },
 	{ id: '/clear', label: 'Clear', description: 'Clear conversation and transcript' },
 	{ id: '/help', label: 'Help', description: 'Show terminal commands' },
 	{ id: '/exit', label: 'Exit', description: 'Save and quit' }
 ];
+
+const FOOTER_HELP = ' enter send · esc cancel · ctrl-c exit · pgup/pgdn scroll · / commands · /setup · /models';
 
 function CommandPalette({ items, selected }: { items: readonly ICommandPaletteItem[]; selected: number }) {
 	const start = Math.max(0, Math.min(selected - 5, items.length - 10));
@@ -128,43 +142,113 @@ function toolSummary(part: any): string {
 	return result?.success === false ? 'failed' : 'completed';
 }
 
-function TranscriptItem({ entry }: { entry: ICliTranscriptEntry }) {
-	if (entry.kind === 'user') {
-		return (
-			<Box marginTop={1}>
-				<Text color={COLORS.cyan} bold>you  </Text>
-				<Text wrap="wrap">{entry.content}</Text>
-			</Box>
-		);
+export type TranscriptViewportLineKind = 'blank' | 'user' | 'assistantLabel' | 'assistant' | 'reasoning' | 'tool' | 'toolError' | 'system' | 'error';
+
+export interface ITranscriptViewportLine {
+	key: string;
+	kind: TranscriptViewportLineKind;
+	text: string;
+}
+
+function wrapViewportText(value: string, width: number): string[] {
+	const safeWidth = Math.max(1, width);
+	const result: string[] = [];
+	for (const sourceLine of value.replace(/\t/g, '  ').split('\n')) {
+		if (!sourceLine) {
+			result.push('');
+			continue;
+		}
+		let remaining = sourceLine;
+		while (remaining.length > safeWidth) {
+			let split = remaining.lastIndexOf(' ', safeWidth);
+			if (split <= 0) {
+				split = safeWidth;
+			}
+			result.push(remaining.slice(0, split).trimEnd());
+			remaining = remaining.slice(split).trimStart();
+		}
+		result.push(remaining);
 	}
-	if (entry.kind === 'assistant') {
-		return (
-			<Box marginTop={1} flexDirection="column">
-				<Text color={COLORS.accent} bold>cleanslate</Text>
-				<Text wrap="wrap">{entry.content || ' '}</Text>
-			</Box>
-		);
+	return result.length > 0 ? result : [''];
+}
+
+export function transcriptViewportLines(entries: readonly ICliTranscriptEntry[], width: number): ITranscriptViewportLine[] {
+	const safeWidth = Math.max(8, width);
+	const lines: ITranscriptViewportLine[] = [];
+	const pushWrapped = (entry: ICliTranscriptEntry, kind: TranscriptViewportLineKind, value: string) => {
+		for (const [index, text] of wrapViewportText(value, safeWidth).entries()) {
+			lines.push({ key: `${entry.id}-${kind}-${index}`, kind, text });
+		}
+	};
+	for (const entry of entries) {
+		if (entry.kind === 'user') {
+			lines.push({ key: `${entry.id}-space`, kind: 'blank', text: '' });
+			pushWrapped(entry, 'user', `you  ${entry.content}`);
+		} else if (entry.kind === 'assistant') {
+			lines.push({ key: `${entry.id}-space`, kind: 'blank', text: '' });
+			lines.push({ key: `${entry.id}-label`, kind: 'assistantLabel', text: 'cleanslate' });
+			pushWrapped(entry, 'assistant', entry.content || ' ');
+		} else if (entry.kind === 'reasoning') {
+			continue;
+		} else if (entry.kind === 'tool') {
+			const marker = entry.status === 'running' ? '●' : entry.status === 'failed' ? '×' : '✓';
+			pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', `${marker} ${entry.toolName ?? 'tool'}  ${entry.content}`);
+		} else {
+			pushWrapped(entry, entry.kind === 'error' ? 'error' : 'system', `  ${entry.content}`);
+		}
 	}
-	if (entry.kind === 'reasoning') {
-		return (
-			<Box>
-				<Text color={COLORS.muted}>  reasoning  {compact(entry.content, 240)}</Text>
-			</Box>
-		);
+	return lines;
+}
+
+export function visibleTranscriptLines(
+	entries: readonly ICliTranscriptEntry[],
+	width: number,
+	rows: number,
+	scrollOffset = 0
+): ITranscriptViewportLine[] {
+	const lines = transcriptViewportLines(entries, width);
+	const safeRows = Math.max(1, rows);
+	const maxOffset = Math.max(0, lines.length - safeRows);
+	const offset = Math.max(0, Math.min(maxOffset, scrollOffset));
+	const end = lines.length - offset;
+	return lines.slice(Math.max(0, end - safeRows), end);
+}
+
+export function formatActivityStatus(status: string): string {
+	switch (status) {
+		case 'thinking':
+			return 'Thinking…';
+		case 'cancelling':
+			return 'Cancelling…';
+		case 'compacting context':
+			return 'Organizing context…';
+		case 'waiting for answer':
+			return 'Waiting for answer…';
+		default:
+			return 'Working…';
 	}
-	if (entry.kind === 'tool') {
-		const color = entry.status === 'failed' ? COLORS.danger : entry.status === 'running' ? COLORS.warning : COLORS.success;
-		const marker = entry.status === 'running' ? '●' : entry.status === 'failed' ? '×' : '✓';
-		return (
-			<Box>
-				<Text color={color}>{marker} </Text>
-				<Text bold>{entry.toolName}</Text>
-				<Text color={COLORS.muted}>  {entry.content}</Text>
-			</Box>
-		);
+}
+
+function TranscriptViewportLine({ line }: { line: ITranscriptViewportLine }) {
+	switch (line.kind) {
+		case 'blank':
+			return <Text> </Text>;
+		case 'user':
+			return <Text color={COLORS.cyan} bold>{line.text}</Text>;
+		case 'assistantLabel':
+			return <Text color={COLORS.accent} bold>{line.text}</Text>;
+		case 'reasoning':
+			return <Text color={COLORS.muted}>{line.text}</Text>;
+		case 'tool':
+			return <Text color={COLORS.success}>{line.text}</Text>;
+		case 'toolError':
+		case 'error':
+			return <Text color={COLORS.danger}>{line.text}</Text>;
+		case 'system':
+			return <Text color={COLORS.muted}>{line.text}</Text>;
+		default:
+			return <Text>{line.text || ' '}</Text>;
 	}
-	const color = entry.kind === 'error' ? COLORS.danger : COLORS.muted;
-	return <Text color={color}>  {entry.content}</Text>;
 }
 
 function ApprovalBox({ approval, decide }: { approval: IPendingApproval; decide: (approved: boolean, session?: boolean) => void }) {
@@ -251,13 +335,12 @@ function ModelPicker({ models, current, onSelect, onCancel }: {
 	);
 }
 
-export function CleanSlateTui({ args, store, initialSession, initialTask, onConfigurationChange, getCredential, onCredentialChange, onRequestSetup }: ITuiProps) {
+export function CleanSlateTui({ args, store, initialSession, initialTask, onConfigurationChange, getCredential, onCredentialChange, onCredentialRemove, onDoctor, onRequestSetup }: ITuiProps) {
 	const { exit } = useApp();
 	const { stdout } = useStdout();
 	const [session, setSession] = useState(initialSession);
 	const sessionRef = useRef(initialSession);
 	const [transcript, setTranscript] = useState<ICliTranscriptEntry[]>(initialSession.transcript);
-	const [liveReasoning, setLiveReasoning] = useState('');
 	const [liveText, setLiveText] = useState('');
 	const liveTurnRef = useRef(new LiveTurnBuffer());
 	const [input, setInput] = useState('');
@@ -271,10 +354,13 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const [showSessions, setShowSessions] = useState(false);
 	const [models, setModels] = useState<string[] | undefined>();
 	const [mode, setMode] = useState<'execution' | 'planning'>('execution');
+	const [permissionMode, setPermissionMode] = useState<CliPermissionMode>(args.permissionMode);
 	const [scrollOffset, setScrollOffset] = useState(0);
 	const abortRef = useRef<AbortController | undefined>(undefined);
 	const runtimeRef = useRef<CleanSlateNodeAgentRuntime | undefined>(undefined);
 	const initialTaskStarted = useRef(false);
+	const projectContext = useMemo(() => new CliProjectContext(args.cwd), [args.cwd]);
+	const workspaceReview = useMemo(() => new CliWorkspaceReview(args.cwd), [args.cwd]);
 	const commandQuery = input.match(/^\/(\S*)$/)?.[1]?.toLowerCase();
 	const commandItems = commandQuery === undefined
 		? []
@@ -300,10 +386,6 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 
 	const append = (entry: ICliTranscriptEntry) => replaceTranscript(entries => [...entries, entry]);
 
-	const updateLiveReasoning = (value: string) => {
-		setLiveReasoning(value);
-	};
-
 	const updateLiveText = (value: string) => {
 		setLiveText(value);
 	};
@@ -311,26 +393,22 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const flushWorkingTurn = () => {
 		const working = liveTurnRef.current.flushWorking();
 		if (working) {
-			append(transcriptEntry('reasoning', working));
+			append(transcriptEntry('assistant', working));
 		}
-		updateLiveReasoning('');
 		updateLiveText('');
 	};
 
 	const finishResponse = () => {
-		const { reasoning, answer } = liveTurnRef.current.finish();
-		if (reasoning) {
-			append(transcriptEntry('reasoning', reasoning));
-		}
+		const { answer } = liveTurnRef.current.finish();
 		if (answer) {
 			append(transcriptEntry('assistant', answer));
 		}
-		updateLiveReasoning('');
 		updateLiveText('');
 	};
 
-	const createRuntime = (targetSession: ICliSession) => {
+	const createRuntime = (targetSession: ICliSession, activePermissionMode: CliPermissionMode = permissionMode) => {
 		runtimeRef.current?.dispose();
+		const permissionPolicy = new CliPermissionPolicy(activePermissionMode);
 		const runtime = new CleanSlateNodeAgentRuntime({
 			rootPath: args.cwd,
 			sessionId: targetSession.id,
@@ -349,8 +427,14 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				azureDeploymentName: args.model
 			}),
 			onManagedTokenRefresh: token => onCredentialChange?.('cleanslate', token),
+			additionalContext: task => projectContext.build(task),
+			resolveAttachments: task => projectContext.imageAttachments(task).map(attachment => ({
+				type: 'image_url',
+				image_url: { url: attachment.dataUrl }
+			})),
+			approveTool: request => permissionPolicy.allowsTool(request),
 			approveCommand: request => {
-				if (allowCommandsRef.current) {
+				if (permissionPolicy.allowsCommandWithoutPrompt() || allowCommandsRef.current) {
 					return Promise.resolve(true);
 				}
 				return new Promise<boolean>(resolve => setApproval({ request, resolve }));
@@ -399,19 +483,19 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			for await (const part of stream) {
 				switch (part.type) {
 					case 'assistant_turn_start':
-						setStatus(`thinking · turn ${part.turnIndex ?? ''}`.trim());
+						setStatus('thinking');
 						break;
 					case 'context_usage':
 						setContextUsage(part.percentage);
 						break;
 					case 'reasoning':
-						updateLiveReasoning(liveTurnRef.current.appendReasoning(part.content).reasoning);
+						liveTurnRef.current.appendReasoning(part.content);
 						break;
 					case 'chat_text':
 						updateLiveText(liveTurnRef.current.appendText(part.content).text);
 						break;
 					case 'reasoning_reset':
-						updateLiveReasoning(liveTurnRef.current.resetReasoning().reasoning);
+						liveTurnRef.current.resetReasoning();
 						break;
 					case 'chat_text_reset':
 						updateLiveText(liveTurnRef.current.resetText().text);
@@ -555,7 +639,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		if (value === '/help') {
-			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /mode plan|execution · /plan · /fix · /explain · /test · /rewrite · /doc · /review · /optimize · /scaffold · /migrate · /clear · /exit'));
+			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /delete-session <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /mode plan|execution · /permissions read-only|default|full · /context · /changes · /diff · /doctor · /logout · /clear · /exit'));
 			return;
 		}
 		if (value === '/new') {
@@ -569,6 +653,26 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		if (value.startsWith('/resume ')) {
 			const resumed = store.load(value.slice('/resume '.length).trim());
 			resumed ? switchSession(resumed) : append(transcriptEntry('error', 'Session not found.'));
+			return;
+		}
+		if (value.startsWith('/delete-session ')) {
+			const id = value.slice('/delete-session '.length).trim();
+			if (!id) {
+				append(transcriptEntry('error', 'Use /delete-session <id>.'));
+				return;
+			}
+			if (id === sessionRef.current.id) {
+				append(transcriptEntry('error', 'The active session cannot be deleted. Start or resume another session first.'));
+				return;
+			}
+			if (!store.load(id)) {
+				append(transcriptEntry('error', `Session not found: ${id}.`));
+				return;
+			}
+			const deleted = store.delete(id);
+			append(transcriptEntry(deleted ? 'system' : 'error', deleted
+				? `Deleted session ${id}.`
+				: `Could not delete session ${id}.`));
 			return;
 		}
 		if (value === '/models' || value === '/model') {
@@ -589,7 +693,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				append(transcriptEntry('error', `Use /provider <name> <model>. Providers: ${SUPPORTED_PROVIDERS.join(', ')}`));
 				return;
 			}
-			const apiKey = apiKeyFromEnvironment(provider as any, process.env) ?? getCredential?.(provider as any);
+			const apiKey = getCredential?.(provider as any) ?? apiKeyFromEnvironment(provider as any, process.env);
 			if (provider !== 'bedrock' && provider !== 'custom' && !apiKey) {
 				append(transcriptEntry('error', `No saved credential for ${provider}. Run cleanslate --setup to connect it.`));
 				return;
@@ -631,6 +735,24 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			}
 			return;
 		}
+		if (value === '/permissions') {
+			append(transcriptEntry('system', `Permission mode: ${permissionMode}. Use /permissions read-only|default|full.`));
+			return;
+		}
+		if (value.startsWith('/permissions ')) {
+			const requested = value.slice('/permissions '.length).trim() as CliPermissionMode;
+			if (!['read-only', 'default', 'full'].includes(requested)) {
+				append(transcriptEntry('error', 'Use /permissions read-only|default|full.'));
+				return;
+			}
+			setPermissionMode(requested);
+			args.permissionMode = requested;
+			args.permissionSpecified = true;
+			createRuntime(sessionRef.current, requested);
+			onConfigurationChange?.(args);
+			append(transcriptEntry('system', `Permission mode set to ${requested}.`));
+			return;
+		}
 		if (value === '/plan') {
 			setMode('planning');
 			append(transcriptEntry('system', 'Planning mode enabled. Write tools are filtered until the plan is complete.'));
@@ -643,6 +765,35 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		}
 		if (value === '/status') {
 			append(transcriptEntry('system', `Provider: ${args.provider} · Model: ${args.model} · Reasoning: ${args.reasoningLevel}`));
+			return;
+		}
+		if (value === '/context') {
+			const inventory = projectContext.inventory();
+			append(transcriptEntry('system', [
+				`Project instructions: ${inventory.instructionFiles.join(', ') || 'none'}`,
+				'Attach workspace files by mentioning them as @path/to/file in your prompt.',
+				`Context usage: ${contextUsage === undefined ? 'waiting for provider usage data' : `${Math.round(contextUsage)}%`}`
+			].join('\n')));
+			return;
+		}
+		if (value === '/changes') {
+			append(transcriptEntry('system', workspaceReview.summary()));
+			return;
+		}
+		if (value === '/diff') {
+			append(transcriptEntry('system', workspaceReview.diff().slice(0, 100_000)));
+			return;
+		}
+		if (value === '/doctor') {
+			append(transcriptEntry('system', onDoctor?.() ?? 'Doctor is unavailable.'));
+			return;
+		}
+		if (value === '/logout') {
+			const removed = onCredentialRemove?.(args.provider) ?? false;
+			args.apiKey = undefined;
+			append(transcriptEntry('system', removed
+				? `Removed the saved ${args.provider} credential. Run /setup to reconnect.`
+				: `No saved ${args.provider} credential was found.`));
 			return;
 		}
 		if (value === '/clear') {
@@ -679,20 +830,43 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				exit();
 			}
 		} else if (key.pageUp) {
-			setScrollOffset(value => Math.min(transcript.length, value + Math.max(5, Math.floor((stdout.rows ?? 30) / 2))));
+			setScrollOffset(value => value + Math.max(5, Math.floor((stdout.rows ?? 30) / 2)));
 		} else if (key.pageDown) {
 			setScrollOffset(value => Math.max(0, value - Math.max(5, Math.floor((stdout.rows ?? 30) / 2))));
 		}
 	});
 
-	const visibleCount = Math.max(8, Math.floor((stdout.rows ?? 30) - 12));
-	const visibleTranscript = useMemo(() => {
-		const end = Math.max(0, transcript.length - scrollOffset);
-		return transcript.slice(Math.max(0, end - visibleCount), end);
-	}, [transcript, visibleCount, scrollOffset]);
+	const viewportRows = Math.max(1, stdout.rows ?? 30);
+	const viewportColumns = Math.max(20, stdout.columns ?? 80);
+	const contentWidth = Math.max(8, viewportColumns - 2);
+	const overlayRows = approval
+		? 7
+		: showSessions
+			? Math.min(10, store.list().length) + 3
+			: models
+				? Math.min(10, models.length) + 3
+				: commandItems.length > 0
+					? Math.min(10, commandItems.length) + 3
+					: 0;
+	const footerRows = Math.max(1, Math.ceil(FOOTER_HELP.length / viewportColumns));
+	const contentRows = Math.max(1, viewportRows - 9 - footerRows - overlayRows);
+	const viewportEntries = useMemo<ICliTranscriptEntry[]>(() => {
+		const entries = [...transcript];
+		if (running && liveText) {
+			entries.push({ id: 'live-answer', kind: 'assistant', content: liveText, timestamp: 0 });
+		}
+		return entries;
+	}, [transcript, running, liveText]);
+	const visibleLines = useMemo(
+		() => visibleTranscriptLines(viewportEntries, contentWidth, contentRows, scrollOffset),
+		[viewportEntries, contentWidth, contentRows, scrollOffset]
+	);
+	const contextStatus = `${contextUsage !== undefined ? `context ${Math.round(contextUsage)}%` : ''}`
+		+ `${contextUsage !== undefined && allowCommandsForSession ? ' · ' : ''}`
+		+ `${allowCommandsForSession ? 'commands allowed' : ''}`;
 
 	return (
-		<Box flexDirection="column">
+		<Box flexDirection="column" height={viewportRows} overflow="hidden">
 			<Box borderStyle="round" borderColor={COLORS.accent} paddingX={1} justifyContent="space-between">
 				<Box alignItems="center">
 					<CleanSlateTerminalLogo />
@@ -701,39 +875,27 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 						<Text color={COLORS.muted}>agent terminal</Text>
 					</Box>
 				</Box>
-				<Text color={COLORS.muted}>{args.provider}/{args.model} · {mode}</Text>
+				<Box flexShrink={1}>
+					<Text color={COLORS.muted} wrap="truncate-middle">{args.provider}/{args.model} · {mode} · {permissionMode}</Text>
+				</Box>
 			</Box>
 
 			<Box paddingX={1} justifyContent="space-between">
-				<Text color={COLORS.muted}>{session.title} · {session.id.slice(0, 8)} · {args.cwd}</Text>
-				<Text color={running ? COLORS.warning : COLORS.success}>
-					{running && <Spinner type="line" />} {status}
-					{contextUsage !== undefined ? ` · context ${Math.round(contextUsage)}%` : ''}
-					{allowCommandsForSession ? ' · commands allowed' : ''}
-				</Text>
+				<Box flexGrow={1} flexShrink={1}>
+					<Text color={COLORS.muted} wrap="truncate-middle">{session.title} · {session.id.slice(0, 8)} · {args.cwd}</Text>
+				</Box>
+				{contextStatus && <Text color={COLORS.muted}> {contextStatus}</Text>}
 			</Box>
 
-			<Box flexDirection="column" paddingX={1} minHeight={8}>
-				{visibleTranscript.length === 0 && (
-					<Box flexDirection="column" marginTop={1}>
-						<Text bold>What are we building?</Text>
-						<Text color={COLORS.muted}>Describe a task. CleanSlate has all 59 IDE-agent tools in this workspace.</Text>
-						<Text color={COLORS.muted}>Type /help for commands.</Text>
-					</Box>
+			<Box flexDirection="column" paddingX={1} height={contentRows} overflow="hidden">
+				{visibleLines.length === 0 && (
+					<>
+						{contentRows >= 1 && <Text bold>What are we building?</Text>}
+						{contentRows >= 2 && <Text color={COLORS.muted}>Describe a task. CleanSlate has all 59 IDE-agent tools in this workspace.</Text>}
+						{contentRows >= 3 && <Text color={COLORS.muted}>Type /help for commands.</Text>}
+					</>
 				)}
-				{visibleTranscript.map(entry => <TranscriptItem key={entry.id} entry={entry} />)}
-				{running && liveReasoning && (
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={COLORS.warning} bold>thinking</Text>
-						<Text color={COLORS.muted} wrap="wrap">{liveReasoning}</Text>
-					</Box>
-				)}
-				{running && liveText && (
-					<Box flexDirection="column" marginTop={1}>
-						<Text color={COLORS.accent} bold>cleanslate</Text>
-						<Text wrap="wrap">{liveText}</Text>
-					</Box>
-				)}
+				{visibleLines.map(line => <TranscriptViewportLine key={line.key} line={line} />)}
 			</Box>
 
 			{approval && <ApprovalBox approval={approval} decide={decideApproval} />}
@@ -747,7 +909,10 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				<Box borderStyle="round" borderColor={running ? COLORS.muted : COLORS.cyan} paddingX={1}>
 					<Text color={COLORS.cyan}>❯ </Text>
 					{running
-						? <Text color={COLORS.muted}>Agent is working… press Esc to cancel</Text>
+						? <>
+							<Text color={COLORS.warning}><Spinner type="line" /> {formatActivityStatus(status)}</Text>
+							<Text color={COLORS.muted}> · Esc to cancel</Text>
+						</>
 						: <TextInput
 							value={input}
 							onChange={value => {
@@ -767,7 +932,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 						/>}
 				</Box>
 			)}
-			<Text color={COLORS.muted}> enter send · esc cancel · ctrl-c exit · pgup/pgdn scroll · / commands · /setup · /models</Text>
+			<Text color={COLORS.muted}>{FOOTER_HELP}</Text>
 		</Box>
 	);
 }

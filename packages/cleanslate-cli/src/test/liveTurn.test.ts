@@ -7,14 +7,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { LiveTurnBuffer } from '../liveTurn.js';
 
-test('intermediate model narration is closed as working context before tools', () => {
+test('internal reasoning is hidden while visible intermediate text is retained before tools', () => {
 	const buffer = new LiveTurnBuffer();
 	buffer.appendReasoning('Inspecting the repository. ');
 	buffer.appendText('I will read the relevant files.');
 
 	assert.equal(
 		buffer.flushWorking(),
-		'Inspecting the repository. \n\nI will read the relevant files.'
+		'I will read the relevant files.'
 	);
 	assert.deepEqual(buffer.snapshot(), { reasoning: '', text: '' });
 });

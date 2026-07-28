@@ -157,4 +157,40 @@ describe('CleanSlateNodeAgentRuntime', () => {
 		assert.equal(names.includes('submit_artifact'), true);
 		runtime.dispose();
 	});
+
+	test('injects deterministic host context and enforces the host tool policy', async () => {
+		const runtime = new CleanSlateNodeAgentRuntime({
+			rootPath: process.cwd(),
+			configuration: createNodeProviderConfiguration({
+				provider: 'openai',
+				model: 'gpt-4o',
+				apiKey: 'test'
+			}),
+			additionalContext: task => `Project rule for: ${task}`,
+			resolveAttachments: () => [{ type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } }],
+			approveTool: request => request.toolName !== 'list_dir'
+		});
+		let request: any;
+		(runtime as any).mainService.openAICompatibleChatStream = (options: any) => {
+			request = options;
+			const emitter = new Emitter<any>();
+			setTimeout(() => {
+				emitter.fire('data: {"type":"text","content":"Done."}\n\n');
+				emitter.fire(null);
+			}, 0);
+			return emitter.event;
+		};
+		for await (const _part of runtime.run('Inspect safely')) { /* consume */ }
+		assert.equal(request.messages.some((message: any) =>
+			JSON.stringify(message.content).includes('Project rule for: Inspect safely')), true);
+		assert.equal(request.messages.some((message: any) =>
+			JSON.stringify(message.content).includes('data:image/png;base64,iVBORw0KGgo=')), true);
+
+		const denied: any[] = [];
+		for await (const part of (runtime as any).headlessRuntime.executeTool('list_dir', { path: '.' }, 'call-1')) {
+			denied.push(part);
+		}
+		assert.equal(denied[0].result.code, 'permission_denied');
+		runtime.dispose();
+	});
 });

@@ -22,10 +22,16 @@ cleanslate
 ```
 
 The first launch opens provider setup inside the TUI. CleanSlate remembers the
-provider, model, reasoning level, and endpoint settings. On macOS, API keys are
-stored in Keychain; on other platforms they are stored in an owner-only
-credentials file. Run `cleanslate --setup` whenever you want to reconnect or
-change provider credentials.
+provider, model, reasoning level, permission mode, and endpoint settings.
+Provider credentials are stored globally in `~/.cleanslate/auth.json` with
+owner-only (`0600`) permissions, independently of workspaces and sessions.
+Legacy macOS Keychain credentials are migrated on first use. Run
+`cleanslate --setup` whenever you want to reconnect or change provider
+credentials.
+
+Use `cleanslate --auth-list`, `cleanslate --logout`, and
+`cleanslate --doctor` without opening the TUI for credential and installation
+maintenance.
 
 After provider connection, setup loads that provider's available models and
 opens a terminal picker. A manual model-ID fallback remains for
@@ -37,7 +43,7 @@ Choose **CleanSlate** to sign in with your TheWariend account and use the same
 managed models and entitlements as the IDE. CleanSlate opens the existing
 TheWariend sign-in page in the system browser and completes a one-time device
 authorization. Your password never passes through the CLI; the returned session
-token is kept in the operating system credential store.
+token is kept in the same owner-only global auth file as provider API keys.
 
 Common provider examples:
 
@@ -61,15 +67,22 @@ Run `cleanslate` in a terminal to open the TUI. Useful commands:
 - `/new` — start a clean session
 - `/sessions` — browse and resume workspace sessions
 - `/resume <id>` — resume a specific session
+- `/delete-session <id>` — delete an inactive saved session
 - `/models` — fetch and select a provider model
 - `/model <id>` — switch directly to a model
 - `/provider <name> <model>` — switch provider and model using environment credentials
 - `/reasoning <level>` — change reasoning effort without restarting
+- `/permissions read-only|default|full` — choose the host-enforced tool policy
 - `/mode plan` or `/mode execution` — switch agent phase
 - `/plan <task>` — run one turn with write tools filtered
 - `/fix`, `/explain`, `/test`, `/rewrite`, `/doc`, `/review`, `/optimize`,
   `/scaffold`, `/migrate` — the IDE agent’s task-specific slash commands
 - `/clear` — clear the visible transcript
+- `/context` — inspect loaded project instructions and context usage
+- `/changes` — inspect the Git branch and working tree
+- `/diff` — review staged and unstaged changes
+- `/doctor` — validate the CLI, provider, workspace, Git, and MCP configuration
+- `/logout` — remove the active provider credential
 - `/exit` — save and quit
 
 Use Page Up and Page Down for transcript scrollback. Escape cancels the active
@@ -85,19 +98,35 @@ Sessions are isolated by workspace and stored under
 `~/.cleanslate/sessions/`. They include the native provider/tool transcript, so
 resuming does not flatten or reconstruct tool calls.
 
+At session start CleanSlate deterministically loads project instructions from
+`AGENTS.md`, `CLAUDE.md`, and `.cleanslate/instructions.md` when present.
+Mention a text file inside the workspace as `@path/to/file` to attach its
+contents to that turn. Mention PNG, JPEG, WebP, or GIF files the same way to
+send them as native multimodal image parts. Attachments are
+workspace-contained and size-bounded.
+
 ## One-shot and automation
 
 Use `--no-tui` for streaming, script-friendly execution:
 
 ```sh
 cleanslate --no-tui -C /path/to/repo "fix the failing tests"
+cleanslate --no-tui --permission-mode read-only "audit the repository"
+cleanslate --no-tui --permission-mode full "run the tests and fix failures"
+cleanslate --json --permission-mode read-only "inspect the project"
 cleanslate --no-tui --resume "continue the refactor"
 cleanslate --list-sessions -C /path/to/repo
+cleanslate --delete-session <id> -C /path/to/repo
 ```
 
-Shell commands default to refusal. In the TUI, each command asks for approval:
-`y` allows it once, `a` allows commands for the current session, and `n`
-refuses. Non-interactive stdin always refuses commands.
+`--json` emits one JSON object per stream event for scripts and higher-level
+clients while preserving the same session, permission, and tool semantics as
+the interactive surface.
+
+In default mode, the TUI asks before each shell command: `y` allows it once,
+`a` allows commands for the current session, and `n` refuses. Read-only mode
+blocks mutations. Full mode permits commands without prompts. Non-interactive
+default-mode stdin refuses command prompts.
 
 ## Browser, web, and MCP
 

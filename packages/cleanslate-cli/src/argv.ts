@@ -5,6 +5,7 @@
 
 export const SUPPORTED_PROVIDERS = ['cleanslate', 'openai', 'azureOpenAI', 'anthropic', 'gemini', 'grok', 'nvidia', 'openrouter', 'custom', 'bedrock'] as const;
 export type CliProvider = typeof SUPPORTED_PROVIDERS[number];
+export type CliPermissionMode = 'read-only' | 'default' | 'full';
 
 export interface ICliArguments {
 	task?: string;
@@ -14,19 +15,27 @@ export interface ICliArguments {
 	model?: string;
 	modelSpecified: boolean;
 	apiKey?: string;
+	apiKeySpecified: boolean;
 	baseUrl?: string;
 	reasoningLevel: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 	reasoningSpecified: boolean;
+	permissionMode: CliPermissionMode;
+	permissionSpecified: boolean;
 	maxTurns?: number;
 	bedrockRegion?: string;
 	bedrockProfile?: string;
 	azureEndpoint?: string;
 	azureApiVersion?: string;
 	tui?: boolean;
+	json: boolean;
 	resume: boolean;
 	sessionId?: string;
+	deleteSessionId?: string;
 	listSessions: boolean;
 	setup: boolean;
+	doctor: boolean;
+	listCredentials: boolean;
+	logout: boolean;
 	help: boolean;
 	version: boolean;
 }
@@ -63,11 +72,18 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 		provider: inferredProvider(env),
 		providerSpecified: false,
 		modelSpecified: false,
-		reasoningLevel: 'low',
+		apiKeySpecified: false,
+		reasoningLevel: 'minimal',
 		reasoningSpecified: false,
+		permissionMode: 'default',
+		permissionSpecified: false,
+		json: false,
 		resume: false,
 		listSessions: false,
 		setup: false,
+		doctor: false,
+		listCredentials: false,
+		logout: false,
 		help: false,
 		version: false
 	};
@@ -89,6 +105,10 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 			case '--no-tui':
 				result.tui = false;
 				break;
+			case '--json':
+				result.json = true;
+				result.tui = false;
+				break;
 			case '--resume':
 			case '-r':
 				result.resume = true;
@@ -101,8 +121,21 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 			case '--list-sessions':
 				result.listSessions = true;
 				break;
+			case '--delete-session':
+				result.deleteSessionId = valueAfter(argv, index, arg);
+				index++;
+				break;
 			case '--setup':
 				result.setup = true;
+				break;
+			case '--doctor':
+				result.doctor = true;
+				break;
+			case '--auth-list':
+				result.listCredentials = true;
+				break;
+			case '--logout':
+				result.logout = true;
 				break;
 			case '--cwd':
 			case '-C':
@@ -131,6 +164,7 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 				break;
 			case '--api-key':
 				result.apiKey = valueAfter(argv, index, arg);
+				result.apiKeySpecified = true;
 				index++;
 				break;
 			case '--base-url':
@@ -153,6 +187,16 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 					throw new Error('--max-turns must be a positive integer.');
 				}
 				result.maxTurns = value;
+				index++;
+				break;
+			}
+			case '--permission-mode': {
+				const value = valueAfter(argv, index, arg);
+				if (!['read-only', 'default', 'full'].includes(value)) {
+					throw new Error('--permission-mode must be one of: read-only, default, full.');
+				}
+				result.permissionMode = value as CliPermissionMode;
+				result.permissionSpecified = true;
 				index++;
 				break;
 			}
@@ -222,21 +266,28 @@ Options:
       --base-url <url>      Override the provider base URL
       --reasoning <level>   none, minimal, low, medium, high, xhigh, max
       --max-turns <count>   Bound model turns
+      --permission-mode <m> read-only, default, or full
       --aws-region <id>     AWS region for Bedrock (or AWS_REGION)
       --aws-profile <name>  AWS profile for Bedrock
       --azure-endpoint <url> Azure OpenAI endpoint
       --azure-api-version <v> Azure OpenAI API version
       --tui                 Force the interactive terminal UI
       --no-tui              Stream one task without the terminal UI
+      --json                Emit structured JSONL stream events
   -r, --resume              Resume the latest workspace session
       --session <id>        Resume a specific session
       --list-sessions       List saved sessions for this workspace
+      --delete-session <id> Delete a saved session for this workspace
       --setup               Re-run interactive provider setup
+      --doctor              Check the local CLI configuration
+      --auth-list           List providers with saved credentials
+      --logout              Remove the active provider credential
   -h, --help                Show help
   -v, --version             Show version
 
 With a terminal attached, CleanSlate opens the TUI by default. In a pipe or
 with --no-tui, a task is required.
 
-Every shell command requires an explicit y/N approval. Non-interactive input
-refuses commands by default. Ctrl-C cancels the active run.`;
+Default mode asks before shell commands, read-only blocks mutations, and full
+mode permits tools without prompts. Non-interactive command prompts deny by
+default. Ctrl-C cancels the active run.`;

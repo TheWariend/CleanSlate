@@ -15,13 +15,16 @@ import {
 	CleanSlateNodeAgentRuntime,
 	createNodeProviderConfiguration
 } from '@slate/sdk';
-import { apiKeyFromEnvironment, HELP_TEXT, ICliArguments, parseArguments } from './argv.js';
+import { HELP_TEXT, ICliArguments, parseArguments } from './argv.js';
 import { CliConfigStore, CliCredentialStore, ICliConfig } from './config.js';
 import { authenticateCleanSlateInBrowser } from './managedAuth.js';
 import { CliSessionStore, ICliSession, transcriptEntry } from './sessions.js';
 import { CleanSlateModelSetupTui, CleanSlateSetupTui, ICliSetupResult } from './setupTui.js';
 import { clearInteractiveScreen, enterInteractiveScreen } from './terminalScreen.js';
 import { CleanSlateTui } from './tui.js';
+import { CliProjectContext } from './projectContext.js';
+import { cliDoctorReport } from './doctor.js';
+import { CliPermissionPolicy } from './permissions.js';
 
 const VERSION = '0.1.0';
 let activeApprovalPrompt: readline.Interface | undefined;
@@ -205,9 +208,16 @@ async function loadProviderModels(args: ICliArguments, setup: ICliSetupResult): 
 async function completeInteractiveSetup(
 	args: ICliArguments,
 	setup: ICliSetupResult,
-	credentialStore: CliCredentialStore
+	credentialStore: CliCredentialStore,
+	configStore: CliConfigStore
 ): Promise<boolean> {
 	const previousModel = args.provider === setup.provider ? args.model : undefined;
+	setup.model = previousModel ?? setup.model;
+	applySetupResult(args, setup);
+	if (setup.apiKey) {
+		credentialStore.set(setup.provider, setup.apiKey);
+	}
+	configStore.save(configFromArguments(args));
 	const models = setup.provider === 'cleanslate'
 		? await completeManagedSetup(args, setup, credentialStore)
 		: await loadProviderModels(args, setup);
@@ -217,9 +227,6 @@ async function completeInteractiveSetup(
 	}
 	setup.model = model;
 	applySetupResult(args, setup);
-	if (setup.apiKey) {
-		credentialStore.set(setup.provider, setup.apiKey);
-	}
 	return true;
 }
 
@@ -256,11 +263,37 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 	const credentialStore = new CliCredentialStore();
 	const storedConfig = configStore.load();
 	applyStoredConfig(args, storedConfig);
+	if (args.listCredentials) {
+		const providers = credentialStore.list();
+		process.stdout.write(providers.length ? `${providers.join('\n')}\n` : 'No saved provider credentials.\n');
+		return 0;
+	}
+	if (args.logout) {
+		const removed = credentialStore.remove(args.provider);
+		process.stdout.write(removed
+			? `Removed the saved ${args.provider} credential.\n`
+			: `No saved ${args.provider} credential was found.\n`);
+		return 0;
+	}
+	if (args.doctor) {
+		process.stdout.write(`${cliDoctorReport(args, credentialStore)}\n`);
+		return 0;
+	}
 	const sessionStore = new CliSessionStore(args.cwd);
-	const useTui = args.tui ?? (process.stdin.isTTY === true && process.stdout.isTTY === true);
+	const useTui = args.json ? false : args.tui ?? (process.stdin.isTTY === true && process.stdout.isTTY === true);
 
 	if (args.listSessions) {
 		printSessions(sessionStore.list());
+		return 0;
+	}
+	if (args.deleteSessionId) {
+		if (!sessionStore.load(args.deleteSessionId)) {
+			throw new Error(`Session not found: ${args.deleteSessionId}`);
+		}
+		if (!sessionStore.delete(args.deleteSessionId)) {
+			throw new Error(`Could not delete session: ${args.deleteSessionId}`);
+		}
+		process.stdout.write(`Deleted session ${args.deleteSessionId}.\n`);
 		return 0;
 	}
 
@@ -281,9 +314,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 		}
 	}
 
-	if (!argv.includes('--api-key')) {
-		args.apiKey = apiKeyFromEnvironment(args.provider, process.env) ?? credentialStore.get(args.provider);
-	}
+	args.apiKey = credentialStore.resolve(args.provider, args.apiKey, args.apiKeySpecified);
 
 	if (args.setup && !useTui) {
 		throw new Error('--setup requires an interactive terminal.');
@@ -293,7 +324,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 		if (!setup) {
 			return 130;
 		}
-		if (!await completeInteractiveSetup(args, setup, credentialStore)) {
+		if (!await completeInteractiveSetup(args, setup, credentialStore, configStore)) {
 			return 130;
 		}
 	}
@@ -316,6 +347,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 				onConfigurationChange: changed => configStore.save(configFromArguments(changed)),
 				getCredential: provider => credentialStore.get(provider),
 				onCredentialChange: (provider, credential) => credentialStore.set(provider, credential),
+				onCredentialRemove: provider => credentialStore.remove(provider),
+				onDoctor: () => cliDoctorReport(args, credentialStore),
 				onRequestSetup: () => { setupRequested = true; }
 			}), { exitOnCtrlC: false });
 			await app.waitUntilExit();
@@ -328,7 +361,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
 			const setup = await runInteractiveSetup(args.provider);
 			if (setup) {
-				if (!await completeInteractiveSetup(args, setup, credentialStore)) {
+				if (!await completeInteractiveSetup(args, setup, credentialStore, configStore)) {
 					continue;
 				}
 				validateProvider(args);
@@ -359,6 +392,9 @@ function applyStoredConfig(args: ICliArguments, config: ICliConfig): void {
 	if (!args.reasoningSpecified && config.reasoningLevel) {
 		args.reasoningLevel = config.reasoningLevel;
 	}
+	if (!args.permissionSpecified && config.permissionMode) {
+		args.permissionMode = config.permissionMode;
+	}
 	args.maxTurns ??= config.maxTurns;
 	args.bedrockRegion ??= config.bedrockRegion;
 	args.bedrockProfile ??= config.bedrockProfile;
@@ -374,6 +410,7 @@ function configFromArguments(args: ICliArguments): ICliConfig {
 		baseUrl: args.baseUrl,
 		reasoningLevel: args.reasoningLevel,
 		maxTurns: args.maxTurns,
+		permissionMode: args.permissionMode,
 		bedrockRegion: args.bedrockRegion,
 		bedrockProfile: args.bedrockProfile,
 		azureEndpoint: args.azureEndpoint,
@@ -429,8 +466,16 @@ async function runOneShot(
 			azureApiVersion: args.azureApiVersion,
 			azureDeploymentName: args.model
 		}),
+		additionalContext: task => new CliProjectContext(args.cwd).build(task),
+		resolveAttachments: task => new CliProjectContext(args.cwd).imageAttachments(task).map(attachment => ({
+			type: 'image_url',
+			image_url: { url: attachment.dataUrl }
+		})),
+		approveTool: request => new CliPermissionPolicy(args.permissionMode).allowsTool(request),
 		onManagedTokenRefresh: token => new CliCredentialStore().set('cleanslate', token),
-		approveCommand: request => requestCommandApproval(request),
+		approveCommand: request => new CliPermissionPolicy(args.permissionMode).allowsCommandWithoutPrompt()
+			? Promise.resolve(true)
+			: requestCommandApproval(request),
 		onProgress: event => {
 			if (event.type === 'command_output' && typeof event.chunk === 'string') {
 				process.stderr.write(event.chunk);
@@ -444,12 +489,16 @@ async function runOneShot(
 	session.transcript.push(transcriptEntry('user', args.task!));
 	try {
 		for await (const part of runtime.run(args.task!, abort.signal)) {
-			renderPart(part, state);
+			if (args.json) {
+				process.stdout.write(`${JSON.stringify(part)}\n`);
+			} else {
+				renderPart(part, state);
+			}
 			if (part.type === 'chat_text') {
 				assistantText += part.content;
 			}
 		}
-		if (state.wroteText) {
+		if (!args.json && state.wroteText) {
 			process.stdout.write('\n');
 		}
 		if (assistantText.trim()) {

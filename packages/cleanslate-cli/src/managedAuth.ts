@@ -129,6 +129,12 @@ export async function authenticateCleanSlateInBrowser(
 		signal: options.signal
 	});
 	if (!startResponse.ok) {
+		if (startResponse.status === 404) {
+			throw new Error(
+				`CleanSlate browser sign-in is not available at ${baseUrl}. `
+				+ 'The server is missing the device-auth routes; deploy them or set CLEANSLATE_API_BASE_URL to a compatible API.'
+			);
+		}
 		throw await responseError(startResponse);
 	}
 	const authorization = await startResponse.json() as Partial<IDeviceAuthorization>;

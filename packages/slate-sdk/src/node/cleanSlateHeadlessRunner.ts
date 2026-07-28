@@ -25,6 +25,8 @@ export interface ICleanSlateHeadlessRunOptions extends ICleanSlateNodeRuntimeOpt
 	cleanSlateService: any;
 	/** Extra services the agent loop needs that the context does not carry. */
 	contextService?: any;
+	/** Host-owned policy gate evaluated before a native tool runs. */
+	approveTool?: (request: { toolName: string; category?: string; input: unknown }) => boolean | Promise<boolean>;
 }
 
 export interface ICleanSlateHeadlessRunResult {
@@ -81,6 +83,16 @@ export class CleanSlateHeadlessRuntime {
 				toolName,
 				toolCallId,
 				result: { success: false, error: `Unknown tool: ${toolName}` }
+			};
+			return;
+		}
+		if (this.options.approveTool && !await this.options.approveTool({ toolName, category: tool.category, input })) {
+			this.calls.push({ toolName, input, ok: false });
+			yield {
+				type: 'tool_result',
+				toolName,
+				toolCallId,
+				result: { success: false, code: 'permission_denied', error: `Permission denied for ${toolName}.` }
 			};
 			return;
 		}
