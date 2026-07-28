@@ -5,7 +5,7 @@
   "description": "Workspace root for the Slate runtime and the CleanSlate surfaces.",
   "license": "MIT",
   "workspaces": [
-    "packages/slate-sdk",
+    "packages/cleanslate-sdk",
     "packages/cleanslate-cli"
   ],
   "scripts": {

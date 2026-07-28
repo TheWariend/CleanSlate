@@ -3,7 +3,7 @@
  * Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ICleanSlateManagedEntitlements } from '@slate/sdk';
+import { ICleanSlateManagedEntitlements } from '@cleanslate/sdk';
 import { spawnSync } from 'node:child_process';
 
 export interface ICleanSlateManagedSignIn {

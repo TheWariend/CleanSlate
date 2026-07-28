@@ -19,13 +19,13 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "npm --prefix ../slate-sdk run build && tsc -p tsconfig.json",
+    "build": "npm --prefix ../cleanslate-sdk run build && tsc -p tsconfig.json",
     "test": "npm run build && node --test \"dist/test/*.test.js\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {
-    "@slate/sdk": "^0.1.0",
+    "@cleanslate/sdk": "^0.1.0",
     "ink": "^7.1.1",
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",

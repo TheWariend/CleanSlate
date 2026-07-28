@@ -4,7 +4,7 @@ CleanSlate is the terminal surface for the same native agent engine and tool
 registry used by the CleanSlate IDE. It runs directly against a repository
 without building or launching the VS Code fork.
 
-The engine is [`@slate/sdk`](../slate-sdk), and the CLI gets **all 59 tools** —
+The engine is [`@cleanslate/sdk`](../cleanslate-sdk), and the CLI gets **all 59 tools** —
 the same set the editor has, not a reduced subset:
 
 | Group | Count | Examples |

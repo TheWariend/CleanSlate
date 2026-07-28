@@ -14,7 +14,7 @@ import {
 	CancellationTokenSource,
 	CleanSlateNodeAgentRuntime,
 	createNodeProviderConfiguration
-} from '@slate/sdk';
+} from '@cleanslate/sdk';
 import { HELP_TEXT, ICliArguments, parseArguments } from './argv.js';
 import { CliConfigStore, CliCredentialStore, getCleanSlateWorkspaceStorageHome, ICliConfig } from './config.js';
 import { authenticateCleanSlateInBrowser } from './managedAuth.js';

@@ -9,7 +9,7 @@ import Spinner from 'ink-spinner';
 import {
 	CleanSlateNodeAgentRuntime,
 	createNodeProviderConfiguration
-} from '@slate/sdk';
+} from '@cleanslate/sdk';
 import { apiKeyFromEnvironment, ICliArguments, SUPPORTED_PROVIDERS } from './argv.js';
 import { CleanSlateTerminalLogo } from './brand.js';
 import { LiveTurnBuffer } from './liveTurn.js';

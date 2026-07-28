@@ -5,7 +5,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { CleanSlateDiffService } from '@slate/sdk';
+import { CleanSlateDiffService } from '@cleanslate/sdk';
 import { ICliDiffFile, parseCliDiffFile } from './workspaceReview.js';
 
 export interface ICliEditPreview {
