@@ -549,6 +549,20 @@ export function visibleTranscriptLines(
 	return lines.slice(Math.max(0, end - safeRows), end);
 }
 
+export function padTranscriptViewportLines(
+	lines: readonly ITranscriptViewportLine[],
+	rows: number
+): ITranscriptViewportLine[] {
+	const safeRows = Math.max(1, rows);
+	const visible = lines.slice(-safeRows);
+	const blanks = Array.from({ length: Math.max(0, safeRows - visible.length) }, (_, index) => ({
+		key: `viewport-blank-${index}`,
+		kind: 'blank' as const,
+		text: ''
+	}));
+	return [...blanks, ...visible];
+}
+
 export function latestToolGroupId(entries: readonly ICliTranscriptEntry[]): string | undefined {
 	let latest: string | undefined;
 	let previousWasTool = false;
@@ -603,37 +617,38 @@ export function nextInteractiveMode(mode: 'execution' | 'planning'): 'execution'
 	return mode === 'planning' ? 'execution' : 'planning';
 }
 
-function TranscriptViewportLine({ line }: { line: ITranscriptViewportLine }) {
+function TranscriptViewportLine({ line, width }: { line: ITranscriptViewportLine; width: number }) {
+	const text = line.text.padEnd(Math.max(1, width));
 	switch (line.kind) {
 		case 'blank':
-			return <Text> </Text>;
+			return <Text>{text}</Text>;
 		case 'user':
-			return <Text color={COLORS.accent} bold>{line.text}</Text>;
+			return <Text color={COLORS.accent} bold>{text}</Text>;
 		case 'assistant':
-			return line.text.startsWith('↳ ')
-				? <Text><Text color={COLORS.success} bold>↳ </Text>{line.text.slice(2)}</Text>
-				: <Text>{line.text || ' '}</Text>;
+			return text.startsWith('↳ ')
+				? <Text><Text color={COLORS.success} bold>↳ </Text>{text.slice(2)}</Text>
+				: <Text>{text}</Text>;
 		case 'reasoning':
-			return <Text color={COLORS.muted}>{line.text}</Text>;
+			return <Text color={COLORS.muted}>{text}</Text>;
 		case 'tool':
-			return <Text color={COLORS.success}>{line.text}</Text>;
+			return <Text color={COLORS.success}>{text}</Text>;
 		case 'toolError':
 		case 'error':
-			return <Text color={COLORS.danger}>{line.text}</Text>;
+			return <Text color={COLORS.danger}>{text}</Text>;
 		case 'diffAddition':
-			return <Text color="#bbf7d0" backgroundColor="#153f2a">{line.text}</Text>;
+			return <Text color="#bbf7d0" backgroundColor="#153f2a">{text}</Text>;
 		case 'diffDeletion':
-			return <Text color="#fecaca" backgroundColor="#4a2028">{line.text}</Text>;
+			return <Text color="#fecaca" backgroundColor="#4a2028">{text}</Text>;
 		case 'diffHunk':
-			return <Text color={COLORS.warning}>{line.text}</Text>;
+			return <Text color={COLORS.warning}>{text}</Text>;
 		case 'diffHeader':
-			return <Text color={COLORS.muted} bold>{line.text}</Text>;
+			return <Text color={COLORS.muted} bold>{text}</Text>;
 		case 'diffContext':
-			return <Text color={COLORS.muted}>{line.text}</Text>;
+			return <Text color={COLORS.muted}>{text}</Text>;
 		case 'system':
-			return <Text color={COLORS.muted}>{line.text}</Text>;
+			return <Text color={COLORS.muted}>{text}</Text>;
 		default:
-			return <Text>{line.text || ' '}</Text>;
+			return <Text>{text}</Text>;
 	}
 }
 
@@ -1521,6 +1536,10 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		() => visibleTranscriptLines(viewportEntries, contentWidth, contentRows, scrollOffset, expandedToolGroupId),
 		[viewportEntries, contentWidth, contentRows, scrollOffset, expandedToolGroupId]
 	);
+	const renderedLines = useMemo(
+		() => visibleLines.length > 0 ? padTranscriptViewportLines(visibleLines, contentRows) : [],
+		[visibleLines, contentRows]
+	);
 	const activeDiffReview = diffReviews?.[Math.min(diffReviewIndex, diffReviews.length - 1)];
 	const contextStatus = [
 		contextUsage !== undefined ? `context ${Math.round(contextUsage)}%` : '',
@@ -1568,7 +1587,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 								{contentRows >= 3 && <Text color={COLORS.muted}>Type /help for commands.</Text>}
 							</>
 						)}
-						{visibleLines.map(line => <TranscriptViewportLine key={line.key} line={line} />)}
+						{renderedLines.map(line => <TranscriptViewportLine key={line.key} line={line} width={contentWidth} />)}
 					</>}
 			</Box>
 

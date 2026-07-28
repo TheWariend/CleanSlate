@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ICliTranscriptEntry } from '../sessions.js';
-import { formatActivityStatus, toggleLatestToolGroup, transcriptViewportLines, visibleTranscriptLines } from '../tui.js';
+import { formatActivityStatus, padTranscriptViewportLines, toggleLatestToolGroup, transcriptViewportLines, visibleTranscriptLines } from '../tui.js';
 
 function entry(id: string, kind: ICliTranscriptEntry['kind'], content: string): ICliTranscriptEntry {
 	return { id, kind, content, timestamp: 0 };
@@ -124,4 +124,13 @@ test('TUI viewport never renders more rows than its content budget', () => {
 	assert.equal(scrolled.length, 15);
 	assert.match(visible.at(-1)?.text ?? '', /token-199/);
 	assert.notDeepEqual(scrolled, visible);
+});
+
+test('TUI repaints vacated transcript rows when expanded content collapses', () => {
+	const visible = transcriptViewportLines([entry('answer', 'assistant', 'Done.')], 80);
+	const padded = padTranscriptViewportLines(visible, 6);
+
+	assert.equal(padded.length, 6);
+	assert.equal(padded.slice(0, 4).every(line => line.kind === 'blank'), true);
+	assert.equal(padded.at(-1)?.text, '↳ Done.');
 });
