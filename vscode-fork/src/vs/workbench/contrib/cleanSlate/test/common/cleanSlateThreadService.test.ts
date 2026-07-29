@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { CleanSlateThreadService } from '../../browser/core/cleanSlateThreadService.js';
+import { CleanSlateThreadService } from '@cleanslate/sdk/services/cleanSlateThreadService.js';
 
 suite('CleanSlateThreadService', () => {
     test('preserves oversized historical tool output until context budgeting runs', () => {

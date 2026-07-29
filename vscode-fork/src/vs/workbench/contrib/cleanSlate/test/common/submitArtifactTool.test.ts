@@ -5,8 +5,26 @@
 
 import * as assert from 'assert';
 import { URI } from '../../../../../base/common/uri.js';
-import { ACTIVE_GROUP } from '../../../../services/editor/common/editorService.js';
-import { submitArtifactTool } from '../../browser/tools/SubmitArtifactTool.js';
+import { submitArtifactTool } from '@cleanslate/sdk/tools/SubmitArtifactTool.js';
+
+/**
+ * Records what the tool asked its host to present. Which editor group the
+ * artifact lands in, and whether it is pinned, is no longer the tool's call —
+ * that moved to CleanSlateArtifactPresentationHost with the runtime extraction.
+ * What the tool still decides is whether to present at all, and whether doing
+ * so should steal focus.
+ */
+function recordingPresentationHost() {
+	const opened: { resource: URI; artifactId: string; preserveFocus: boolean }[] = [];
+	return {
+		opened,
+		host: {
+			openArtifact: async (resource: URI, artifactId: string, options?: { preserveFocus?: boolean }) => {
+				opened.push({ resource, artifactId, preserveFocus: options?.preserveFocus === true });
+			}
+		}
+	};
+}
 
 function workspaceContext(folderPath: string, id: string): any {
     return {
@@ -85,25 +103,15 @@ suite('submitArtifactTool', () => {
         assert.strictEqual(saved?.metadata.surface, 'agentManager');
     });
 
-    test('opens authored IDE artifacts in the active editor group', async () => {
-        let openedGroup: unknown;
-        let openedOptions: any;
-        const artifactInput = { id: 'artifact-input' };
+    test('presents authored IDE artifacts and takes focus', async () => {
+        const { opened, host } = recordingPresentationHost();
         const context = {
             surface: 'ide',
             sessionId: 'session-1',
             artifactService: {
                 saveArtifact: (type: string, content: string, metadata: any) => ({ id: 'artifact-1', type, content, timestamp: Date.now(), metadata })
             },
-            instantiationService: {
-                createInstance: () => artifactInput
-            },
-            editorService: {
-                openEditor: async (_input: unknown, options: unknown, group: unknown) => {
-                    openedOptions = options;
-                    openedGroup = group;
-                }
-            }
+            artifactPresentationHost: host
         };
 
         const result = await submitArtifactTool.run({
@@ -113,29 +121,20 @@ suite('submitArtifactTool', () => {
         }, context as any);
 
         assert.strictEqual(result.success, true);
-        assert.strictEqual(openedGroup, ACTIVE_GROUP);
-        assert.strictEqual(openedOptions?.preserveFocus, false);
+        assert.strictEqual(opened.length, 1);
+        assert.strictEqual(opened[0].artifactId, 'artifact-1');
+        assert.strictEqual(opened[0].preserveFocus, false);
     });
 
-    test('opens Agent Manager-authored artifacts in IDE active group without stealing focus', async () => {
-        let openedGroup: unknown;
-        let openedOptions: any;
-        const artifactInput = { id: 'artifact-input' };
+    test('presents Agent Manager-authored artifacts without stealing focus', async () => {
+        const { opened, host } = recordingPresentationHost();
         const context = {
             surface: 'agentManager',
             sessionId: 'session-1',
             artifactService: {
                 saveArtifact: (type: string, content: string, metadata: any) => ({ id: 'artifact-1', type, content, timestamp: Date.now(), metadata })
             },
-            instantiationService: {
-                createInstance: () => artifactInput
-            },
-            editorService: {
-                openEditor: async (_input: unknown, options: unknown, group: unknown) => {
-                    openedOptions = options;
-                    openedGroup = group;
-                }
-            }
+            artifactPresentationHost: host
         };
 
         const result = await submitArtifactTool.run({
@@ -145,8 +144,8 @@ suite('submitArtifactTool', () => {
         }, context as any);
 
         assert.strictEqual(result.success, true);
-        assert.strictEqual(openedGroup, ACTIVE_GROUP);
-        assert.strictEqual(openedOptions?.preserveFocus, true);
+        assert.strictEqual(opened.length, 1);
+        assert.strictEqual(opened[0].preserveFocus, true);
     });
 
     test('opens same-project Agent Manager artifacts in the IDE editor', async () => {
@@ -159,9 +158,8 @@ suite('submitArtifactTool', () => {
             artifactService: {
                 saveArtifact: (type: string, content: string, metadata: any) => ({ id: 'artifact-1', type, content, timestamp: Date.now(), metadata })
             },
-            instantiationService: { createInstance: () => ({ id: 'artifact-input' }) },
-            editorService: {
-                openEditor: async () => { opened = true; }
+            artifactPresentationHost: {
+                openArtifact: async () => { opened = true; }
             }
         };
 
@@ -186,9 +184,8 @@ suite('submitArtifactTool', () => {
             artifactService: {
                 saveArtifact: (type: string, content: string, metadata: any) => { saved = true; return { id: 'artifact-1', type, content, timestamp: Date.now(), metadata }; }
             },
-            instantiationService: { createInstance: () => ({ id: 'artifact-input' }) },
-            editorService: {
-                openEditor: async () => { opened = true; }
+            artifactPresentationHost: {
+                openArtifact: async () => { opened = true; }
             }
         };
 

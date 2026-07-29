@@ -4,12 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { CleanSlateAgentParsingSupport } from '../../browser/agent/cleanSlateAgentParsing.js';
-import { CleanSlateExecutionQueryEngine } from '../../browser/agent/cleanSlateExecutionQuery.js';
-import { AgentPhase } from '../../browser/agent/cleanSlatePrompts.js';
-import { CleanSlateThreadService } from '../../browser/core/cleanSlateThreadService.js';
-import { CleanSlateTaskSessionService } from '../../browser/core/cleanSlateTaskSessionService.js';
-import { normalizeApplyEditRequest } from '../../browser/tools/ApplyEditTool.js';
+import { CleanSlateAgentParsingSupport } from '@cleanslate/sdk/agent/cleanSlateAgentParsing.js';
+import { CleanSlateExecutionQueryEngine } from '@cleanslate/sdk/agent/cleanSlateExecutionQuery.js';
+import { AgentPhase } from '@cleanslate/sdk/agent/cleanSlatePrompts.js';
+import { CleanSlateThreadService } from '@cleanslate/sdk/services/cleanSlateThreadService.js';
+import { CleanSlateTaskSessionService } from '@cleanslate/sdk/services/cleanSlateTaskSessionService.js';
+import { normalizeApplyEditRequest } from '@cleanslate/sdk/tools/ApplyEditTool.js';
 
 /**
  * End-to-end coverage for the chat -> execution pipeline that the unit suite did

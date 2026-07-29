@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { AgentPhase } from '../../browser/agent/cleanSlatePrompts.js';
+import { AgentPhase } from '@cleanslate/sdk/agent/cleanSlatePrompts.js';
 import { getRenderableSummaryRole, isStableSummaryRole, selectRenderableSummaries } from '../../browser/chat/runtime/cleanSlateSummaryPolicy.js';
 
 suite('CleanSlateSummaryPolicy', () => {

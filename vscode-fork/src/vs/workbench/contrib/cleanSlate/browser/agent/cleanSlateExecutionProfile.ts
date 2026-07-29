@@ -3,8 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { CleanSlateTaskKind, CleanSlateTurnIntent } from '../core/cleanSlateTaskState.js';
-import type { IExecutionLoopSettings } from './cleanSlateAgentTypes.js';
+import { CleanSlateTaskKind, CleanSlateTurnIntent } from '@cleanslate/sdk/services/cleanSlateTaskState.js';
+import type { IExecutionLoopSettings } from '@cleanslate/sdk/agent/cleanSlateAgentTypes.js';
 
 export const CLEANSLATE_PHASE = {
 	PLANNING: 'PLANNING',

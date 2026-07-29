@@ -4,61 +4,29 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { createDecorator } from '../../../../../platform/instantiation/common/instantiation.js';
-import { Disposable } from '../../../../../base/common/lifecycle.js';
-import { CancellationToken } from '../../../../../base/common/cancellation.js';
-import { Event } from '../../../../../base/common/event.js';
 import {
-	ICleanSlateBackgroundCommandOptions,
-	ICleanSlateBackgroundCommandResult,
-	ICleanSlateCommandExecutionOptions,
-	ICleanSlateCommandExecutionResult,
-	ICleanSlateCommandOutputEvent,
-	ICleanSlateMainService,
-	ICleanSlateStopBackgroundCommandResult
-} from '../../../../services/cleanSlate/common/core/cleanSlateAI.js';
+	CleanSlateCommandExecutionService as CleanSlateCommandExecutionServiceBase,
+	ICleanSlateCommandExecutionService as ICleanSlateCommandExecutionServiceShape
+} from '@cleanslate/sdk/services/cleanSlateCommandExecutionService.js';
+import { ICleanSlateMainService } from '../../../../services/cleanSlate/common/core/cleanSlateAI.js';
 
+/**
+ * Command execution, wired for the workbench.
+ *
+ * The implementation is the SDK's — it only forwards to the main service. What
+ * stays here is the injection: the service identifier and the decorator that
+ * hands the main service to the constructor. See `cleanSlateAI.ts` for why the
+ * identifiers cannot live in the SDK.
+ */
+
+export interface ICleanSlateCommandExecutionService extends ICleanSlateCommandExecutionServiceShape { }
 export const ICleanSlateCommandExecutionService = createDecorator<ICleanSlateCommandExecutionService>('cleanSlateCommandExecutionService');
 
-export interface ICleanSlateCommandExecutionService {
-	_serviceBrand: undefined;
-	executeCommand(options: ICleanSlateCommandExecutionOptions): Promise<ICleanSlateCommandExecutionResult>;
-	executeCommandStream(options: ICleanSlateCommandExecutionOptions, token?: CancellationToken): Event<ICleanSlateCommandOutputEvent | null>;
-	startBackgroundCommand(options: ICleanSlateBackgroundCommandOptions): Promise<ICleanSlateBackgroundCommandResult>;
-	stopBackgroundCommand(processId: string): Promise<ICleanSlateStopBackgroundCommandResult>;
-	getBackgroundCommand(processId: string): Promise<ICleanSlateBackgroundCommandResult>;
-	listBackgroundCommands(): Promise<ICleanSlateBackgroundCommandResult[]>;
-}
-
-export class CleanSlateCommandExecutionService extends Disposable implements ICleanSlateCommandExecutionService {
-	declare readonly _serviceBrand: undefined;
+export class CleanSlateCommandExecutionService extends CleanSlateCommandExecutionServiceBase {
 
 	constructor(
-		@ICleanSlateMainService private readonly mainService: ICleanSlateMainService
+		@ICleanSlateMainService mainService: ICleanSlateMainService
 	) {
-		super();
-	}
-
-	executeCommand(options: ICleanSlateCommandExecutionOptions): Promise<ICleanSlateCommandExecutionResult> {
-		return this.mainService.executeCommand(options);
-	}
-
-	executeCommandStream(options: ICleanSlateCommandExecutionOptions, token: CancellationToken = CancellationToken.None): Event<ICleanSlateCommandOutputEvent | null> {
-		return this.mainService.executeCommandStream(options, token);
-	}
-
-	startBackgroundCommand(options: ICleanSlateBackgroundCommandOptions): Promise<ICleanSlateBackgroundCommandResult> {
-		return this.mainService.startBackgroundCommand(options);
-	}
-
-	stopBackgroundCommand(processId: string): Promise<ICleanSlateStopBackgroundCommandResult> {
-		return this.mainService.stopBackgroundCommand(processId);
-	}
-
-	getBackgroundCommand(processId: string): Promise<ICleanSlateBackgroundCommandResult> {
-		return this.mainService.getBackgroundCommand(processId);
-	}
-
-	listBackgroundCommands(): Promise<ICleanSlateBackgroundCommandResult[]> {
-		return this.mainService.listBackgroundCommands();
+		super(mainService);
 	}
 }

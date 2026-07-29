@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { CleanSlateToolCallLedger } from '../../browser/agent/cleanSlateToolCallLedger.js';
+import { CleanSlateToolCallLedger } from '@cleanslate/sdk/agent/cleanSlateToolCallLedger.js';
 
 suite('CleanSlateToolCallLedger', () => {
 	test('normalizes tool aliases before execution', () => {

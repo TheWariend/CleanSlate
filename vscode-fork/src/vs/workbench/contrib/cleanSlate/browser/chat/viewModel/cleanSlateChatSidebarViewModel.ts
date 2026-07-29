@@ -5,8 +5,8 @@
 
 import { URI } from '../../../../../../base/common/uri.js';
 import type { CleanSlateReasoningLevel } from '../../../../../services/cleanSlate/common/core/cleanSlateAI.js';
-import { AgentDefinition } from '../../composer/registry/agentSchema.js';
-import { ICleanSlateRunSummary } from '../../core/cleanSlateTaskSessionService.js';
+import { AgentDefinition } from '@cleanslate/sdk/composer/registry/agentSchema.js';
+import { ICleanSlateRunSummary } from '@cleanslate/sdk/services/cleanSlateTaskSessionService.js';
 import { CleanSlateChatComposerProvider, type ICleanSlateEditorSelectionReference } from '../providers/cleanSlateChatComposerProvider.js';
 import { CleanSlateChatHistoryProvider } from '../providers/cleanSlateChatHistoryProvider.js';
 import { CleanSlateChatModelProvider, ICleanSlateModelDropdownState } from '../providers/cleanSlateChatModelProvider.js';

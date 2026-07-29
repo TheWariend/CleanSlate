@@ -18,6 +18,7 @@
     "test-build-scripts": "cd build && npm run test",
     "preinstall": "node build/npm/preinstall.ts",
     "postinstall": "node build/npm/postinstall.ts",
+    "precompile": "npm --prefix ../packages/cleanslate-sdk run build",
     "compile": "npm run gulp compile",
     "compile:diagnostic": "npm run gulp -- compile-diagnostic",
     "compile-check-ts-native": "tsgo --project ./src/tsconfig.json --noEmit --skipLibCheck",
@@ -28,6 +29,7 @@
     "kill-watch-webd": "deemon --kill npm run watch-web",
     "restart-watchd": "deemon --restart npm run watch",
     "restart-watch-webd": "deemon --restart npm run watch-web",
+    "prewatch-client": "npm --prefix ../packages/cleanslate-sdk run build",
     "watch-client": "npm run gulp watch-client",
     "watch-clientd": "deemon npm run watch-client",
     "kill-watch-clientd": "deemon --kill npm run watch-client",
@@ -59,6 +61,7 @@
     "eslint": "node build/eslint.ts",
     "stylelint": "node build/stylelint.ts",
     "playwright-install": "npm exec playwright install",
+    "precompile-build": "npm --prefix ../packages/cleanslate-sdk run build",
     "compile-build": "npm run gulp compile-build-with-mangling",
     "compile-extensions-build": "npm run gulp compile-extensions-build",
     "minify-vscode": "npm run gulp minify-vscode",
@@ -136,6 +139,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@cleanslate/sdk": "file:../packages/cleanslate-sdk",
     "@playwright/test": "^1.56.1",
     "@stylistic/eslint-plugin-ts": "^2.8.0",
     "@types/cookie": "^0.3.3",

@@ -7,7 +7,7 @@ import * as assert from 'assert';
 import { URI } from '../../../../../base/common/uri.js';
 import { Range } from '../../../../../editor/common/core/range.js';
 import { createTextModel } from '../../../../../editor/test/common/testTextModel.js';
-import { assessRewriteScope, normalizeApplyEditRequest, validateFreshReplaceRangeAnchors, validateReadBeforeEdit } from '../../browser/tools/ApplyEditTool.js';
+import { assessRewriteScope, normalizeApplyEditRequest, validateFreshReplaceRangeAnchors, validateReadBeforeEdit } from '@cleanslate/sdk/tools/ApplyEditTool.js';
 
 suite('CleanSlate apply edit guards', () => {
 	test('normalizes the model-facing exact-string edit contract', () => {

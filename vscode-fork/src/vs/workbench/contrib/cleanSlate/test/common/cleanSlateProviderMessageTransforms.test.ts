@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { normalizeCleanSlateMessagesForProvider } from '../../../../services/cleanSlate/common/core/cleanSlateProviderMessageTransforms.js';
+import { normalizeCleanSlateMessagesForProvider } from '@cleanslate/sdk/protocol/cleanSlateProviderMessageTransforms.js';
 
 suite('cleanSlateProviderMessageTransforms', () => {
 	test('normalizes tool names and tool-call ids for non-OpenAI providers', () => {

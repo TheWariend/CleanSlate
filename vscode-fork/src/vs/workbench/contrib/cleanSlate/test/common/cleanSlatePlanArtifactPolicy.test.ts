@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { extractPlanFileEntries, planEntryTargetToPath, validateImplementationPlanStructure, type ICleanSlatePlanTargetStat } from '../../browser/tools/cleanSlatePlanArtifactPolicy.js';
+import { extractPlanFileEntries, planEntryTargetToPath, validateImplementationPlanStructure, type ICleanSlatePlanTargetStat } from '@cleanslate/sdk/tools/cleanSlatePlanArtifactPolicy.js';
 
 function statMap(entries: Record<string, ICleanSlatePlanTargetStat>): (path: string) => Promise<ICleanSlatePlanTargetStat | undefined> {
 	return async path => entries[path] ?? { exists: false, isDirectory: false };

@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { evaluateExecutionCommandPolicy, evaluateVerificationCommandPolicy } from '../../browser/agent/cleanSlateCommandPolicy.js';
+import { evaluateExecutionCommandPolicy, evaluateVerificationCommandPolicy } from '@cleanslate/sdk/agent/cleanSlateCommandPolicy.js';
 
 suite('CleanSlateCommandPolicy', () => {
 	test('allows verification commands inside the continuous execution loop', () => {

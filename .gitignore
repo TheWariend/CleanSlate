@@ -13,3 +13,4 @@ compile_errors.txt
 compile_output.txt
 ts_errors*.txt
 launch_error.log
+node_modules/

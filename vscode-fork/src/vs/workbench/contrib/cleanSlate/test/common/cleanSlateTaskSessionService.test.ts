@@ -4,9 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { AgentPhase } from '../../browser/agent/cleanSlatePrompts.js';
-import { CleanSlateTaskSessionService } from '../../browser/core/cleanSlateTaskSessionService.js';
-import { CleanSlateTaskKind, CleanSlateTaskLifecycleStatus, CleanSlateWorkspaceShape } from '../../browser/core/cleanSlateTaskState.js';
+import { AgentPhase } from '@cleanslate/sdk/agent/cleanSlatePrompts.js';
+import { CleanSlateTaskSessionService } from '@cleanslate/sdk/services/cleanSlateTaskSessionService.js';
+import { CleanSlateTaskKind, CleanSlateTaskLifecycleStatus, CleanSlateWorkspaceShape } from '@cleanslate/sdk/services/cleanSlateTaskState.js';
 
 suite('CleanSlateTaskSessionService', () => {
     test('archives the previous run when a new task starts', () => {

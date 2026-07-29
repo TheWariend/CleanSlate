@@ -5,13 +5,13 @@
 
 import * as assert from 'assert';
 import { CleanSlateAgentHistoryBuilder } from '../../browser/agent/cleanSlateAgentHistoryBuilder.js';
-import { CleanSlateAgentSession } from '../../browser/agent/cleanSlateAgentSession.js';
-import { CleanSlateExecutionEditPolicy } from '../../browser/agent/cleanSlateExecutionEditPolicy.js';
+import { CleanSlateAgentSession } from '@cleanslate/sdk/agent/cleanSlateAgentSession.js';
+import { CleanSlateExecutionEditPolicy } from '@cleanslate/sdk/agent/cleanSlateExecutionEditPolicy.js';
 import { CleanSlateToolDispatcher } from '../../browser/agent/cleanSlateToolDispatcher.js';
 import { CleanSlateAgentManagerSessionMapper } from '../../browser/agentManager/cleanSlateAgentManagerSessionMapper.js';
 import { CleanSlateChatSessionSnapshotCodec } from '../../browser/chat/providers/cleanSlateChatSessionSnapshotCodec.js';
-import { CleanSlateVerificationTargetTracker } from '../../browser/core/cleanSlateVerificationTargetTracker.js';
-import { CleanSlateProviderSchemaNormalizer } from '../../../../services/cleanSlate/node/core/cleanSlateProviderSchemaNormalizer.js';
+import { CleanSlateVerificationTargetTracker } from '@cleanslate/sdk/services/cleanSlateVerificationTargetTracker.js';
+import { CleanSlateProviderSchemaNormalizer } from '@cleanslate/sdk/node/cleanSlateProviderSchemaNormalizer.js';
 
 suite('CleanSlate refactored boundaries', () => {
 	test('history builder removes the current echo and strips ephemeral context', () => {

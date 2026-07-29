@@ -7,7 +7,7 @@ import * as assert from 'assert';
 import {
 	getCleanSlateMcpCapabilityCatalog,
 	getCleanSlateSkillCatalog
-} from '../../browser/skills/cleanSlateSkillCatalog.js';
+} from '@cleanslate/sdk/skills/cleanSlateSkillCatalog.js';
 
 suite('CleanSlateSkillCatalog', () => {
 	test('tracks the requested eleven reference skills', () => {

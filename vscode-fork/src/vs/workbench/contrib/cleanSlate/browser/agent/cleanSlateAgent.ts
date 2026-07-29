@@ -11,6 +11,11 @@ import { IInstantiationService } from '../../../../../platform/instantiation/com
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { Selection } from '../../../../../editor/common/core/selection.js';
 import { IBulkEditService } from '../../../../../editor/browser/services/bulkEditService.js';
+import { CleanSlateEditorDecorationHost } from '../tools/cleanSlateEditorDecorationHost.js';
+import { CleanSlateEditorBulkEditHost } from '../host/cleanSlateEditorBulkEditHost.js';
+import { CleanSlateArtifactPresentationHost } from '../artifacts/cleanSlateArtifactPresentationHost.js';
+import { CleanSlateFileHost } from '../host/cleanSlateFileHost.js';
+import { CleanSlateTextFileHost } from '../host/cleanSlateTextFileHost.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { IEnvironmentService } from '../../../../../platform/environment/common/environment.js';
 import { ILanguageFeaturesService } from '../../../../../editor/common/services/languageFeatures.js';
@@ -20,45 +25,44 @@ import {
     parseSlashCommand,
 	AgentPhase,
 	SLASH_COMMANDS
-} from './cleanSlatePrompts.js';
+} from '@cleanslate/sdk/agent/cleanSlatePrompts.js';
 import {
     buildContinuationContextPrompt,
     buildPhaseObjectivePrompt,
 	buildWorkspaceMemoryPrompt
-} from './cleanSlateRuntimePromptBuilder.js';
-import { CleanSlateThreadService } from '../core/cleanSlateThreadService.js';
-import { CleanSlateReadFileState, CleanSlateTool, CleanSlateToolContext, CleanSlateToolSurface, ALL_TOOLS } from '../core/cleanSlateTools.js';
-import { AgentDefinition } from '../composer/registry/agentSchema.js';
-import { AsyncQueue, CleanSlateStreamPart, IExecutionLoopSettings } from './cleanSlateAgentTypes.js';
+} from '@cleanslate/sdk/agent/cleanSlateRuntimePromptBuilder.js';
+import { CleanSlateThreadService } from '@cleanslate/sdk/services/cleanSlateThreadService.js';
+import { CleanSlateReadFileState, CleanSlateTool, CleanSlateToolContext, CleanSlateToolSurface, ALL_TOOLS } from '@cleanslate/sdk/services/cleanSlateTools.js';
+import { AgentDefinition } from '@cleanslate/sdk/composer/registry/agentSchema.js';
+import { AsyncQueue, CleanSlateStreamPart, IExecutionLoopSettings } from '@cleanslate/sdk/agent/cleanSlateAgentTypes.js';
 import { CleanSlateAgentContextHelper } from './cleanSlateAgentContext.js';
-import { CleanSlateAgentParsingSupport } from './cleanSlateAgentParsing.js';
-import { CleanSlateAgentExecutionSupport } from './cleanSlateAgentExecutionSupport.js';
-import { CleanSlateQueryRunner, IExecutionRunnerOptions, ICleanSlateDeferredContext } from './cleanSlateQueryRunner.js';
-import { CleanSlateExecutionBudget, ICleanSlateExecutionBudget } from './cleanSlateExecutionBudget.js';
-import { cancellationTokenFromAbortSignal } from '../core/cleanSlateCancellation.js';
+import { CleanSlateAgentParsingSupport } from '@cleanslate/sdk/agent/cleanSlateAgentParsing.js';
+import { CleanSlateAgentExecutionSupport } from '@cleanslate/sdk/agent/cleanSlateAgentExecutionSupport.js';
+import { CleanSlateQueryRunner, IExecutionRunnerOptions, ICleanSlateDeferredContext } from '@cleanslate/sdk/agent/cleanSlateQueryRunner.js';
+import { CleanSlateExecutionBudget, ICleanSlateExecutionBudget } from '@cleanslate/sdk/agent/cleanSlateExecutionBudget.js';
+import { cancellationTokenFromAbortSignal } from '@cleanslate/sdk/services/cleanSlateCancellation.js';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
-import { requestMcpToolApproval } from '../tools/MCPTools.js';
+import { requestMcpToolApproval } from '@cleanslate/sdk/tools/MCPTools.js';
 import { CleanSlateDialogueContextService } from './cleanSlateDialogueContextService.js';
 import { CleanSlateCodeGraphService } from './cleanSlateCodeGraphService.js';
-import { CleanSlateTaskSessionService } from '../core/cleanSlateTaskSessionService.js';
+import { CleanSlateTaskSessionService } from '@cleanslate/sdk/services/cleanSlateTaskSessionService.js';
 import { ICleanSlateCommandExecutionService } from '../core/cleanSlateCommandExecutionService.js';
 import { ICleanSlateBrowserAutomationService, type ICleanSlateBrowserAnnotation } from '../core/cleanSlateBrowserAutomationService.js';
 import { ICleanSlateCommandApprovalService } from '../core/cleanSlateCommandApprovalService.js';
 import { applyRequestedModeToExecutionSettings, CLEANSLATE_REQUESTED_MODE, CleanSlateRequestedMode, normalizePhaseForExecutionFlow } from './cleanSlateExecutionProfile.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
-import { ITerminalService } from '../../../terminal/browser/terminal.js';
 import { IMarkerService } from '../../../../../platform/markers/common/markers.js';
-import { CleanSlateTaskKind, CleanSlateTaskLifecycleStatus, CleanSlateTurnIntent, CleanSlateWorkspaceShape } from '../core/cleanSlateTaskState.js';
+import { CleanSlateTaskKind, CleanSlateTaskLifecycleStatus, CleanSlateTurnIntent, CleanSlateWorkspaceShape } from '@cleanslate/sdk/services/cleanSlateTaskState.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IWorkspaceTrustManagementService } from '../../../../../platform/workspace/common/workspaceTrust.js';
 import { ISearchService } from '../../../../services/search/common/search.js';
-import { sanitizeToolResultForRenderer as sanitizeToolResultForRendererPayload } from './cleanSlateToolResultPromptSerializer.js';
+import { sanitizeToolResultForRenderer as sanitizeToolResultForRendererPayload } from '@cleanslate/sdk/agent/cleanSlateToolResultPromptSerializer.js';
 import { CleanSlateAgentHistoryBuilder } from './cleanSlateAgentHistoryBuilder.js';
 import { buildBrowserAnnotationTaskContext } from './cleanSlateBrowserAnnotationContext.js';
-import { CleanSlateAgentSession } from './cleanSlateAgentSession.js';
+import { CleanSlateAgentSession } from '@cleanslate/sdk/agent/cleanSlateAgentSession.js';
 import { CleanSlateToolDispatcher } from './cleanSlateToolDispatcher.js';
-import { composeTurnReminder } from '../composer/promptComposer.js';
+import { composeTurnReminder } from '@cleanslate/sdk/composer/promptComposer.js';
 
 interface ICleanSlateTurnControlDecision {
 	intent: CleanSlateTurnIntent;
@@ -93,6 +97,13 @@ export class CleanSlateAgent {
     private readonly dialogueContextService: CleanSlateDialogueContextService;
     private readonly codeGraphService: CleanSlateCodeGraphService;
     private readonly historyBuilder = new CleanSlateAgentHistoryBuilder();
+    /** Inline diff decorations, backed by the editor's inline controller. */
+    private readonly editorDecorationHost: CleanSlateEditorDecorationHost;
+    /** Turns edit descriptors into the editor's own ResourceTextEdit. */
+    private readonly bulkEditHost: CleanSlateEditorBulkEditHost;
+    private readonly artifactPresentationHost: CleanSlateArtifactPresentationHost;
+    private readonly fileHost: CleanSlateFileHost;
+    private readonly textFileHost: CleanSlateTextFileHost;
     private sessionId: string | undefined;
     private mcpToolsLoaded = false;
     private mcpToolsLoadPromise: Promise<void> | undefined;
@@ -112,7 +123,6 @@ export class CleanSlateAgent {
         @IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
         @ICleanSlateConfigurationService private readonly configService: ICleanSlateConfigurationService,
         @IFileService private readonly fileService: IFileService,
-        @ITerminalService private readonly terminalService: ITerminalService,
         @IMarkerService private readonly markerService: IMarkerService,
         @ICleanSlateArtifactService private readonly artifactService: ICleanSlateArtifactService,
         @IInstantiationService private readonly instantiationService: IInstantiationService,
@@ -129,26 +139,32 @@ export class CleanSlateAgent {
         @ICommandService private readonly commandService: ICommandService,
         @IWorkspaceTrustManagementService private readonly workspaceTrustManagementService: IWorkspaceTrustManagementService
     ) {
+        this.editorDecorationHost = new CleanSlateEditorDecorationHost(this.codeEditorService);
+        this.bulkEditHost = new CleanSlateEditorBulkEditHost(this.bulkEditService);
+        this.artifactPresentationHost = new CleanSlateArtifactPresentationHost(this.instantiationService, this.editorService);
+        this.fileHost = new CleanSlateFileHost(this.fileService);
+        this.textFileHost = new CleanSlateTextFileHost(this.textFileService);
         this.toolContext = {
             surface: 'ide',
             modelService: this.modelService,
             codeEditorService: this.codeEditorService,
-            textFileService: this.textFileService,
-            fileService: this.fileService,
+            textFileService: this.textFileHost,
+            fileService: this.fileHost,
             contextService: this.cleanSlateContextService,
             indexService: this.indexService,
             workspaceContextService: this.workspaceContextService,
             ideWorkspaceContextService: this.workspaceContextService,
             configService: this.configService,
-            terminalService: this.terminalService,
             markerService: this.markerService,
             artifactService: this.artifactService,
             mcpClientService: this.mcpClientService,
             cleanSlateMainService: this.cleanSlateMainService,
             instantiationService: this.instantiationService,
             editorService: this.editorService,
+            artifactPresentationHost: this.artifactPresentationHost,
             searchService: this.searchService,
-            bulkEditService: this.bulkEditService,
+            bulkEditService: this.bulkEditHost,
+            editorDecorationHost: this.editorDecorationHost,
             languageFeaturesService: this.languageFeaturesService,
             commandExecutionService: this.commandExecutionService,
             browserAutomationService: this.browserAutomationService,

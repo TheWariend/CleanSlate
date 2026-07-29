@@ -5,7 +5,7 @@
 
 import * as assert from 'assert';
 import { CleanSlateDialogueContextService } from '../../browser/agent/cleanSlateDialogueContextService.js';
-import { CleanSlateThreadService } from '../../browser/core/cleanSlateThreadService.js';
+import { CleanSlateThreadService } from '@cleanslate/sdk/services/cleanSlateThreadService.js';
 
 suite('CleanSlateDialogueContextService', () => {
 	test('keeps recent visible dialogue across task boundaries when using full thread memory', () => {

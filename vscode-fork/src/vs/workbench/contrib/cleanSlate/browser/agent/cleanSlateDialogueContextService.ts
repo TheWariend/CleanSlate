@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CLEANSLATE_FALLBACK_CONTEXT_WINDOW_TOKENS, IChatMessage, ICleanSlateConfigurationService } from '../../../../services/cleanSlate/common/core/cleanSlateAI.js';
-import { CleanSlateThreadService } from '../core/cleanSlateThreadService.js';
+import { CleanSlateThreadService } from '@cleanslate/sdk/services/cleanSlateThreadService.js';
 
 interface IDialogueContextOptions {
 	minUserTurns?: number;

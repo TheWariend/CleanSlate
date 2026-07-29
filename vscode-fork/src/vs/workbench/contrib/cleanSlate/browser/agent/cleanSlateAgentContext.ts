@@ -13,7 +13,7 @@ import { IWorkspaceContextService } from '../../../../../platform/workspace/comm
 import { CLEANSLATE_FALLBACK_CONTEXT_WINDOW_TOKENS, ICleanSlateConfigurationService } from '../../../../services/cleanSlate/common/core/cleanSlateAI.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { IMarkerService } from '../../../../../platform/markers/common/markers.js';
-import { cancellationTokenFromAbortSignal } from '../core/cleanSlateCancellation.js';
+import { cancellationTokenFromAbortSignal } from '@cleanslate/sdk/services/cleanSlateCancellation.js';
 
 interface IPinnedSymbol {
     name: string;

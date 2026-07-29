@@ -5,7 +5,7 @@
 
 import * as assert from 'assert';
 import { applyRequestedModeToExecutionSettings, CLEANSLATE_PHASE, CLEANSLATE_REQUESTED_MODE, normalizePhaseForExecutionFlow } from '../../browser/agent/cleanSlateExecutionProfile.js';
-import { CleanSlateTaskKind, CleanSlateTurnIntent } from '../../browser/core/cleanSlateTaskState.js';
+import { CleanSlateTaskKind, CleanSlateTurnIntent } from '@cleanslate/sdk/services/cleanSlateTaskState.js';
 import { normalizeCleanSlateExecutionState } from '../../../../services/cleanSlate/common/core/cleanSlateAI.js';
 
 suite('CleanSlateExecutionFlow', () => {

@@ -8,8 +8,8 @@ import { IReader } from '../../../../../base/common/observable.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ITreeSitterLibraryService } from '../../../../../editor/common/services/treeSitter/treeSitterLibraryService.js';
 import { createTextModel } from '../../../../../editor/test/common/testTextModel.js';
-import { canonicalizeStructuredEdits } from '../../browser/tools/structuredEditCanonicalizer.js';
-import { CleanSlateToolContext } from '../../browser/tools/types.js';
+import { canonicalizeStructuredEdits } from '@cleanslate/sdk/tools/structuredEditCanonicalizer.js';
+import { CleanSlateToolContext } from '@cleanslate/sdk/tools/types.js';
 
 class MockTreeSitterParser {
 	private language: { parse(content: string): { rootNode: MockTreeSitterNode; delete(): void } } | undefined;

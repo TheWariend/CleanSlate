@@ -8,7 +8,7 @@ import { URI } from '../../../../../../base/common/uri.js';
 import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { ISCMService } from '../../../../scm/common/scm.js';
 import type { ICleanSlateMainService } from '../../../../../services/cleanSlate/common/core/cleanSlateAI.js';
-import { CleanSlateDiffService } from '../../core/cleanSlateDiffService.js';
+import { CleanSlateDiffService } from '@cleanslate/sdk/services/cleanSlateDiffService.js';
 
 const MAX_EAGER_REVIEW_DIFF_CELLS = 500_000;
 const CLEANSLATE_GIT_REVIEW_TIMEOUT_MS = 15_000;

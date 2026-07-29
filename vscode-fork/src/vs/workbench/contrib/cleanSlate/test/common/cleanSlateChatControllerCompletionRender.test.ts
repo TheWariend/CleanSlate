@@ -7,10 +7,10 @@ import * as assert from 'assert';
 import { URI } from '../../../../../base/common/uri.js';
 import { CleanSlateChatController } from '../../browser/chat/runtime/cleanSlateChatController.js';
 import { InteractionBlock } from '../../browser/chat/types/cleanSlateChatTypes.js';
-import { CleanSlateThreadService } from '../../browser/core/cleanSlateThreadService.js';
-import { CleanSlateTaskSessionService } from '../../browser/core/cleanSlateTaskSessionService.js';
-import { CleanSlateTaskKind, CleanSlateTaskLifecycleStatus, CleanSlateWorkspaceShape } from '../../browser/core/cleanSlateTaskState.js';
-import { AgentPhase } from '../../browser/agent/cleanSlatePrompts.js';
+import { CleanSlateThreadService } from '@cleanslate/sdk/services/cleanSlateThreadService.js';
+import { CleanSlateTaskSessionService } from '@cleanslate/sdk/services/cleanSlateTaskSessionService.js';
+import { CleanSlateTaskKind, CleanSlateTaskLifecycleStatus, CleanSlateWorkspaceShape } from '@cleanslate/sdk/services/cleanSlateTaskState.js';
+import { AgentPhase } from '@cleanslate/sdk/agent/cleanSlatePrompts.js';
 import { CleanSlateCommandApprovalService } from '../../browser/core/cleanSlateCommandApprovalService.js';
 import { CleanSlateToolPresentation } from '../../browser/chat/runtime/cleanSlateToolPresentation.js';
 

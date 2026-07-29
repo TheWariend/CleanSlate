@@ -4,8 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { browserClickTool, browserDiagnosticsTool, browserFillTool, browserOpenTool, browserSnapshotTool, browserTabsTool } from '../../browser/tools/BrowserAutomationTools.js';
-import { CleanSlateToolContext } from '../../browser/tools/types.js';
+import { browserClickTool, browserDiagnosticsTool, browserFillTool, browserOpenTool, browserSnapshotTool, browserTabsTool } from '@cleanslate/sdk/tools/BrowserAutomationTools.js';
+import { CleanSlateToolContext } from '@cleanslate/sdk/tools/types.js';
 
 suite('CleanSlateBrowserOpenTool', () => {
 	const workspaceContextService = {

@@ -5,9 +5,9 @@
 
 import * as assert from 'assert';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
-import { CleanSlateAnthropicMessageAdapter } from '../../../../services/cleanSlate/node/core/cleanSlateAnthropicMessageAdapter.js';
+import { CleanSlateAnthropicMessageAdapter } from '@cleanslate/sdk/node/cleanSlateAnthropicMessageAdapter.js';
 import { NodeCleanSlateMainService } from '../../../../services/cleanSlate/node/core/cleanSlateMainService.js';
-import { CleanSlateProviderSchemaNormalizer } from '../../../../services/cleanSlate/node/core/cleanSlateProviderSchemaNormalizer.js';
+import { CleanSlateProviderSchemaNormalizer } from '@cleanslate/sdk/node/cleanSlateProviderSchemaNormalizer.js';
 
 suite('CleanSlate provider transcript formatting', () => {
 	function createService(): any {

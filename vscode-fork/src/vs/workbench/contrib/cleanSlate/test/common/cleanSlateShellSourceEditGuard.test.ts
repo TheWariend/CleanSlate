@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { detectShellSourceEditAttempt } from '../../browser/tools/ExecuteCommandTool.js';
+import { detectShellSourceEditAttempt } from '@cleanslate/sdk/tools/ExecuteCommandTool.js';
 
 suite('CleanSlateShellSourceEditGuard', () => {
 	test('blocks the observed python heredoc rewrite', () => {

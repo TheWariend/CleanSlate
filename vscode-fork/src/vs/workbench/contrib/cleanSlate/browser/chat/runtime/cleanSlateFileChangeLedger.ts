@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { URI } from '../../../../../../base/common/uri.js';
-import type { ICleanSlateFileChange } from '../../agent/cleanSlateFilesModifiedService.js';
+import type { ICleanSlateFileChange } from '@cleanslate/sdk/agent/cleanSlateFilesModifiedService.js';
 
 export interface ICleanSlateLedgerRecord extends ICleanSlateFileChange {
 	uri: URI;

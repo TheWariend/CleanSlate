@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { getCleanSlateContextDefaults, resolveCleanSlateEffectiveReasoningLevel, resolveCleanSlateModelCapabilities, resolveCleanSlateReasoningLevelOptions } from '../../../../services/cleanSlate/common/core/cleanSlateModelCapabilities.js';
+import { getCleanSlateContextDefaults, resolveCleanSlateEffectiveReasoningLevel, resolveCleanSlateModelCapabilities, resolveCleanSlateReasoningLevelOptions } from '@cleanslate/sdk/protocol/cleanSlateModelCapabilities.js';
 
 suite('CleanSlate model capabilities', () => {
 	test('uses models.dev limits and reasoning metadata for newly released models', () => {

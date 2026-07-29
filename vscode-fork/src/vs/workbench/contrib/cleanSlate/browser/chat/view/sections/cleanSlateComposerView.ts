@@ -6,7 +6,7 @@
 import * as dom from '../../../../../../../base/browser/dom.js';
 import type { ICleanSlateBrowserAnnotation } from '../../../core/cleanSlateBrowserAutomationService.js';
 import { policy } from '../../runtime/cleanSlateChatController.js';
-import { SLASH_COMMANDS } from '../../../composer/commands/slashCommands.js';
+import { SLASH_COMMANDS } from '@cleanslate/sdk/composer/commands/slashCommands.js';
 import type { ICleanSlateEditorSelectionReference } from '../../providers/cleanSlateChatComposerProvider.js';
 import { setCleanSlateProviderLogo } from '../../providers/cleanSlateProviderLogos.js';
 import type { AIProvider } from '../../../../../../services/cleanSlate/common/core/cleanSlateAI.js';

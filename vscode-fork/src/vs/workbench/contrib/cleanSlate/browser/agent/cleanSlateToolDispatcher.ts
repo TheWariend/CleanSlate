@@ -3,7 +3,7 @@
  * Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { CleanSlateTool } from '../core/cleanSlateTools.js';
+import { CleanSlateTool } from '@cleanslate/sdk/services/cleanSlateTools.js';
 
 export interface ICleanSlatePreparedToolCall {
 	readonly ok: true;

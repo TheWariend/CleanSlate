@@ -5,8 +5,8 @@
 
 import * as assert from 'assert';
 import { URI } from '../../../../../base/common/uri.js';
-import { resolveBackgroundLanguageFeatureModel } from '../../browser/tools/languageFeatureActivation.js';
-import { CleanSlateToolContext } from '../../browser/tools/types.js';
+import { resolveBackgroundLanguageFeatureModel } from '@cleanslate/sdk/tools/languageFeatureActivation.js';
+import { CleanSlateToolContext } from '@cleanslate/sdk/tools/types.js';
 
 /**
  * Regression guard for the cross-project file "leak": a background LSP warm-up

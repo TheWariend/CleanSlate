@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { CleanSlateNativeToolTranscript } from '../../browser/agent/cleanSlateNativeToolTranscript.js';
+import { CleanSlateNativeToolTranscript } from '@cleanslate/sdk/agent/cleanSlateNativeToolTranscript.js';
 
 suite('CleanSlateNativeToolTranscript', () => {
 	test('builds provider-native assistant and tool result messages', () => {

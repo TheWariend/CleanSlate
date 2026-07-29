@@ -5,7 +5,7 @@
 
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 import { ICleanSlateEditCodeService } from '../../../../../services/cleanSlate/common/core/cleanSlateAI.js';
-import { CleanSlateFilesModifiedService } from '../../agent/cleanSlateFilesModifiedService.js';
+import { CleanSlateFilesModifiedService } from '@cleanslate/sdk/agent/cleanSlateFilesModifiedService.js';
 import { InteractionBlock } from '../types/cleanSlateChatTypes.js';
 import { CleanSlateFileChangeLedger } from './cleanSlateFileChangeLedger.js';
 

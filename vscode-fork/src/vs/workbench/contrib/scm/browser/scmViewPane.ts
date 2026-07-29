@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/scm.css';
-import { ICleanSlateService } from '../../../../workbench/services/cleanSlate/common/core/cleanSlateAI.js';
+import { ICleanSlateService } from '../../../services/cleanSlate/common/core/cleanSlateAI.js';
 import { Event, Emitter } from '../../../../base/common/event.js';
 import { basename, dirname } from '../../../../base/common/resources.js';
 import { IDisposable, Disposable, DisposableStore, combinedDisposable, dispose, toDisposable, MutableDisposable, DisposableMap } from '../../../../base/common/lifecycle.js';

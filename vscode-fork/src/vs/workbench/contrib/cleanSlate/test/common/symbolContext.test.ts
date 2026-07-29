@@ -5,7 +5,7 @@
 
 import * as assert from 'assert';
 import { SymbolKind } from '../../../../../editor/common/languages.js';
-import { buildSymbolContext } from '../../browser/tools/symbolContext.js';
+import { buildSymbolContext } from '@cleanslate/sdk/tools/symbolContext.js';
 
 function range(startLineNumber: number, startColumn: number, endLineNumber: number, endColumn: number) {
 	return { startLineNumber, startColumn, endLineNumber, endColumn };

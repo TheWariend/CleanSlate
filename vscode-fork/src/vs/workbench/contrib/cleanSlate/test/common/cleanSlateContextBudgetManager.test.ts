@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { CleanSlateContextBudgetManager } from '../../browser/agent/cleanSlateContextBudgetManager.js';
+import { CleanSlateContextBudgetManager } from '@cleanslate/sdk/agent/cleanSlateContextBudgetManager.js';
 import { IChatMessage } from '../../../../services/cleanSlate/common/core/cleanSlateAI.js';
 
 suite('CleanSlateContextBudgetManager', () => {

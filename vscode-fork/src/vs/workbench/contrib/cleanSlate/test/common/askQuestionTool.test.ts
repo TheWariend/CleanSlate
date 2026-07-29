@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { askQuestionTool } from '../../browser/tools/AskQuestionTool.js';
+import { askQuestionTool } from '@cleanslate/sdk/tools/AskQuestionTool.js';
 
 suite('askQuestionTool', () => {
 	test('returns a structured native question without text parsing', async () => {

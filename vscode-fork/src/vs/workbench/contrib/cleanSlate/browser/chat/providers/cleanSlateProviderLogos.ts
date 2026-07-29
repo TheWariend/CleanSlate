@@ -6,7 +6,7 @@
 import { asCSSUrl } from '../../../../../../base/browser/cssValue.js';
 import { FileAccess } from '../../../../../../base/common/network.js';
 import { AIProvider } from '../../../../../services/cleanSlate/common/core/cleanSlateAI.js';
-import { resolveCleanSlateModelFamily } from '../../../../../services/cleanSlate/common/core/cleanSlateModelCapabilities.js';
+import { resolveCleanSlateModelFamily } from '@cleanslate/sdk/protocol/cleanSlateModelCapabilities.js';
 
 export interface ICleanSlateProviderLogo {
     readonly label: string;
