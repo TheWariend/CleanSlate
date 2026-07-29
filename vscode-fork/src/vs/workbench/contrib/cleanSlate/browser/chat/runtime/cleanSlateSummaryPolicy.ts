@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { AgentPhase } from '../../agent/cleanSlatePrompts.js';
+import { AgentPhase } from '@cleanslate/sdk/agent/cleanSlatePrompts.js';
 import { ChatResponse } from '../types/cleanSlateChatTypes.js';
 
 export type RenderableSummaryRole = 'orientation' | 'progress' | 'completion' | 'status';

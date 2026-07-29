@@ -5,8 +5,8 @@
 
 import * as assert from 'assert';
 import { URI } from '../../../../../base/common/uri.js';
-import { applyEditTool } from '../../browser/tools/ApplyEditTool.js';
-import { writeFileTool } from '../../browser/tools/WriteFileTool.js';
+import { applyEditTool } from '@cleanslate/sdk/tools/ApplyEditTool.js';
+import { writeFileTool } from '@cleanslate/sdk/tools/WriteFileTool.js';
 
 suite('CleanSlate write file tool', () => {
 	test('delegates an existing file to the guarded full-file edit engine', async () => {

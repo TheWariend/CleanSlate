@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { ICleanSlateArtifactService } from '../../../../../services/cleanSlate/common/core/cleanSlateAI.js';
-import { CleanSlateTaskLifecycleStatus } from '../../core/cleanSlateTaskState.js';
+import { CleanSlateTaskLifecycleStatus } from '@cleanslate/sdk/services/cleanSlateTaskState.js';
 import { IResponseRenderer } from '../types/cleanSlateChatTypes.js';
 import { CleanSlateChatSidebarViewModel } from './cleanSlateChatSidebarViewModel.js';
 

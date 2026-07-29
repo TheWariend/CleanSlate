@@ -37,7 +37,7 @@ import {
     ICleanSlateWebSearchOptions,
     ICleanSlateWebSearchResponse
 } from '../../common/core/cleanSlateAI.js';
-import { normalizeToolName } from '../../common/core/cleanSlateProviderMessageTransforms.js';
+import { normalizeToolName } from '@cleanslate/sdk/protocol/cleanSlateProviderMessageTransforms.js';
 import { parseEnvFile } from '../../../../../base/common/envfile.js';
 import { IRequestOptions } from '../../../../../base/parts/request/common/request.js';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
@@ -52,9 +52,9 @@ import { ILogService } from '../../../../../platform/log/common/log.js';
 import { CleanSlateThreadPersistenceStore } from './cleanSlateThreadPersistenceStore.js';
 import { CleanSlateWebRetrievalService } from './cleanSlateWebRetrievalService.js';
 import { CleanSlateLocalEmbeddingService } from './cleanSlateLocalEmbeddingService.js';
-import { CleanSlateProviderSchemaNormalizer } from './cleanSlateProviderSchemaNormalizer.js';
-import { CleanSlateOpenAIMessageAdapter } from './cleanSlateOpenAIMessageAdapter.js';
-import { CleanSlateAnthropicMessageAdapter } from './cleanSlateAnthropicMessageAdapter.js';
+import { CleanSlateProviderSchemaNormalizer } from '@cleanslate/sdk/node/cleanSlateProviderSchemaNormalizer.js';
+import { CleanSlateOpenAIMessageAdapter } from '@cleanslate/sdk/node/cleanSlateOpenAIMessageAdapter.js';
+import { CleanSlateAnthropicMessageAdapter } from '@cleanslate/sdk/node/cleanSlateAnthropicMessageAdapter.js';
 
 interface IReasoningTagSplitState {
     inside: boolean;

@@ -5,7 +5,7 @@
 
 import * as assert from 'assert';
 import { URI } from '../../../../../base/common/uri.js';
-import { resolveCommandCwd, resolvePathToUri } from '../../browser/tools/utils.js';
+import { resolveCommandCwd, resolvePathToUri } from '@cleanslate/sdk/tools/utils.js';
 
 suite('resolvePathToUri', () => {
     const workspaceRoot = URI.file('/tmp/cleanslate-resolver');

@@ -6,7 +6,7 @@
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { Disposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { AIProvider, ICleanSlateConfiguration, ICleanSlateConfigurationService, ICleanSlateService } from '../../../../../services/cleanSlate/common/core/cleanSlateAI.js';
-import { CleanSlateOpenAICompatibleProviderFlavor, ICleanSlateReasoningLevelOption, resolveCleanSlateReasoningLevelOptions } from '../../../../../services/cleanSlate/common/core/cleanSlateModelCapabilities.js';
+import { CleanSlateOpenAICompatibleProviderFlavor, ICleanSlateReasoningLevelOption, resolveCleanSlateReasoningLevelOptions } from '@cleanslate/sdk/protocol/cleanSlateModelCapabilities.js';
 
 export interface ICleanSlateModelDropdownState {
     provider: AIProvider;

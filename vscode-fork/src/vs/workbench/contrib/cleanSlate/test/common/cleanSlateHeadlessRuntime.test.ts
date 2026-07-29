@@ -7,9 +7,10 @@ import assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { CleanSlateHeadlessRuntime } from '../../../../services/cleanSlate/node/agentRuntime/cleanSlateHeadlessRunner.js';
-import { readFileTool } from '../../browser/tools/ReadFileTool.js';
-import { applyEditTool } from '../../browser/tools/ApplyEditTool.js';
+import { CleanSlateHeadlessRuntime } from '@cleanslate/sdk/node/cleanSlateHeadlessRunner.js';
+import { createCleanSlateNodeToolContext } from '../../../../services/cleanSlate/node/agentRuntime/cleanSlateNodeToolContext.js';
+import { readFileTool } from '@cleanslate/sdk/tools/ReadFileTool.js';
+import { applyEditTool } from '@cleanslate/sdk/tools/ApplyEditTool.js';
 
 function scratchRepo(files: Record<string, string>): string {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cleanslate-headless-'));
@@ -22,10 +23,17 @@ function scratchRepo(files: Record<string, string>): string {
 }
 
 function runtimeFor(root: string, tools: any[]): CleanSlateHeadlessRuntime {
-	return new CleanSlateHeadlessRuntime({
+	const options = {
 		rootPath: root,
 		configuration: { provider: 'test' },
-		approveCommand: async () => true,
+		approveCommand: async () => true
+	};
+	return new CleanSlateHeadlessRuntime({
+		...options,
+		// The editor builds its own headless context — see
+		// cleanSlateNodeToolContext.ts — so the runner is handed one rather than
+		// assembling the SDK's, which would reach for Playwright and MCP.
+		toolContext: createCleanSlateNodeToolContext(options),
 		tools,
 		cleanSlateService: { chat: async () => (async function* () { })() }
 	});

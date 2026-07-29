@@ -5,7 +5,7 @@
 
 import * as assert from 'assert';
 import { URI } from '../../../../../base/common/uri.js';
-import { multiFileReplaceTool } from '../../browser/tools/MultiFileReplaceTool.js';
+import { multiFileReplaceTool } from '@cleanslate/sdk/tools/MultiFileReplaceTool.js';
 
 /**
  * These cover the seam that used to be a silent-failure hazard.

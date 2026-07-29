@@ -17,7 +17,7 @@ import { CleanSlateIndexServiceProxy } from '../../../../../services/cleanSlate/
 import { URI } from '../../../../../../base/common/uri.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../../platform/storage/common/storage.js';
 import { IWorkspaceContextService, WorkbenchState, type IWorkspace, type IWorkspaceFolder, type IWorkspaceFoldersChangeEvent, type IWorkspaceFoldersWillChangeEvent, type IWorkspaceIdentifier, type ISingleFolderWorkspaceIdentifier } from '../../../../../../platform/workspace/common/workspace.js';
-import { AgentDefinition } from '../../composer/registry/agentSchema.js';
+import { AgentDefinition } from '@cleanslate/sdk/composer/registry/agentSchema.js';
 import { CleanSlateAgent } from '../../agent/cleanSlateAgent.js';
 import { CleanSlateChatController } from '../runtime/cleanSlateChatController.js';
 import { IResponseRenderer } from '../types/cleanSlateChatTypes.js';
@@ -42,9 +42,9 @@ import {
     isCleanSlateSessionState,
     normalizeCleanSlateSessionExecutionState
 } from '../types/cleanSlateChatSessionTypes.js';
-import { CleanSlateThreadService } from '../../core/cleanSlateThreadService.js';
-import { CleanSlateTaskSessionService, ICleanSlateRunSummary } from '../../core/cleanSlateTaskSessionService.js';
-import type { CleanSlateToolSurface } from '../../core/cleanSlateTools.js';
+import { CleanSlateThreadService } from '@cleanslate/sdk/services/cleanSlateThreadService.js';
+import { CleanSlateTaskSessionService, ICleanSlateRunSummary } from '@cleanslate/sdk/services/cleanSlateTaskSessionService.js';
+import type { CleanSlateToolSurface } from '@cleanslate/sdk/services/cleanSlateTools.js';
 import { CleanSlateChatSessionRunState, CleanSlateSessionAlreadyRunningError, type CleanSlateSessionRunStatus } from './cleanSlateChatSessionRunState.js';
 import { CleanSlateChatSessionSnapshotCodec } from './cleanSlateChatSessionSnapshotCodec.js';
 

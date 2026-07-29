@@ -4,8 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { SLASH_COMMANDS } from '../../browser/composer/commands/slashCommands.js';
-import { composePrompt } from '../../browser/composer/promptComposer.js';
+import { SLASH_COMMANDS } from '@cleanslate/sdk/composer/commands/slashCommands.js';
+import { composePrompt } from '@cleanslate/sdk/composer/promptComposer.js';
 
 suite('promptComposer', () => {
     function flattenPromptText(parts: readonly { text: string }[]): string {

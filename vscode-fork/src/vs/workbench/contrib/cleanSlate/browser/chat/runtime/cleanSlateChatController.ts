@@ -11,9 +11,9 @@ import { URI } from '../../../../../../base/common/uri.js';
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 
 import { CleanSlateAgent } from '../../agent/cleanSlateAgent.js';
-import { CleanSlateThreadService } from '../../core/cleanSlateThreadService.js';
-import { CleanSlateTaskSessionService } from '../../core/cleanSlateTaskSessionService.js';
-import { AgentPhase } from '../../agent/cleanSlatePrompts.js';
+import { CleanSlateThreadService } from '@cleanslate/sdk/services/cleanSlateThreadService.js';
+import { CleanSlateTaskSessionService } from '@cleanslate/sdk/services/cleanSlateTaskSessionService.js';
+import { AgentPhase } from '@cleanslate/sdk/agent/cleanSlatePrompts.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { Disposable } from '../../../../../../base/common/lifecycle.js';
 
@@ -23,7 +23,7 @@ import { ChatResponse, InteractionBlock, IResponseRenderer } from '../types/clea
 import { normalizeChatResponse, normalizePlanningQuestion } from './cleanSlateChatResponseNormalizer.js';
 import { formatChatErrorMessage, parseStreamingJSON } from './cleanSlateStreamingResponseParser.js';
 import { getRenderableSummaryRole, isAgentTaskPhase, isStableSummaryRole, selectRenderableSummaries, type SummaryRenderContext } from './cleanSlateSummaryPolicy.js';
-import { CleanSlateFilesModifiedService } from '../../agent/cleanSlateFilesModifiedService.js';
+import { CleanSlateFilesModifiedService } from '@cleanslate/sdk/agent/cleanSlateFilesModifiedService.js';
 import { CleanSlateFileChangeLedger } from './cleanSlateFileChangeLedger.js';
 import { ICleanSlateCommandApprovalService, type ICleanSlateCommandApprovalRequest, type ICleanSlateCommandApprovalResolution } from '../../core/cleanSlateCommandApprovalService.js';
 import { CleanSlateRenderPayloadCodec } from './cleanSlateRenderPayloadCodec.js';

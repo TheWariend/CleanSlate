@@ -5,17 +5,24 @@
 
 import * as path from 'path';
 import { URI } from '../../../../../base/common/uri.js';
-import { CleanSlateNodeFileService, CleanSlateNodeModelService, CleanSlateNodeTextFileService } from './cleanSlateNodeFileServices.js';
-import { CleanSlateNodeCommandService } from './cleanSlateNodeCommandService.js';
+import { CleanSlateNodeFileService, CleanSlateNodeModelService, CleanSlateNodeTextFileService } from '@cleanslate/sdk/node/cleanSlateNodeFileServices.js';
+import { CleanSlateNodeCommandService } from '@cleanslate/sdk/node/cleanSlateNodeCommandService.js';
 
 /**
  * A single-folder workspace rooted at the directory the run was pointed at.
  * `getWorkspaceFolder` doubles as the containment check the tools use to refuse
  * paths outside the repository, so it returns undefined rather than clamping.
  */
+interface ICleanSlateNodeWorkspaceFolder {
+	uri: URI;
+	name: string;
+	index: number;
+	toResource: (relative: string) => URI;
+}
+
 export class CleanSlateNodeWorkspaceService {
 
-	private readonly folder: { uri: URI; name: string; index: number; toResource: (relative: string) => URI };
+	private readonly folder: ICleanSlateNodeWorkspaceFolder;
 
 	constructor(rootPath: string) {
 		const root = URI.file(path.resolve(rootPath));
@@ -27,11 +34,11 @@ export class CleanSlateNodeWorkspaceService {
 		};
 	}
 
-	getWorkspace(): { folders: typeof this.folder[] } {
+	getWorkspace(): { folders: ICleanSlateNodeWorkspaceFolder[] } {
 		return { folders: [this.folder] };
 	}
 
-	getWorkspaceFolder(resource: URI): typeof this.folder | undefined {
+	getWorkspaceFolder(resource: URI): ICleanSlateNodeWorkspaceFolder | undefined {
 		const root = this.folder.uri.fsPath;
 		const target = resource.fsPath;
 		const relative = path.relative(root, target);
@@ -61,6 +68,13 @@ export interface ICleanSlateNodeRuntimeOptions {
  * decorating a diff, opening an editor — are present but inert. The tools
  * already treat them as optional or ignore their return, so a run behaves the
  * same minus the visuals.
+ *
+ * This is deliberately not `createNodeHost` from `@cleanslate/sdk/node`. That
+ * one wires the SDK's own browser automation, MCP client and index, which would
+ * put `playwright` and `@modelcontextprotocol/sdk` in the editor's dependency
+ * tree beside the ones it already has and prefers. The pieces underneath — the
+ * file services, the text model, the command service — do come from the SDK;
+ * only the assembly is the editor's.
  */
 export function createCleanSlateNodeToolContext(options: ICleanSlateNodeRuntimeOptions): any {
 	const fileService = new CleanSlateNodeFileService();

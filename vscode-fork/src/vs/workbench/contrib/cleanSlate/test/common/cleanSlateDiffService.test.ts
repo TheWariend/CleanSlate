@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { CleanSlateDiffService } from '../../browser/core/cleanSlateDiffService.js';
+import { CleanSlateDiffService } from '@cleanslate/sdk/services/cleanSlateDiffService.js';
 
 suite('CleanSlateDiffService', () => {
 	test('preserves dollar and ampersand characters in computed diff text', () => {

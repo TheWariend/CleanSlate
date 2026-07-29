@@ -5,8 +5,8 @@
 
 import * as assert from 'assert';
 import { Emitter } from '../../../../../base/common/event.js';
-import { executeCommandTool, readBackgroundCommandTool, startBackgroundCommandTool } from '../../browser/tools/ExecuteCommandTool.js';
-import { CleanSlateToolContext } from '../../browser/tools/types.js';
+import { executeCommandTool, readBackgroundCommandTool, startBackgroundCommandTool } from '@cleanslate/sdk/tools/ExecuteCommandTool.js';
+import { CleanSlateToolContext } from '@cleanslate/sdk/tools/types.js';
 
 suite('CleanSlateBackgroundCommandTool', () => {
 	test('preserves timeout status from finite command results', async () => {

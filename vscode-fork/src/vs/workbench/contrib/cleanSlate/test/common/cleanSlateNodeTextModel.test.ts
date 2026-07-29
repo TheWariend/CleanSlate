@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { URI } from '../../../../../base/common/uri.js';
-import { CleanSlateNodeTextModel } from '../../../../services/cleanSlate/node/agentRuntime/cleanSlateNodeTextModel.js';
+import { CleanSlateNodeTextModel } from '@cleanslate/sdk/node/cleanSlateNodeTextModel.js';
 
 function model(text: string): CleanSlateNodeTextModel {
 	return new CleanSlateNodeTextModel(URI.file('/tmp/example.ts'), text, 'typescript');

@@ -8,7 +8,7 @@ import { IReader } from '../../../../../base/common/observable.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ITreeSitterLibraryService } from '../../../../../editor/common/services/treeSitter/treeSitterLibraryService.js';
 import { createTextModel } from '../../../../../editor/test/common/testTextModel.js';
-import { CleanSlateEditService } from '../../browser/core/cleanSlateEditService.js';
+import { CleanSlateEditService } from '@cleanslate/sdk/services/cleanSlateEditService.js';
 
 class MockTreeSitterParser {
 	private language: { parse(content: string): { rootNode: any; delete(): void } } | undefined;

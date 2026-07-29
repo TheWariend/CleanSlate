@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { CleanSlateFilesModifiedService } from '../../browser/agent/cleanSlateFilesModifiedService.js';
+import { CleanSlateFilesModifiedService } from '@cleanslate/sdk/agent/cleanSlateFilesModifiedService.js';
 
 suite('CleanSlateFilesModifiedService', () => {
 	test('uses ledger snapshots before timeline and pending diff fallbacks', () => {

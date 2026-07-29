@@ -4,13 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { CleanSlateAgentParsingSupport } from '../../browser/agent/cleanSlateAgentParsing.js';
-import { CleanSlateExecutionQueryEngine } from '../../browser/agent/cleanSlateExecutionQuery.js';
-import { CleanSlateQueryRunner } from '../../browser/agent/cleanSlateQueryRunner.js';
-import { PHASE_CONCLUSION_SIGNAL_PLAN_CREATED } from '../../browser/agent/cleanSlateAgentTypes.js';
-import { AgentPhase } from '../../browser/agent/cleanSlatePrompts.js';
-import { CleanSlateThreadService } from '../../browser/core/cleanSlateThreadService.js';
-import { CleanSlateTaskSessionService } from '../../browser/core/cleanSlateTaskSessionService.js';
+import { CleanSlateAgentParsingSupport } from '@cleanslate/sdk/agent/cleanSlateAgentParsing.js';
+import { CleanSlateExecutionQueryEngine } from '@cleanslate/sdk/agent/cleanSlateExecutionQuery.js';
+import { CleanSlateQueryRunner } from '@cleanslate/sdk/agent/cleanSlateQueryRunner.js';
+import { PHASE_CONCLUSION_SIGNAL_PLAN_CREATED } from '@cleanslate/sdk/agent/cleanSlateAgentTypes.js';
+import { AgentPhase } from '@cleanslate/sdk/agent/cleanSlatePrompts.js';
+import { CleanSlateThreadService } from '@cleanslate/sdk/services/cleanSlateThreadService.js';
+import { CleanSlateTaskSessionService } from '@cleanslate/sdk/services/cleanSlateTaskSessionService.js';
 
 suite('CleanSlateQueryRunner', () => {
     test('planning-profile execution keeps prompt context stable across model turns', async () => {

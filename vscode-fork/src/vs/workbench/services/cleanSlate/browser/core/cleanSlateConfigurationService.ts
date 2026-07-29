@@ -23,7 +23,7 @@ import { ISecretStorageService } from '../../../../../platform/secrets/common/se
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { Emitter } from '../../../../../base/common/event.js';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
-import { CleanSlateOpenAICompatibleProviderFlavor, getCleanSlateContextDefaults, resolveCleanSlateEffectiveReasoningLevel } from '../../common/core/cleanSlateModelCapabilities.js';
+import { CleanSlateOpenAICompatibleProviderFlavor, getCleanSlateContextDefaults, resolveCleanSlateEffectiveReasoningLevel } from '@cleanslate/sdk/protocol/cleanSlateModelCapabilities.js';
 
 type StoredProviderConfigurations = ICleanSlateProviderConfigurations;
 type StoredConfiguration = Partial<Omit<ICleanSlateConfiguration, 'providers'>> & { providers?: StoredProviderConfigurations };

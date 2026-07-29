@@ -3,8 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { AgentDefinition } from '../../composer/registry/agentSchema.js';
-import { ICleanSlateTaskSessionSnapshot } from '../../core/cleanSlateTaskSessionService.js';
+import { AgentDefinition } from '@cleanslate/sdk/composer/registry/agentSchema.js';
+import { ICleanSlateTaskSessionSnapshot } from '@cleanslate/sdk/services/cleanSlateTaskSessionService.js';
 import {
     CleanSlateReasoningLevel,
 	type ICleanSlateAgentRuntimeSnapshot,

@@ -5,7 +5,7 @@
 
 import * as assert from 'assert';
 import { CLEANSLATE_FALLBACK_CONTEXT_WINDOW_TOKENS } from '../../../../services/cleanSlate/common/core/cleanSlateAI.js';
-import { CleanSlateAgentParsingSupport } from '../../browser/agent/cleanSlateAgentParsing.js';
+import { CleanSlateAgentParsingSupport } from '@cleanslate/sdk/agent/cleanSlateAgentParsing.js';
 
 suite('CleanSlateAgentParsingSupport', () => {
 	function createParsingSupport(config: Record<string, unknown>): CleanSlateAgentParsingSupport {

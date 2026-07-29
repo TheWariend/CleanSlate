@@ -4,8 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { sanitizeToolResultForRenderer, serializeToolResultForPrompt } from '../../browser/agent/cleanSlateToolResultPromptSerializer.js';
-import { CLEANSLATE_ABSOLUTE_MAX_FILE_READ_TOKENS, CLEANSLATE_MAX_FULL_FILE_READ_BYTES, CLEANSLATE_MIN_FILE_READ_TOKENS, estimateCleanSlateFileReadTokens, estimateCleanSlateUtf8Bytes, resolveCleanSlateFileReadBudget, takeCleanSlateBoundedLineSlice } from '../../browser/tools/cleanSlateFileReadPolicy.js';
+import { sanitizeToolResultForRenderer, serializeToolResultForPrompt } from '@cleanslate/sdk/agent/cleanSlateToolResultPromptSerializer.js';
+import { CLEANSLATE_ABSOLUTE_MAX_FILE_READ_TOKENS, CLEANSLATE_MAX_FULL_FILE_READ_BYTES, CLEANSLATE_MIN_FILE_READ_TOKENS, estimateCleanSlateFileReadTokens, estimateCleanSlateUtf8Bytes, resolveCleanSlateFileReadBudget, takeCleanSlateBoundedLineSlice } from '@cleanslate/sdk/tools/cleanSlateFileReadPolicy.js';
 
 suite('CleanSlateToolResultPromptSerializer', () => {
 	test('preserves complete file-read content instead of applying the generic string clamp', () => {

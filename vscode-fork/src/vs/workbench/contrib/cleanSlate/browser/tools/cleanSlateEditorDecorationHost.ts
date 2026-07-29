@@ -6,7 +6,7 @@
 import { URI } from '../../../../../base/common/uri.js';
 import { ICodeEditorService } from '../../../../../editor/browser/services/codeEditorService.js';
 import { InlineCleanSlateController } from '../../../../../editor/browser/cleanSlate/core/inlineCleanSlateController.js';
-import { ICleanSlateEditorDecorationHost, ICleanSlateOriginalEditForDisplay } from './cleanSlateHostTypes.js';
+import { ICleanSlateEditorDecorationHost, ICleanSlateOriginalEditForDisplay } from '@cleanslate/sdk/tools/cleanSlateHostTypes.js';
 
 /**
  * The editor's implementation of the decoration host: everything here reaches

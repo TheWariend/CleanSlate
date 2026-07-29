@@ -4,12 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { IBulkEditService, ResourceTextEdit } from '../../../../../editor/browser/services/bulkEditService.js';
+import { reviveHostUri } from './cleanSlateHostUri.js';
 import {
 	ICleanSlateBulkEditHost,
 	ICleanSlateBulkEditOptions,
 	ICleanSlateBulkEditResult,
 	ICleanSlateResourceTextEditDescriptor
-} from '../tools/cleanSlateHostTypes.js';
+} from '@cleanslate/sdk/tools/cleanSlateHostTypes.js';
 
 /**
  * The editor's implementation of the bulk-edit seam.
@@ -30,7 +31,7 @@ export class CleanSlateEditorBulkEditHost implements ICleanSlateBulkEditHost {
 		options?: ICleanSlateBulkEditOptions
 	): Promise<ICleanSlateBulkEditResult> {
 		const resourceEdits = edits.map(edit => new ResourceTextEdit(
-			edit.resource,
+			reviveHostUri(edit.resource),
 			{ range: edit.range, text: edit.text },
 			edit.versionId
 		));
