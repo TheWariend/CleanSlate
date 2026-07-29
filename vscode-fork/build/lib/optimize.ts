@@ -134,6 +134,19 @@ function bundleESMTask(opts: IBundleESMTaskOpts): NodeJS.ReadWriteStream {
 					build.onResolve({ filter: /^minimist$/ }, () => {
 						return { path: path.join(REPO_ROOT_PATH, 'node_modules', 'minimist', 'index.js'), external: false };
 					});
+
+					// The agent runtime is the one npm package the workbench
+					// imports statically. A renderer cannot resolve a bare
+					// specifier, so it is inlined here rather than left external
+					// — the dev build maps it through an import map instead, see
+					// setupImportMaps in workbench.ts.
+					build.onResolve({ filter: /^@cleanslate\/sdk(\/.*)?$/ }, ({ path: specifier }) => {
+						const subPath = specifier.slice('@cleanslate/sdk'.length).replace(/^\//, '') || 'index.js';
+						return {
+							path: path.join(REPO_ROOT_PATH, 'node_modules', '@cleanslate', 'sdk', 'dist', subPath),
+							external: false
+						};
+					});
 				},
 			};
 

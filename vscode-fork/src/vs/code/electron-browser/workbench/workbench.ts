@@ -293,8 +293,8 @@
 		const baseUrl = new URL(`${fileUriFromPath(configuration.appRoot, { isWindows: safeProcess.platform === 'win32', scheme: 'vscode-file', fallbackAuthority: 'vscode-app' })}/out/`);
 		globalThis._VSCODE_FILE_ROOT = baseUrl.toString();
 
-		// Dev only: CSS import map tricks
-		setupCSSImportMaps<T>(configuration, baseUrl);
+		// Import maps: the agent runtime package, and (dev only) CSS modules
+		setupImportMaps<T>(configuration, baseUrl);
 
 		// ESM Import
 		try {
@@ -449,7 +449,18 @@
 		return uri.replace(/#/g, '%23');
 	}
 
-	function setupCSSImportMaps<T extends ISandboxConfiguration>(configuration: T, baseUrl: URL) {
+	function setupImportMaps<T extends ISandboxConfiguration>(configuration: T, baseUrl: URL) {
+		const imports: Record<string, string> = {};
+
+		// The agent runtime is an npm package, not part of `vs/`, so the
+		// workbench imports it by its bare name. Nothing else in the renderer
+		// does that, and a renderer cannot resolve a bare specifier on its own,
+		// so the package needs an entry here. The production bundle inlines the
+		// package instead (see the esbuild resolve override in build/lib), and
+		// these entries go unused there.
+		const sdkUrl = new URL('../node_modules/@cleanslate/sdk/dist/', baseUrl).href;
+		imports['@cleanslate/sdk'] = `${sdkUrl}index.js`;
+		imports['@cleanslate/sdk/'] = sdkUrl;
 
 		// DEV ---------------------------------------------------------------------------------------
 		// DEV: This is for development and enables loading CSS via import-statements via import-maps.
@@ -457,11 +468,8 @@
 		// DEV: a blob URL that loads the CSS via a dynamic @import-rule.
 		// DEV ---------------------------------------------------------------------------------------
 
-		if (globalThis._VSCODE_DISABLE_CSS_IMPORT_MAP) {
-			return; // disabled in certain development setups
-		}
-
-		if (Array.isArray(configuration.cssModules) && configuration.cssModules.length > 0) {
+		let addedCssLoader = false;
+		if (!globalThis._VSCODE_DISABLE_CSS_IMPORT_MAP && Array.isArray(configuration.cssModules) && configuration.cssModules.length > 0) {
 			performance.mark('code/willAddCssLoader');
 
 			globalThis._VSCODE_CSS_LOAD = function (url) {
@@ -473,23 +481,26 @@
 				window.document.head.appendChild(link);
 			};
 
-			const importMap: { imports: Record<string, string> } = { imports: {} };
 			for (const cssModule of configuration.cssModules) {
 				const cssUrl = new URL(cssModule, baseUrl).href;
 				const jsSrc = `globalThis._VSCODE_CSS_LOAD('${cssUrl}');\n`;
 				const blob = new Blob([jsSrc], { type: 'application/javascript' });
-				importMap.imports[cssUrl] = URL.createObjectURL(blob);
+				imports[cssUrl] = URL.createObjectURL(blob);
 			}
 
-			const ttp = window.trustedTypes?.createPolicy('vscode-bootstrapImportMap', { createScript(value) { return value; }, });
-			const importMapSrc = JSON.stringify(importMap, undefined, 2);
-			const importMapScript = document.createElement('script');
-			importMapScript.type = 'importmap';
-			importMapScript.setAttribute('nonce', '0c6a828f1297');
-			// @ts-expect-error
-			importMapScript.textContent = ttp?.createScript(importMapSrc) ?? importMapSrc;
-			window.document.head.appendChild(importMapScript);
+			addedCssLoader = true;
+		}
 
+		const ttp = window.trustedTypes?.createPolicy('vscode-bootstrapImportMap', { createScript(value) { return value; }, });
+		const importMapSrc = JSON.stringify({ imports }, undefined, 2);
+		const importMapScript = document.createElement('script');
+		importMapScript.type = 'importmap';
+		importMapScript.setAttribute('nonce', '0c6a828f1297');
+		// @ts-expect-error
+		importMapScript.textContent = ttp?.createScript(importMapSrc) ?? importMapSrc;
+		window.document.head.appendChild(importMapScript);
+
+		if (addedCssLoader) {
 			performance.mark('code/didAddCssLoader');
 		}
 	}
