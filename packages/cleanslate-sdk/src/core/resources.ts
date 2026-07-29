@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as paths from 'node:path';
+import * as paths from './path.js';
 import { URI, uriToFsPath } from './uri.js';
 import { isWindows } from './platform.js';
 
@@ -15,8 +15,8 @@ import { isWindows } from './platform.js';
  * `path` port and — through `platform` — `vs/nls`. That is ~25 files to get six
  * functions.
  *
- * This reimplements exactly those six on `node:path`. Two simplifications are
- * safe and deliberate:
+ * This reimplements exactly those six on the vendored `path` port. Two
+ * simplifications are safe and deliberate:
  *
  * - The exported helpers in the original all bind to `extUri`, which is
  *   constructed with `() => false` for path casing. So path comparison here is

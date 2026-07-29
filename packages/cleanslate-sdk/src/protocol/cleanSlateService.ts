@@ -6,7 +6,7 @@
 import { ICleanSlateService, IChatMessage, IChatOptions, ICleanSlateConfigurationService, AIProvider, ICleanSlateMainService, ICleanSlateLogger, CleanSlateResponsePart, ICleanSlateProviderCapabilities, ICleanSlateConfiguration, CleanSlateReasoningLevel } from './cleanSlateAI.js';
 import { VSBuffer } from '../core/buffer.js';
 import { CancellationToken } from '../core/cancellation.js';
-import { Event } from '../core/event.js';
+import { Subscribable } from '../host/events.js';
 import { CleanSlateOpenAICompatibleProviderFlavor, CleanSlateProviderReasoningEffort, ICleanSlateModelCapabilityRequest, resolveCleanSlateModelCapabilities, resolveCleanSlateModelFamily } from './cleanSlateModelCapabilities.js';
 import { normalizeCleanSlateMessagesForProvider } from './cleanSlateProviderMessageTransforms.js';
 
@@ -955,7 +955,7 @@ export class CleanSlateService implements ICleanSlateService {
 		}, 0);
 	}
 
-	private async * parseProviderPartStream(event: Event<VSBuffer | string | null>, diagnostics?: IProviderRequestDiagnostics): AsyncIterable<CleanSlateResponsePart> {
+	private async * parseProviderPartStream(event: Subscribable<VSBuffer | string | null>, diagnostics?: IProviderRequestDiagnostics): AsyncIterable<CleanSlateResponsePart> {
 		const decoder = new TextDecoder();
 		let buffer = '';
 		const startedAt = Date.now();
@@ -1085,7 +1085,7 @@ export class CleanSlateService implements ICleanSlateService {
 		this.logger.info(`[CleanSlateAzureDebug] provider=${diagnostics.providerName} model=${diagnostics.model} reportedInputTokens=${numberOrUnknown(usage?.inputTokens)} reportedOutputTokens=${numberOrUnknown(usage?.outputTokens)} reportedTotalTokens=${numberOrUnknown(usage?.totalTokens)} cachedInputTokens=${numberOrUnknown(usage?.cachedInputTokens)}`);
 	}
 
-	private async * toAsyncIterableFromEvent(event: Event<VSBuffer | string | null>): AsyncIterable<Uint8Array> {
+	private async * toAsyncIterableFromEvent(event: Subscribable<VSBuffer | string | null>): AsyncIterable<Uint8Array> {
 		const queue: Uint8Array[] = [];
 		let done = false;
 		let error: any = null;

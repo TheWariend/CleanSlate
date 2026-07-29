@@ -10,6 +10,7 @@ const DEST = '/Users/mohammedmazin/WARIEND/CleanSlate/packages/cleanslate-sdk/sr
 // vs path -> destination file inside core/
 const FILES = {
 	'vs/base/common/uri.ts': 'uri.ts',
+	'vs/base/common/path.ts': 'path.ts',
 	'vs/base/common/charCode.ts': 'charCode.ts',
 	'vs/base/common/marshallingIds.ts': 'marshallingIds.ts',
 	'vs/base/common/event.ts': 'event.ts',
@@ -47,9 +48,11 @@ for (const [from, to] of Object.entries(FILES)) {
 	let text = readFileSync(path.join(SRC, from), 'utf8');
 	const depth = to.includes('/') ? '../' : './';
 
-	// node:path replaces vs/base/common/path.ts — the SDK runs on Node, so the
-	// browser-safe port is dead weight. uri.ts uses only win32.join/posix.join.
-	text = text.replace(/import \* as paths from '\.\/path\.js';/, `import * as paths from 'node:path';`);
+	// path.ts comes across as-is: the runtime has to run in an editor renderer
+	// too, where `node:path` does not exist.
+	text = text.replace(/from '\.\/path\.js'/g, `from '${depth}path.js'`);
+	// process.ts is reimplemented locally — see VENDOR.md.
+	text = text.replace(/from '\.\/process\.js'/g, `from '${depth}process.js'`);
 	// platform.ts exists to read the nls locale config; the SDK needs only the
 	// OS booleans, which live in a local module with no nls dependency.
 	text = text.replace(/from '\.\/platform\.js'/g, `from '${depth}platform.js'`);

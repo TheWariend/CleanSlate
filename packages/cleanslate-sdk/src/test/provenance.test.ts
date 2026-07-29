@@ -84,6 +84,41 @@ describe('SDK boundary', () => {
 		assert.deepEqual(missing, []);
 	});
 
+	test('the root entry point reaches no Node built-in', () => {
+		// The editor loads this graph in a renderer: no `require`, no `node:`
+		// scheme, no `Buffer`. Anything that needs Node belongs behind
+		// `@cleanslate/sdk/node`, which is a separate entry point for exactly
+		// this reason.
+		const DIST = path.resolve(SRC, '../dist');
+		const seen = new Set<string>();
+		const bare: string[] = [];
+		const visit = (file: string) => {
+			if (seen.has(file)) {
+				return;
+			}
+			seen.add(file);
+			const code = readFileSync(file, 'utf8');
+			// Anchored at the start of a line so that a specifier quoted inside
+			// a doc comment or a string literal is not mistaken for an import.
+			const importRe = /^\s*(?:import|export)[^'";]*?from\s*'([^']+)'|^\s*import\s*\(\s*'([^']+)'\s*\)/gm;
+			for (const m of code.matchAll(importRe)) {
+				const spec = m[1] ?? m[2];
+				if (spec.startsWith('.')) {
+					visit(path.resolve(path.dirname(file), spec));
+				} else {
+					bare.push(`${path.relative(DIST, file)}: ${spec}`);
+				}
+			}
+		};
+		visit(path.join(DIST, 'index.js'));
+		assert.deepEqual(bare, [], 'the browser-safe entry point must import nothing by bare name');
+
+		const usesBuffer = [...seen]
+			.filter(f => /(^|[^.\w])Buffer\s*\./.test(codeOf(f)))
+			.map(f => path.relative(DIST, f));
+		assert.deepEqual(usesBuffer, [], 'Buffer is a Node global and is absent in a renderer');
+	});
+
 	test('runtime code carries no DI decorators', () => {
 		// The SDK uses plain constructor injection; @IFooService is a fork idiom
 		// and needs experimentalDecorators, which this package builds without.

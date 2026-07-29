@@ -52,15 +52,15 @@ export interface ILanguageFeatureRegistry<T> {
 }
 
 export interface IDefinitionProvider {
-	provideDefinition(model: ISlateTextModel, position: unknown, token: unknown): Promise<ILocation | ILocation[] | null | undefined>;
+	provideDefinition(model: ISlateTextModel, position: unknown, token: unknown): ILocation | ILocation[] | null | undefined | PromiseLike<ILocation | ILocation[] | null | undefined>;
 }
 
 export interface IReferenceProvider {
-	provideReferences(model: ISlateTextModel, position: unknown, context: unknown, token: unknown): Promise<ILocation[] | null | undefined>;
+	provideReferences(model: ISlateTextModel, position: unknown, context: unknown, token: unknown): ILocation[] | null | undefined | PromiseLike<ILocation[] | null | undefined>;
 }
 
 export interface IDocumentSymbolProvider {
-	provideDocumentSymbols(model: ISlateTextModel, token: unknown): Promise<IDocumentSymbol[] | null | undefined>;
+	provideDocumentSymbols(model: ISlateTextModel, token: unknown): IDocumentSymbol[] | null | undefined | PromiseLike<IDocumentSymbol[] | null | undefined>;
 }
 
 /**
@@ -91,7 +91,7 @@ export interface ITreeSitterHost {
 //#region http
 
 export interface IHeaders {
-	[header: string]: string;
+	[header: string]: string | string[] | undefined;
 }
 
 export interface IRequestOptions {

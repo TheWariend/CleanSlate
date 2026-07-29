@@ -6,6 +6,11 @@
 import { createCleanSlateNodeToolContext, ICleanSlateNodeRuntimeOptions } from './cleanSlateNodeToolContext.js';
 
 export { CleanSlateHeadlessRuntime } from './cleanSlateHeadlessRunner.js';
+export type {
+	ICleanSlateHeadlessTool,
+	ICleanSlateHeadlessRunOptions,
+	ICleanSlateHeadlessRunResult
+} from './cleanSlateHeadlessRunner.js';
 export { createCleanSlateNodeToolContext } from './cleanSlateNodeToolContext.js';
 export type { ICleanSlateNodeRuntimeOptions } from './cleanSlateNodeToolContext.js';
 export { CleanSlateNodeTextModel } from './cleanSlateNodeTextModel.js';

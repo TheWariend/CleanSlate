@@ -66,7 +66,8 @@ export interface IFileStat {
 	/** Always present — every entry a host reports has a location and a name. */
 	resource: URI;
 	name: string;
-	mtime: number;
+	/** Optional, as in the editor: only a metadata-resolving stat reports times. */
+	mtime?: number;
 	size?: number;
 	ctime?: number;
 	etag?: string;
@@ -85,7 +86,15 @@ export interface IFileHost {
 	exists(resource: URI): Promise<boolean>;
 	stat(resource: URI): Promise<IFileStat>;
 	readFile(resource: URI): Promise<IFileContent>;
-	writeFile(resource: URI, content: VSBuffer): Promise<unknown>;
+	/**
+	 * Writes text. Deliberately not a `VSBuffer`: the editor's file service
+	 * discriminates its buffer type with `instanceof`, and a buffer built in
+	 * here is a different class however identical its shape, so it falls
+	 * through to the readable branch and fails at runtime. Types cannot catch
+	 * that. Handing over a string leaves the conversion to the host, which is
+	 * the only side that knows which class its file layer will accept.
+	 */
+	writeFile(resource: URI, content: string): Promise<unknown>;
 	del(resource: URI, options?: { useTrash?: boolean; recursive?: boolean }): Promise<void>;
 	createFolder(resource: URI): Promise<unknown>;
 	/** Stats a path, listing children when it is a directory. */

@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Event } from '../core/event.js';
+import { Subscribable } from './events.js';
 
 /**
  * Browser automation as a host capability.
@@ -198,8 +198,8 @@ export interface ICleanSlateBrowserAnnotationChangeEvent {
 
 export interface ICleanSlateBrowserAutomationService {
 
-	readonly onDidChangeAnnotations: Event<ICleanSlateBrowserAnnotationChangeEvent>;
-	readonly onDidOpenBrowser: Event<ICleanSlateBrowserState>;
+	readonly onDidChangeAnnotations: Subscribable<ICleanSlateBrowserAnnotationChangeEvent>;
+	readonly onDidOpenBrowser: Subscribable<ICleanSlateBrowserState>;
 	open(url: string): Promise<ICleanSlateBrowserState>;
 	openInAgentManager(url: string, surface?: CleanSlateBrowserSurface): Promise<ICleanSlateBrowserState>;
 	revealOpenBrowser(surface?: CleanSlateBrowserSurface): Promise<ICleanSlateBrowserState | undefined>;

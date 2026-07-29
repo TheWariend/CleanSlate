@@ -10,11 +10,11 @@ import * as readline from 'readline';
 import { fileURLToPath } from 'url';
 import { createElement } from 'react';
 import { render } from 'ink';
+import { CancellationTokenSource } from '@cleanslate/sdk';
 import {
-	CancellationTokenSource,
 	CleanSlateNodeAgentRuntime,
 	createNodeProviderConfiguration
-} from '@cleanslate/sdk';
+} from '@cleanslate/sdk/node';
 import { HELP_TEXT, ICliArguments, parseArguments } from './argv.js';
 import { CliConfigStore, CliCredentialStore, getCleanSlateWorkspaceStorageHome, ICliConfig } from './config.js';
 import { authenticateCleanSlateInBrowser } from './managedAuth.js';

@@ -6,7 +6,7 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { ICleanSlateNodeAgentSessionSnapshot } from '@cleanslate/sdk';
+import type { ICleanSlateNodeAgentSessionSnapshot } from '@cleanslate/sdk/node';
 import { getCleanSlateHome } from './config.js';
 
 export type CliTranscriptKind = 'user' | 'assistant' | 'reasoning' | 'tool' | 'system' | 'error';

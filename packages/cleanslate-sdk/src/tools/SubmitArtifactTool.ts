@@ -91,7 +91,10 @@ const runSubmitArtifact = async (input: { summary: string; path?: string; conten
 };
 
 async function openArtifactEditor(context: CleanSlateToolContext, artifactId: string, filename: string, preserveFocus: boolean): Promise<void> {
-    if (!context.instantiationService || !context.editorService) {
+    // Presenting the artifact is the host's call: the IDE opens a dedicated
+    // editor input, a terminal prints the path. The tool only needs it shown,
+    // and a host with nowhere to show it declines by not providing this.
+    if (!context.artifactPresentationHost) {
         return;
     }
 
@@ -100,11 +103,6 @@ async function openArtifactEditor(context: CleanSlateToolContext, artifactId: st
         path: `/plans/${artifactId}/${filename}`
     });
 
-    // Presenting the artifact is the host's call: the IDE opens a dedicated
-    // editor input, a terminal prints the path. The tool only needs it shown.
-    if (!context.artifactPresentationHost) {
-        return;
-    }
     try {
         await context.artifactPresentationHost.openArtifact(virtualUri, artifactId, { preserveFocus });
     } catch (e) {

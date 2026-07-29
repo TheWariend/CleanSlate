@@ -5,7 +5,7 @@
 
 import { Disposable } from '../core/lifecycle.js';
 import { CancellationToken } from '../core/cancellation.js';
-import { Event } from '../core/event.js';
+import { Subscribable } from '../host/events.js';
 import {
 	ICleanSlateBackgroundCommandOptions,
 	ICleanSlateBackgroundCommandResult,
@@ -20,7 +20,7 @@ import {
 export interface ICleanSlateCommandExecutionService {
 	_serviceBrand: undefined;
 	executeCommand(options: ICleanSlateCommandExecutionOptions): Promise<ICleanSlateCommandExecutionResult>;
-	executeCommandStream(options: ICleanSlateCommandExecutionOptions, token?: CancellationToken): Event<ICleanSlateCommandOutputEvent | null>;
+	executeCommandStream(options: ICleanSlateCommandExecutionOptions, token?: CancellationToken): Subscribable<ICleanSlateCommandOutputEvent | null>;
 	startBackgroundCommand(options: ICleanSlateBackgroundCommandOptions): Promise<ICleanSlateBackgroundCommandResult>;
 	stopBackgroundCommand(processId: string): Promise<ICleanSlateStopBackgroundCommandResult>;
 	getBackgroundCommand(processId: string): Promise<ICleanSlateBackgroundCommandResult>;
@@ -40,7 +40,7 @@ export class CleanSlateCommandExecutionService extends Disposable implements ICl
 		return this.mainService.executeCommand(options);
 	}
 
-	executeCommandStream(options: ICleanSlateCommandExecutionOptions, token: CancellationToken = CancellationToken.None): Event<ICleanSlateCommandOutputEvent | null> {
+	executeCommandStream(options: ICleanSlateCommandExecutionOptions, token: CancellationToken = CancellationToken.None): Subscribable<ICleanSlateCommandOutputEvent | null> {
 		return this.mainService.executeCommandStream(options, token);
 	}
 

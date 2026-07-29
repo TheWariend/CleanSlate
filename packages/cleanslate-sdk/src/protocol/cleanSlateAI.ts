@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { URI } from '../core/uri.js';
-import { Event } from '../core/event.js';
+import { Subscribable } from '../host/events.js';
 import { IHeaders, IRequestOptions } from '../host/services.js';
 import { CancellationToken } from '../core/cancellation.js';
 import { VSBuffer } from '../core/buffer.js';
@@ -431,7 +431,7 @@ export interface MCPServerConfiguration {
 
 export interface ICleanSlateConfigurationService {
     _serviceBrand: undefined;
-    readonly onDidChangeConfiguration: Event<ICleanSlateConfiguration>;
+    readonly onDidChangeConfiguration: Subscribable<ICleanSlateConfiguration>;
     getConfiguration(): ICleanSlateConfiguration;
     getResolvedConfiguration(): Promise<ICleanSlateConfiguration>;
     updateConfiguration(config: Partial<ICleanSlateConfiguration>): Promise<void>;
@@ -704,7 +704,7 @@ export interface ISearchResult {
 
 export interface ICleanSlateIndexService {
     _serviceBrand: undefined;
-    readonly onDidStatusChange: Event<boolean>;
+    readonly onDidStatusChange: Subscribable<boolean>;
     readonly isIndexing: boolean;
     indexWorkspace(): Promise<void>;
     search(query: string, limit?: number, threshold?: number): Promise<ISearchResult[]>;
@@ -769,7 +769,7 @@ export interface ICleanSlateContextService {
 
 export interface ICleanSlateEditCodeService {
     _serviceBrand: undefined;
-    readonly onDidPendingEditsChange: Event<void>;
+    readonly onDidPendingEditsChange: Subscribable<void>;
     undoLastAIEdit(uri: URI): void;
     acceptAll(): void;
     rejectAll(): void;
@@ -813,7 +813,7 @@ export interface ICleanSlateArtifactLookupOptions {
 
 export interface ICleanSlateArtifactService {
     _serviceBrand: undefined;
-    readonly onDidArtifactChange: Event<IArtifact>;
+    readonly onDidArtifactChange: Subscribable<IArtifact>;
     createArtifact(type: string, content: string, metadata?: any): IArtifact;
     saveArtifact(type: string, content: string, metadata?: any): IArtifact;
     getArtifact(id: string): IArtifact | undefined;
@@ -982,7 +982,7 @@ export interface ICleanSlateRuntimeConfig {
 // --- Main Process Service (IPC Proxy) ---
 export interface ICleanSlateMainService {
     readonly _serviceBrand: undefined;
-    readonly onDidPublishThreadSession: Event<ICleanSlateThreadSessionUpdate>;
+    readonly onDidPublishThreadSession: Subscribable<ICleanSlateThreadSessionUpdate>;
 
     getRuntimeConfig(): Promise<ICleanSlateRuntimeConfig>;
 
@@ -996,7 +996,7 @@ export interface ICleanSlateMainService {
      * Returns an Event that fires with chunks of data.
      * Fires `null` when the stream is finished.
      */
-    proxyStream(options: IRequestOptions, token: CancellationToken): Event<VSBuffer | string | null>;
+    proxyStream(options: IRequestOptions, token: CancellationToken): Subscribable<VSBuffer | string | null>;
 
     /**
      * Resolve validated capability metadata from the cached models.dev catalog.
@@ -1012,12 +1012,12 @@ export interface ICleanSlateMainService {
     /**
      * Stream an OpenAI-compatible chat completion using the provider SDK in Node.
      */
-    openAICompatibleChatStream(options: ICleanSlateOpenAICompatibleChatOptions, token: CancellationToken): Event<VSBuffer | string | null>;
+    openAICompatibleChatStream(options: ICleanSlateOpenAICompatibleChatOptions, token: CancellationToken): Subscribable<VSBuffer | string | null>;
 
     /**
      * Stream an OpenAI Responses API request using the provider SDK in Node.
      */
-    openAIResponsesStream(options: ICleanSlateOpenAIResponsesOptions, token: CancellationToken): Event<VSBuffer | string | null>;
+    openAIResponsesStream(options: ICleanSlateOpenAIResponsesOptions, token: CancellationToken): Subscribable<VSBuffer | string | null>;
 
     /**
      * List Anthropic models using the Anthropic SDK in Node.
@@ -1027,7 +1027,7 @@ export interface ICleanSlateMainService {
     /**
      * Stream an Anthropic Messages request using the Anthropic SDK in Node.
      */
-    anthropicMessagesStream(options: ICleanSlateAnthropicMessagesOptions, token: CancellationToken): Event<VSBuffer | string | null>;
+    anthropicMessagesStream(options: ICleanSlateAnthropicMessagesOptions, token: CancellationToken): Subscribable<VSBuffer | string | null>;
 
     /**
      * List Gemini models using the Google GenAI SDK in Node.
@@ -1037,7 +1037,7 @@ export interface ICleanSlateMainService {
     /**
      * Stream a Gemini Generate Content request using the Google GenAI SDK in Node.
      */
-    geminiGenerateContentStream(options: ICleanSlateGeminiGenerateContentOptions, token: CancellationToken): Event<VSBuffer | string | null>;
+    geminiGenerateContentStream(options: ICleanSlateGeminiGenerateContentOptions, token: CancellationToken): Subscribable<VSBuffer | string | null>;
 
     /**
      * List AWS Bedrock foundation models using the production AWS credential chain.
@@ -1047,7 +1047,7 @@ export interface ICleanSlateMainService {
     /**
      * Stream an AWS Bedrock Converse request from the Node process so AWS SDKs and credentials stay off the renderer.
      */
-    bedrockConverseStream(options: ICleanSlateBedrockConverseStreamOptions, token: CancellationToken): Event<VSBuffer | string | null>;
+    bedrockConverseStream(options: ICleanSlateBedrockConverseStreamOptions, token: CancellationToken): Subscribable<VSBuffer | string | null>;
 
     /**
      * Search the public web through configured free/search-provider adapters.
@@ -1073,7 +1073,7 @@ export interface ICleanSlateMainService {
      * Execute a finite shell command and stream bounded stdout/stderr snapshots while it runs.
      * Fires `null` after the final `result` event.
      */
-    executeCommandStream(options: ICleanSlateCommandExecutionOptions, token: CancellationToken): Event<ICleanSlateCommandOutputEvent | null>;
+    executeCommandStream(options: ICleanSlateCommandExecutionOptions, token: CancellationToken): Subscribable<ICleanSlateCommandOutputEvent | null>;
 
     /**
      * Start a long-running command such as a dev server and return once it is ready,

@@ -79,7 +79,7 @@ export class CleanSlateFileHistory {
 		const entryId = this.createEntryId(request.resource);
 		const backupRelativePath = `${this.entriesFolder}/${entryId}.txt`;
 		const backupResource = joinPath(request.storageRoot ?? request.workspaceRoot, backupRelativePath);
-		await request.fileService.writeFile(backupResource, VSBuffer.fromString(content));
+		await request.fileService.writeFile(backupResource, content);
 
 		const entry: CleanSlateFileHistoryEntry = {
 			id: entryId,
@@ -153,7 +153,7 @@ export class CleanSlateFileHistory {
 			}
 		}
 
-		await fileService.writeFile(resource, VSBuffer.fromString(content));
+		await fileService.writeFile(resource, content);
 	}
 
 	private static findRewindEntry(
@@ -209,7 +209,7 @@ export class CleanSlateFileHistory {
 		manifest: CleanSlateFileHistoryManifest
 	): Promise<void> {
 		const manifestResource = joinPath(workspaceRoot, this.manifestFile);
-		await fileService.writeFile(manifestResource, VSBuffer.fromString(JSON.stringify(manifest, null, 2)));
+		await fileService.writeFile(manifestResource, JSON.stringify(manifest, null, 2));
 	}
 
 	private static isEntry(value: unknown): value is CleanSlateFileHistoryEntry {

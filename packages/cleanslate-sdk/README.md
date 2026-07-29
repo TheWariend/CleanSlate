@@ -54,10 +54,19 @@ getToolByName('multi_file_replace');
 Every command-running tool passes through the host's approval gate first, which
 refuses by default.
 
+## Entry points
+
+| Import | Contains |
+| --- | --- |
+| `@cleanslate/sdk` | The runtime: the loop, the tools, the edit engine, the host contracts. Touches no Node built-in, so an editor renderer can load it. |
+| `@cleanslate/sdk/node` | The Node host: filesystem-backed models, child-process commands, the provider bridge, Playwright. |
+| `@cleanslate/sdk/<module>.js` | Any single module, e.g. `@cleanslate/sdk/tools/ReadFileTool.js`. For surfaces that want one piece rather than the barrel. |
+
 ## Shape
 
 ```js
-import { createNodeHost, ALL_TOOLS } from '@cleanslate/sdk';
+import { ALL_TOOLS } from '@cleanslate/sdk';
+import { createNodeHost } from '@cleanslate/sdk/node';
 
 const context = createNodeHost({
   rootPath: process.cwd(),

@@ -27,6 +27,14 @@ export interface ICleanSlateHeadlessRunOptions extends ICleanSlateNodeRuntimeOpt
 	contextService?: any;
 	/** Host-owned policy gate evaluated before a native tool runs. */
 	approveTool?: (request: { toolName: string; category?: string; input: unknown }) => boolean | Promise<boolean>;
+	/**
+	 * A context the host has already assembled. Supply this when the host has
+	 * its own implementations of the capabilities behind the context — the
+	 * editor has its own MCP client and browser service, for instance, and
+	 * should not get the ones `createCleanSlateNodeToolContext` builds. Omit it
+	 * and the runner builds the default Node context from `rootPath`.
+	 */
+	toolContext?: any;
 }
 
 export interface ICleanSlateHeadlessRunResult {
@@ -50,7 +58,7 @@ export class CleanSlateHeadlessRuntime {
 	private readonly touched = new Set<string>();
 
 	constructor(private readonly options: ICleanSlateHeadlessRunOptions) {
-		this.context = createCleanSlateNodeToolContext(options);
+		this.context = options.toolContext ?? createCleanSlateNodeToolContext(options);
 		for (const tool of options.tools) {
 			this.toolsByName.set(tool.name, tool);
 		}

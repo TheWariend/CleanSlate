@@ -40,11 +40,17 @@ export interface ISlateTextModel {
 
 	/** Marks an undo boundary. A host without undo may no-op. */
 	pushStackElement(): void;
+	/**
+	 * The result is `unknown` rather than `null`: the editor's model returns the
+	 * cursor state it computed, and narrowing that to what the runtime passes in
+	 * would stop `ITextModel` from satisfying this interface. No caller here
+	 * reads it.
+	 */
 	pushEditOperations(
 		beforeCursorState: null,
 		editOperations: readonly ISlateSingleEditOperation[],
 		cursorStateComputer: () => null
-	): null;
+	): unknown;
 	undo?(): void;
 }
 
@@ -76,7 +82,7 @@ export interface ITextFileContent {
  */
 export interface ITextFileHost {
 	save(resource: URI, options?: unknown): Promise<unknown>;
-	create(operations: readonly { resource: URI; value: string; options?: { overwrite?: boolean } }[]): Promise<unknown>;
+	create(operations: { resource: URI; value?: string; options?: { overwrite?: boolean } }[]): Promise<unknown>;
 	read(resource: URI, options?: { acceptTextOnly?: boolean; encoding?: string }): Promise<ITextFileContent>;
 	files: {
 		get(resource: URI): { textEditorModel?: ISlateTextModel | null; isResolved?(): boolean } | undefined;

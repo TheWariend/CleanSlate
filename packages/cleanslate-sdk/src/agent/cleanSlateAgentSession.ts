@@ -105,6 +105,11 @@ export class CleanSlateAgentSession {
 		return this.pendingInteraction?.kind === 'question';
 	}
 
+	/**
+	 * Completes the suspended ask_question call with the user's answer. The
+	 * answer is appended as the result of the original tool call, never as a
+	 * fresh model-facing user turn.
+	 */
 	public resumePendingQuestion(answer: string): ICleanSlatePendingAgentInteraction | undefined {
 		const pending = this.pendingInteraction;
 		if (!pending || pending.kind !== 'question') {

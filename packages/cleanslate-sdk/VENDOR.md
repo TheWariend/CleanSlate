@@ -13,6 +13,7 @@ because `const enum` cannot cross a module boundary under `isolatedModules`.
 | SDK path | Source |
 | --- | --- |
 | `core/uri.ts` | `vs/base/common/uri.ts` |
+| `core/path.ts` | `vs/base/common/path.ts` |
 | `core/charCode.ts` | `vs/base/common/charCode.ts` |
 | `core/marshallingIds.ts` | `vs/base/common/marshallingIds.ts` |
 | `core/event.ts` | `vs/base/common/event.ts` |
@@ -34,9 +35,9 @@ because `const enum` cannot cross a module boundary under `isolatedModules`.
 | `core/diff/diff.ts` | `vs/base/common/diff/diff.ts` |
 | `core/diff/diffChange.ts` | `vs/base/common/diff/diffChange.ts` |
 
-`uri.ts` has one further change: `import * as paths from './path.js'` becomes
-`import * as paths from 'node:path'`. It uses only `win32.join` and
-`posix.join`, which Node provides with the same semantics.
+There are no further changes. `path.ts` is carried across rather than replaced
+with `node:path`, because the runtime also loads in an editor renderer, where
+the `node:` scheme does not resolve.
 
 ## Reimplemented instead of copied
 
@@ -49,7 +50,8 @@ verbatim would have meant 32 files and ~16,200 lines instead of the 21 above.
 | `core/platform.ts` | `vs/base/common/platform.ts` | The original resolves the UI locale, which is the sole reason it imports `vs/nls`. The runtime needs only the OS booleans. |
 | `core/resources.ts` | `vs/base/common/resources.ts` | Six functions (`basename`, `dirname`, `joinPath`, `normalizePath`, `relativePath`, `isEqualOrParent`) were reaching `extpath` → `network` → `strings` → `nls`. Rewritten on `node:path`, preserving the original semantics; see the file header for the two deliberate simplifications. |
 | `core/hash.ts` | `vs/base/common/hash.ts` | Only `stringHash` is used. The original also carries SHA-1 and structural hashing, pulling in `buffer` and `strings`. The algorithm is reproduced exactly, because diff output is keyed on it. |
-| `core/buffer.ts` | `vs/base/common/buffer.ts` | Five members are used. The original carries streaming and browser fallbacks via `stream` and `lazy`; Node's `Buffer` covers what is needed. |
+| `core/buffer.ts` | `vs/base/common/buffer.ts` | The original carries streaming and chunked readers via `stream` and `lazy`, which nothing here uses. The rewrite is a `Uint8Array` wrapper on `TextEncoder`/`TextDecoder`. Its *instance* surface is not trimmed: a buffer built here is passed to the editor's `IFileService.writeFile`, and the two classes have to stay structurally interchangeable. |
+| `core/process.ts` | `vs/base/common/process.ts` | `path.ts` needs `cwd`, `env` and `platform`. The original reads them through VS Code's sandbox bridge, which is absent here; a renderer falls through to the web branch and gets the same answers. |
 
 Nothing from `vs/nls` is present, directly or transitively.
 
@@ -58,3 +60,12 @@ Nothing from `vs/nls` is present, directly or transitively.
 `scripts/vendor.mjs` regenerates the copied files. Re-run it after rebasing the
 fork on a newer VS Code, then re-run the SDK tests — `core/resources.ts` and
 `core/hash.ts` are hand-written and will not be updated by it.
+
+## The `Event` seam
+
+`core/event.ts` is vendored, so the SDK's `Event<T>` and the editor's are two
+declarations of the same type — and not assignable to each other in either
+direction, because the third parameter is `DisposableStore`, a class with
+private fields. Contracts a surface implements therefore use
+`Subscribable<T>` from `host/events.ts` instead, which declares only the one
+parameter that crosses the boundary. Inside the runtime, keep using `Event<T>`.

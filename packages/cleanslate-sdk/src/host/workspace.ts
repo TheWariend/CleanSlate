@@ -51,7 +51,6 @@ export interface ITextSearchPattern {
 export interface IFolderQuery {
 	folder: URI;
 	includePattern?: Record<string, boolean>;
-	excludePattern?: unknown;
 	disregardIgnoreFiles?: boolean;
 	disregardGlobalIgnoreFiles?: boolean;
 }
@@ -61,10 +60,9 @@ export interface ITextQuery {
 	contentPattern: ITextSearchPattern;
 	folderQueries: IFolderQuery[];
 	includePattern?: Record<string, boolean>;
-	excludePattern?: unknown;
 	maxResults?: number;
 	maxFileSize?: number;
-	previewOptions?: { matchLines?: number; charsPerLine?: number };
+	previewOptions?: { matchLines: number; charsPerLine: number };
 	afterContext?: number;
 	beforeContext?: number;
 	/** Lines of context to return either side of a match. */
@@ -95,7 +93,24 @@ export interface IFileMatch {
 	results?: readonly ITextSearchResult[];
 }
 
-export type ISearchProgressItem = IFileMatch | ITextSearchResult;
+/** A status line from the search engine rather than a result. */
+export interface ISearchProgressMessage {
+	message: string;
+}
+
+/** A keyword suggestion, which only an AI-backed search emits. */
+export interface ISearchKeyword {
+	keyword: string;
+}
+
+/**
+ * Everything a search can report while it runs.
+ *
+ * The runtime only reads file matches — `isFileMatch` filters the rest out —
+ * but the other kinds have to be named, because the editor's search service
+ * emits them and its callback would otherwise not fit this one.
+ */
+export type ISearchProgressItem = IFileMatch | ITextSearchResult | ISearchProgressMessage | ISearchKeyword;
 
 export interface ISearchComplete {
 	results: readonly IFileMatch[];

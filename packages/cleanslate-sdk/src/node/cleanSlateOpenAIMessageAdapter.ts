@@ -29,6 +29,7 @@ export class CleanSlateOpenAIMessageAdapter {
 			};
 		}
 
+		// System messages must be a plain string for every openai-compatible provider.
 		if (message.role === 'system') {
 			return {
 				role: 'system',
@@ -36,6 +37,9 @@ export class CleanSlateOpenAIMessageAdapter {
 			};
 		}
 
+		// User (and plain assistant) messages: pass a string or a properly shaped
+		// content-part array. Only 'text' and 'image_url' parts are valid for
+		// openai-compatible endpoints — no extra fields like cache_control.
 		if (Array.isArray(message.content)) {
 			return {
 				role: message.role,

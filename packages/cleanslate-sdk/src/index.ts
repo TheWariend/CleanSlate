@@ -9,6 +9,11 @@
  * A surface (a terminal, an editor, a server) supplies host capabilities and
  * drives the loop. Nothing here assumes a particular surface, and nothing
  * requires an editor build.
+ *
+ * Nothing reachable from this entry point touches a Node built-in, because the
+ * editor surface loads it in a renderer where there is no `require` and no
+ * `node:` scheme. The Node host — child processes, the filesystem, Playwright —
+ * lives behind `@cleanslate/sdk/node`.
  */
 
 //#region host contracts — what a surface must provide
@@ -94,21 +99,6 @@ export { CleanSlateExecutionQueryEngine } from './agent/cleanSlateExecutionQuery
 export { CleanSlateEditService } from './services/cleanSlateEditService.js';
 export { CleanSlateDiffService } from './services/cleanSlateDiffService.js';
 
-export {
-	CleanSlateHeadlessRuntime,
-	createNodeHost,
-	NodeCleanSlateMainService,
-	CleanSlateNodeAgentRuntime,
-	createNodeProviderConfiguration
-} from './node/index.js';
-export type {
-	ICleanSlateHeadlessTool,
-	ICleanSlateHeadlessRunOptions,
-	ICleanSlateHeadlessRunResult
-} from './node/cleanSlateHeadlessRunner.js';
-export type { ICleanSlateNodeRuntimeOptions } from './node/cleanSlateNodeToolContext.js';
-export type { ICleanSlateNodeAgentRuntimeOptions } from './node/cleanSlateNodeAgentRuntime.js';
-export type { ICleanSlateNodeAgentSessionSnapshot } from './node/cleanSlateNodeAgentRuntime.js';
 export type {
 	AIProvider,
 	ICleanSlateManagedAccount,

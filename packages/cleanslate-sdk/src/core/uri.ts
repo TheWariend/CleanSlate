@@ -9,7 +9,7 @@
 
 import { CharCode } from './charCode.js';
 import { MarshalledId } from './marshallingIds.js';
-import * as paths from 'node:path';
+import * as paths from './path.js';
 import { isWindows } from './platform.js';
 
 const _schemePattern = /^\w[\w\d+.-]*$/;
