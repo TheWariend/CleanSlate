@@ -6,7 +6,7 @@
   </picture>
 </p>
 <p align="center"><b>CleanSlate</b></p>
-<p align="center">An open source AI code editor.</p>
+<p align="center">The open source coding agent.</p>
 
 ---
 

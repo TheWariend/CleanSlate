@@ -6,7 +6,7 @@
   </picture>
 </p>
 <p align="center"><b>CleanSlate</b></p>
-<p align="center">An open source AI code editor.</p>
+<p align="center">The open source coding agent.</p>
 <p align="center">
   <a href="vscode-fork/LICENSE.txt"><img alt="License" src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
   <a href="https://github.com/TheWariend/CleanSlate-Releases/releases"><img alt="Release" src="https://img.shields.io/badge/release-macOS%20arm64-blue?style=flat-square" /></a>
