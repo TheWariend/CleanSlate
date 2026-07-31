@@ -497,6 +497,10 @@ export class CleanSlateConfigurationService implements ICleanSlateConfigurationS
                 return { model: providers.custom?.model, apiKey: providers.custom?.apiKey };
             case 'bedrock':
                 return { model: providers.bedrock?.modelId, apiKey: providers.bedrock?.secretAccessKey };
+            default: {
+                const exhaustiveCheck: never = provider;
+                return exhaustiveCheck;
+            }
         }
     }
 

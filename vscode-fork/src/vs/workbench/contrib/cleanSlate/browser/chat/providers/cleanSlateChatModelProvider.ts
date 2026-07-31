@@ -302,6 +302,10 @@ export class CleanSlateChatModelProvider extends Disposable {
                 return 'OpenRouter';
             case 'custom':
                 return 'Custom API';
+            default: {
+                const exhaustiveCheck: never = config.provider;
+                return exhaustiveCheck;
+            }
         }
     }
 
@@ -356,8 +360,11 @@ export class CleanSlateChatModelProvider extends Disposable {
                 return !!config.providers?.openrouter?.apiKey;
             case 'custom':
                 return !!(config.providers?.custom?.baseUrl && config.providers.custom.model);
+            default: {
+                const exhaustiveCheck: never = provider;
+                return exhaustiveCheck;
+            }
         }
-        // Unreachable by design: all cases are covered above
     }
 
     private getConfigMessage(provider: AIProvider, config: ICleanSlateConfiguration): string {
@@ -391,8 +398,11 @@ export class CleanSlateChatModelProvider extends Disposable {
                     return 'Custom API base URL is missing.';
                 }
                 return 'Custom API model is missing.';
+            default: {
+                const exhaustiveCheck: never = provider;
+                return exhaustiveCheck;
+            }
         }
-        // Unreachable by design: all cases are covered above
     }
 
     private getDisplayModels(provider: AIProvider, models: string[]): string[] {
@@ -421,6 +431,10 @@ export class CleanSlateChatModelProvider extends Disposable {
                 return config.providers?.openrouter?.model;
             case 'custom':
                 return config.providers?.custom?.model;
+            default: {
+                const exhaustiveCheck: never = provider;
+                return exhaustiveCheck;
+            }
         }
     }
 
