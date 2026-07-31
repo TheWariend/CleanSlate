@@ -44,6 +44,7 @@ import { CleanSlateOpenAIMessageAdapter } from './cleanSlateOpenAIMessageAdapter
 import { CleanSlateProviderSchemaNormalizer } from './cleanSlateProviderSchemaNormalizer.js';
 import { normalizeToolName } from '../protocol/cleanSlateProviderMessageTransforms.js';
 import { CleanSlateNodeWebRetrieval } from './cleanSlateNodeWebRetrieval.js';
+import { CleanSlateNodeHttpTransport } from './cleanSlateNodeHttpTransport.js';
 import {
 	messageContentToText,
 	safeStringifyForTranscript,
@@ -90,16 +91,22 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 	private readonly openAIMessageAdapter = new CleanSlateOpenAIMessageAdapter();
 	private readonly anthropicMessageAdapter = new CleanSlateAnthropicMessageAdapter(this.providerSchemaNormalizer);
 	private readonly commandService: CleanSlateNodeCommandService;
-	private readonly webRetrieval = new CleanSlateNodeWebRetrieval();
+	private readonly envLookup: CleanSlateEnvLookup;
+	private readonly httpTransport: CleanSlateNodeHttpTransport;
+	private readonly webRetrieval: CleanSlateNodeWebRetrieval;
 	private modelsDevCatalogCache: { expiresAt: number; value: Record<string, any> } | undefined;
 	private modelsDevCatalogRequest: Promise<Record<string, any> | undefined> | undefined;
 	readonly onDidPublishThreadSession: Event<ICleanSlateThreadSessionUpdate> = Event.None;
 
-	constructor(rootPath: string = process.cwd()) {
+	constructor(
+		rootPath: string = process.cwd(),
+		envLookup: CleanSlateEnvLookup = name => normalizeEnvValue(process.env[name])
+	) {
 		this.commandService = new CleanSlateNodeCommandService(rootPath);
+		this.envLookup = envLookup;
+		this.httpTransport = new CleanSlateNodeHttpTransport(envLookup);
+		this.webRetrieval = new CleanSlateNodeWebRetrieval(this.httpTransport);
 	}
-
-	private readonly envLookup: CleanSlateEnvLookup = name => normalizeEnvValue(process.env[name]);
 
 	getRuntimeConfig(): Promise<ICleanSlateRuntimeConfig> {
 		return Promise.resolve(buildCleanSlateRuntimeConfig(this.envLookup));
@@ -126,7 +133,7 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 		this.modelsDevCatalogRequest ??= (async () => {
 			const abort = this.createProviderAbortController(token, NodeCleanSlateMainService.MODEL_LIST_TIMEOUT_MS);
 			try {
-				const response = await fetch(MODELS_DEV_CATALOG_URL, { signal: abort.signal });
+				const response = await this.httpTransport.fetch(MODELS_DEV_CATALOG_URL, { signal: abort.signal });
 				if (!response.ok) {
 					throw new Error(`HTTP ${response.status}`);
 				}
@@ -646,11 +653,47 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 		return this.commandService.executeCommand(options);
 	}
 
-	proxyRequest(_options: IRequestOptions, _token: CancellationToken): Promise<ICleanSlateBufferedRequestResponse> {
-		return this.unsupported('proxy requests');
+	async proxyRequest(options: IRequestOptions, token: CancellationToken): Promise<ICleanSlateBufferedRequestResponse> {
+		const request = this.createProxyFetchRequest(options, token);
+		try {
+			const response = await this.httpTransport.fetch(request.url, request.init);
+			return {
+				res: { statusCode: response.status, headers: this.responseHeaders(response.headers) },
+				data: await response.text()
+			};
+		} finally {
+			request.dispose();
+		}
 	}
-	proxyStream(_options: IRequestOptions, _token: CancellationToken): Event<VSBuffer | string | null> {
-		return this.unsupportedEvent('proxy streams');
+	proxyStream(options: IRequestOptions, token: CancellationToken): Event<VSBuffer | string | null> {
+		const emitter = new Emitter<VSBuffer | string | null>();
+		(async () => {
+			let request: ReturnType<NodeCleanSlateMainService['createProxyFetchRequest']> | undefined;
+			try {
+				// Let callers subscribe before validation or setup can emit an error.
+				await Promise.resolve();
+				request = this.createProxyFetchRequest(options, token);
+				const response = await this.httpTransport.fetch(request.url, request.init);
+				if (!response.ok) {
+					emitter.fire(`ERROR: HTTP ${response.status}: ${await response.text() || response.statusText}`);
+					return;
+				}
+				const reader = response.body?.getReader();
+				while (reader) {
+					const next = await reader.read();
+					if (next.done) {
+						break;
+					}
+					emitter.fire(VSBuffer.wrap(next.value));
+				}
+			} catch (error) {
+				emitter.fire(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
+			} finally {
+				request?.dispose();
+				emitter.fire(null);
+			}
+		})();
+		return emitter.event;
 	}
 	async listGeminiModels(options: ICleanSlateGeminiListModelsOptions, token: CancellationToken): Promise<string[]> {
 		if (!options.apiKey) {
@@ -941,6 +984,7 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 	}
 
 	private async createGeminiClient(options: ICleanSlateGeminiListModelsOptions): Promise<any> {
+		this.httpTransport.ensureGlobalDispatcher();
 		const googleModule = await this.importExternalModule<any>('@google/genai');
 		const GoogleGenAI = googleModule.GoogleGenAI;
 		if (!GoogleGenAI) {
@@ -1002,6 +1046,10 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 
 	private async createBedrockClientConfig(options: ICleanSlateBedrockListModelsOptions): Promise<any> {
 		const config: any = { region: options.region };
+		const requestHandler = this.httpTransport.createAwsRequestHandler();
+		if (requestHandler) {
+			config.requestHandler = requestHandler;
+		}
 		if (options.credentialMode === 'accessKey') {
 			if (!options.accessKeyId || !options.secretAccessKey) {
 				throw new Error('Bedrock access key ID and secret access key are required for manual credential mode.');
@@ -1016,10 +1064,13 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 				throw new Error('AWS profile name is required for Bedrock profile credential mode.');
 			}
 			const { fromIni } = await this.importExternalModule<any>('@aws-sdk/credential-provider-ini');
-			config.credentials = fromIni({ profile: options.profile });
+			config.credentials = fromIni({
+				profile: options.profile,
+				...(requestHandler ? { clientConfig: { requestHandler } } : {})
+			});
 		} else {
 			const { defaultProvider } = await this.importExternalModule<any>('@aws-sdk/credential-provider-node');
-			config.credentials = defaultProvider();
+			config.credentials = defaultProvider(requestHandler ? { clientConfig: { requestHandler } } : undefined);
 		}
 		return config;
 	}
@@ -1127,7 +1178,8 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 				apiKey: options.apiKey,
 				endpoint: azure.endpoint,
 				deployment: azure.deploymentName,
-				apiVersion: azure.apiVersion || '2024-12-01-preview'
+				apiVersion: azure.apiVersion || '2024-12-01-preview',
+				...(this.httpTransport.usesProxy ? { fetch: this.httpTransport.fetch.bind(this.httpTransport) } : {})
 			});
 		}
 
@@ -1144,7 +1196,8 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 			defaultHeaders: managed
 				? { 'User-Agent': 'CleanSlate/1.0' }
 				: azureV1 ? { 'api-key': options.apiKey } : undefined,
-			...(managed ? { maxRetries: 0 } : {})
+			...(managed ? { maxRetries: 0 } : {}),
+			...(this.httpTransport.usesProxy ? { fetch: this.httpTransport.fetch.bind(this.httpTransport) } : {})
 		});
 	}
 
@@ -1156,7 +1209,8 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 		}
 		return new Anthropic({
 			apiKey: options.apiKey,
-			baseURL: options.baseUrl || undefined
+			baseURL: options.baseUrl || undefined,
+			...(this.httpTransport.usesProxy ? { fetch: this.httpTransport.fetch.bind(this.httpTransport) } : {})
 		});
 	}
 
@@ -1169,13 +1223,13 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 			return configured;
 		}
 		if (this.isNvidiaProviderName(options.providerName)) {
-			return normalizeBaseUrlValue(process.env['CLEANSLATE_NVIDIA_BASE_URL'])
-				|| normalizeBaseUrlValue(process.env['NVIDIA_BASE_URL'])
+			return normalizeBaseUrlValue(this.envLookup('CLEANSLATE_NVIDIA_BASE_URL'))
+				|| normalizeBaseUrlValue(this.envLookup('NVIDIA_BASE_URL'))
 				|| 'https://integrate.api.nvidia.com/v1';
 		}
 		if (this.isOpenRouterProviderName(options.providerName)) {
-			return normalizeBaseUrlValue(process.env['CLEANSLATE_OPENROUTER_BASE_URL'])
-				|| normalizeBaseUrlValue(process.env['OPENROUTER_BASE_URL'])
+			return normalizeBaseUrlValue(this.envLookup('CLEANSLATE_OPENROUTER_BASE_URL'))
+				|| normalizeBaseUrlValue(this.envLookup('OPENROUTER_BASE_URL'))
 				|| 'https://openrouter.ai/api/v1';
 		}
 		return undefined;
@@ -1192,6 +1246,62 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 	}
 	private isCleanSlateManagedProviderName(providerName: string | undefined): boolean {
 		return typeof providerName === 'string' && providerName.toLowerCase() === 'cleanslate pro';
+	}
+
+	private createProxyFetchRequest(
+		options: IRequestOptions,
+		token: CancellationToken
+	): { url: string; init: RequestInit; dispose: () => void } {
+		if (!options.url) {
+			throw new Error('Request URL is required.');
+		}
+		const url = new URL(options.url);
+		if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+			throw new Error('Request URL must use HTTP or HTTPS.');
+		}
+
+		const headers = new Headers();
+		for (const [name, value] of Object.entries(options.headers ?? {})) {
+			for (const item of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+				headers.append(name, item);
+			}
+		}
+		if (options.user && !headers.has('authorization')) {
+			headers.set('authorization', `Basic ${Buffer.from(`${options.user}:${options.password ?? ''}`).toString('base64')}`);
+		}
+
+		const controller = new AbortController();
+		const cancellation = token.onCancellationRequested(() => controller.abort());
+		if (token.isCancellationRequested) {
+			controller.abort();
+		}
+		const timeout = options.timeout && options.timeout > 0
+			? setTimeout(() => controller.abort(), options.timeout)
+			: undefined;
+		return {
+			url: url.toString(),
+			init: {
+				method: options.type || 'GET',
+				headers,
+				body: options.data,
+				redirect: options.followRedirects === 0 ? 'manual' : 'follow',
+				signal: controller.signal
+			},
+			dispose: () => {
+				if (timeout) {
+					clearTimeout(timeout);
+				}
+				cancellation.dispose();
+			}
+		};
+	}
+
+	private responseHeaders(headers: Headers): Record<string, string> {
+		const result: Record<string, string> = {};
+		for (const [name, value] of headers) {
+			result[name] = value;
+		}
+		return result;
 	}
 
 	private async importExternalModule<T>(specifier: string): Promise<T> {

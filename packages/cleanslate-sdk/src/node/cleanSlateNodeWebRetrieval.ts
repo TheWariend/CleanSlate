@@ -6,6 +6,7 @@
 import * as dns from 'node:dns';
 import * as net from 'node:net';
 import { CancellationToken } from '../core/cancellation.js';
+import { normalizeEnvValue } from '../protocol/cleanSlateRuntimeConfig.js';
 import {
 	CleanSlateWebSearchProvider,
 	ICleanSlateWebFetchOptions,
@@ -14,12 +15,19 @@ import {
 	ICleanSlateWebSearchResponse,
 	ICleanSlateWebSearchResult
 } from '../protocol/cleanSlateAI.js';
+import { CleanSlateNodeHttpTransport } from './cleanSlateNodeHttpTransport.js';
 
 const EXA_MCP_URL = 'https://mcp.exa.ai/mcp';
 const PARALLEL_MCP_URL = 'https://search.parallel.ai/mcp';
 const MAX_FETCH_BYTES = 5 * 1024 * 1024;
 
 export class CleanSlateNodeWebRetrieval {
+	constructor(
+		private readonly httpTransport = new CleanSlateNodeHttpTransport(
+			(name: string) => normalizeEnvValue(process.env[name])
+		)
+	) { }
+
 	async search(options: ICleanSlateWebSearchOptions, token: CancellationToken): Promise<ICleanSlateWebSearchResponse> {
 		const query = options.query?.trim();
 		if (!query) {
@@ -228,7 +236,7 @@ export class CleanSlateNodeWebRetrieval {
 		const timeout = setTimeout(() => controller.abort(), Math.min(120_000, Math.max(1_000, timeoutMs)));
 		const cancellation = token.onCancellationRequested(() => controller.abort());
 		try {
-			const response = await fetch(url, { ...init, redirect: 'follow', signal: controller.signal });
+			const response = await this.httpTransport.fetch(url, { ...init, redirect: 'follow', signal: controller.signal });
 			if (validateRedirects) {
 				await assertPublicUrl(new URL(response.url));
 			}

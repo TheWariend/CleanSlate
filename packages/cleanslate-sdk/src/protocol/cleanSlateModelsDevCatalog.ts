@@ -17,8 +17,8 @@ import { AIProvider, ICleanSlateModelsDevModelMetadata } from './cleanSlateAI.js
  *
  * Only the pure parts live here (URL, cache policy, provider-key mapping, entry parsing). Fetching
  * stays with each host, because they have genuinely different transports: the workbench routes
- * through its request service to honour proxy and certificate settings, while the terminal uses
- * `fetch` directly.
+ * through its request service to honour editor proxy and certificate settings, while the terminal
+ * uses the SDK Node transport that applies HTTP_PROXY, HTTPS_PROXY, and NO_PROXY.
  */
 
 export const MODELS_DEV_CATALOG_URL = 'https://models.dev/api.json';
