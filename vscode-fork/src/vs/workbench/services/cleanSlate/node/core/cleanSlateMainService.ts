@@ -54,6 +54,10 @@ import { CleanSlateWebRetrievalService } from './cleanSlateWebRetrievalService.j
 import { CleanSlateLocalEmbeddingService } from './cleanSlateLocalEmbeddingService.js';
 import { CleanSlateProviderSchemaNormalizer } from '@cleanslate/sdk/node/cleanSlateProviderSchemaNormalizer.js';
 import {
+    messageContentToText,
+    toGeminiContents
+} from '@cleanslate/sdk/protocol/cleanSlateProviderTranscript.js';
+import {
     buildCleanSlateRuntimeConfig,
     CleanSlateEnvLookup,
     normalizeBaseUrlValue,
@@ -777,7 +781,7 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
 
                 const client = await this.createGeminiClient(options);
                 const googleModule = await this.importExternalModule<any>('@google/genai');
-                const { contents, systemInstruction } = this.toGeminiContents(options.messages);
+                const { contents, systemInstruction } = toGeminiContents(options.messages);
                 abort = this.createProviderAbortController(token, NodeCleanSlateMainService.PROVIDER_STREAM_IDLE_TIMEOUT_MS);
                 const config: any = {
                     maxOutputTokens: options.maxOutputTokens || 16384,
@@ -1153,79 +1157,9 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
         return new GoogleGenAI({ apiKey: options.apiKey });
     }
 
-    private toGeminiContents(messages: any[]): { contents: any[]; systemInstruction?: any } {
-        const systemParts: any[] = [];
-        const contents: any[] = [];
 
-        for (let index = 0; index < messages.length; index++) {
-            const message = messages[index];
-            if (message.role === 'system') {
-                systemParts.push(...this.toGeminiParts(message.content));
-                continue;
-            }
 
-            if (message.role === 'tool') {
-                const parts: any[] = [];
-                while (index < messages.length && messages[index].role === 'tool') {
-                    const toolMessage = messages[index];
-                    parts.push({
-                        text: this.toGeminiToolResultTranscriptText(toolMessage)
-                    });
-                    index++;
-                }
-                index--;
-                contents.push({
-                    role: 'user',
-                    parts
-                });
-                continue;
-            }
 
-            const parts = this.toGeminiParts(message.content);
-            if (message.role === 'assistant' && message.toolCalls?.length) {
-                for (let toolIndex = 0; toolIndex < message.toolCalls.length; toolIndex++) {
-                    const toolCall = message.toolCalls[toolIndex];
-                    const toolCallId = toolCall.id || `call_${index}_${toolIndex}`;
-                    parts.push({
-                        text: this.toGeminiToolCallTranscriptText(toolCall, toolCallId)
-                    });
-                }
-            }
-            if (parts.length) {
-                contents.push({
-                    role: message.role === 'assistant' ? 'model' : 'user',
-                    parts
-                });
-            }
-        }
-
-        return {
-            contents,
-            systemInstruction: systemParts.length ? { role: 'user', parts: systemParts } : undefined
-        };
-    }
-
-    private toGeminiToolCallTranscriptText(toolCall: any, toolCallId: string): string {
-        return [
-            `Tool call (${toolCallId}): ${toolCall.toolName || 'tool'}`,
-            `Arguments: ${this.safeStringifyForTranscript(toolCall.input ?? {})}`
-        ].join('\n');
-    }
-
-    private toGeminiToolResultTranscriptText(toolMessage: any): string {
-        return [
-            `Tool result (${toolMessage.toolCallId || 'tool_result'}): ${toolMessage.toolName || 'tool'}`,
-            this.messageContentToText(toolMessage.content)
-        ].filter(part => typeof part === 'string' && part.trim().length > 0).join('\n');
-    }
-
-    private safeStringifyForTranscript(value: any): string {
-        try {
-            return JSON.stringify(value);
-        } catch {
-            return String(value);
-        }
-    }
 
     private extractGeminiThoughtText(chunk: any): string | undefined {
         const candidates = Array.isArray(chunk?.candidates) ? chunk.candidates : [];
@@ -1290,33 +1224,6 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
         });
     }
 
-    private toGeminiParts(content: any): any[] {
-        if (typeof content === 'string') {
-            return content.trim().length > 0 ? [{ text: content }] : [];
-        }
-
-        if (!Array.isArray(content)) {
-            return [];
-        }
-
-        return content.map(part => {
-            if (part?.type === 'text') {
-                return { text: part.text ?? '' };
-            }
-            if (part?.type === 'image_url' && part.image_url?.url) {
-                const match = String(part.image_url.url).match(/^data:(image\/[a-zA-Z0-9.\-+]+);base64,(.*)$/);
-                if (match) {
-                    return {
-                        inlineData: {
-                            mimeType: match[1],
-                            data: match[2]
-                        }
-                    };
-                }
-            }
-            return null;
-        }).filter(Boolean);
-    }
 
     private async createBedrockClientConfig(options: ICleanSlateBedrockListModelsOptions): Promise<any> {
         const config: any = { region: options.region };
@@ -1404,7 +1311,7 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
 
         for (let index = 0; index < options.messages.length; index++) {
             const message = options.messages[index];
-            const text = this.messageContentToText(message.content);
+            const text = messageContentToText(message.content);
             if (message.role === 'system') {
                 if (text) {
                     system.push({ text });
@@ -1419,7 +1326,7 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
                     content.push({
                         toolResult: {
                             toolUseId: toolMessage.toolCallId || `tool_${index}`,
-                            content: [{ text: this.messageContentToText(toolMessage.content) }]
+                            content: [{ text: messageContentToText(toolMessage.content) }]
                         }
                     });
                     index++;
@@ -1504,19 +1411,6 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
         return request;
     }
 
-    private messageContentToText(content: any): string {
-        if (typeof content === 'string') {
-            return content;
-        }
-        if (Array.isArray(content)) {
-            return content
-                .filter(part => part?.type === 'text')
-                .map(part => part.text ?? '')
-                .filter(text => text.length > 0)
-                .join('\n');
-        }
-        return '';
-    }
 
     private parseToolInput(inputJson: string): any {
         if (!inputJson || inputJson.trim().length === 0) {
