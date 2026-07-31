@@ -12,7 +12,7 @@ import { resolvePathToUriAsync } from './utils.js';
  */
 export const readLintsTool: CleanSlateTool = {
     name: 'read_lints',
-    description: 'Reads diagnostics (errors, warnings, hints) from the VS Code marker service. Input: { path?: string, paths?: string[] }. If path or paths are provided, returns lints for those files. If omitted, returns lints for the whole workspace.',
+    description: 'Reads diagnostics (errors, warnings, hints) from the workspace language services. Input: { path?: string, paths?: string[] }. If path or paths are provided, returns lints for those files. If omitted, returns lints for the whole workspace.',
     parametersSchema: {
         path: "string (optional)",
         paths: "string[] (optional) - Preferred after multi-file edits; scopes diagnostics to these files."
