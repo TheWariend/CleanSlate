@@ -54,6 +54,10 @@ import { CleanSlateWebRetrievalService } from './cleanSlateWebRetrievalService.j
 import { CleanSlateLocalEmbeddingService } from './cleanSlateLocalEmbeddingService.js';
 import { CleanSlateProviderSchemaNormalizer } from '@cleanslate/sdk/node/cleanSlateProviderSchemaNormalizer.js';
 import {
+    resolveArchivedSessionWorkspaceId,
+    toArchivedSessionSnapshot
+} from '@cleanslate/sdk/protocol/cleanSlateThreadSession.js';
+import {
     messageContentToText,
     toGeminiContents
 } from '@cleanslate/sdk/protocol/cleanSlateProviderTranscript.js';
@@ -1597,17 +1601,10 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
     }
 
     private persistPublishedThreadSession(session: ICleanSlatePersistedSession): Promise<void> {
-        const workspaceId = session.projectRoot?.trim()
-            || session.workDir?.trim()
-            || session.workspaceId?.trim()
-            || session.workspaceName?.trim()
-            || 'default';
-        return this.threadPersistenceStore.archiveSession(workspaceId, {
-            ...session,
-            status: session.status === 'running' || session.isGenerating === true ? 'detached' : session.status,
-            isGenerating: undefined,
-            updatedAt: Date.now()
-        }).catch(error => {
+        return this.threadPersistenceStore.archiveSession(
+            resolveArchivedSessionWorkspaceId(session),
+            toArchivedSessionSnapshot(session)
+        ).catch(error => {
             this.logService.warn(`CleanSlate failed to persist published thread session: ${String(error)}`);
         });
     }

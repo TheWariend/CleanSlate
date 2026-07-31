@@ -10,6 +10,7 @@ import { joinPath } from '../../../../../base/common/resources.js';
 import { IEnvironmentService } from '../../../../../platform/environment/common/environment.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { ICleanSlatePersistedSession, ICleanSlatePersistedThreadMessage, normalizeCleanSlateExecutionState } from '../../common/core/cleanSlateAI.js';
+import { resolveArchivedSessionWorkspaceId } from '@cleanslate/sdk/protocol/cleanSlateThreadSession.js';
 
 type SQLiteDatabase = any;
 
@@ -669,11 +670,7 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
             const enriched: ICleanSlatePersistedSession = hasWorkspaceIdentity || !fallbackRoot
                 ? session
                 : { ...session, projectRoot: fallbackRoot, workspaceName: this.getPathLabel(fallbackRoot) };
-            const workspaceId = enriched.projectRoot?.trim()
-                || enriched.workDir?.trim()
-                || enriched.workspaceId?.trim()
-                || enriched.workspaceName?.trim()
-                || 'default';
+            const workspaceId = resolveArchivedSessionWorkspaceId(enriched);
             const incomingUpdatedAt = (Number.isFinite(enriched.updatedAt) ? enriched.updatedAt : undefined)
                 ?? (Number.isFinite(enriched.savedAt) ? enriched.savedAt : undefined)
                 ?? 0;
