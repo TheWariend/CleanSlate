@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text, useApp, useInput, useStdout } from 'ink';
+import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import Spinner from 'ink-spinner';
 import {
 	CleanSlateNodeAgentRuntime,
@@ -13,6 +13,8 @@ import {
 import { apiKeyFromEnvironment, ICliArguments, SUPPORTED_PROVIDERS } from './argv.js';
 import { CleanSlateTerminalLogo } from './brand.js';
 import { LiveTurnBuffer } from './liveTurn.js';
+import { CleanSlateStreamReveal, REVEAL_TICK_MS } from '@cleanslate/sdk/agent/cleanSlateStreamReveal.js';
+import { resolveCleanSlateReasoningLevelOptions } from '@cleanslate/sdk/protocol/cleanSlateModelCapabilities.js';
 import { CliProjectContext } from './projectContext.js';
 import {
 	CliWorkspaceReview,
@@ -129,7 +131,7 @@ const COMMAND_PALETTE_ITEMS: readonly ICommandPaletteItem[] = [
 	{ id: '/models', label: 'Models', description: 'Browse models for the active provider' },
 	{ id: '/model', label: 'Set model', description: 'Switch directly to a model ID', requiresArguments: true },
 	{ id: '/provider', label: 'Set provider', description: 'Switch using a saved credential', requiresArguments: true },
-	{ id: '/reasoning', label: 'Reasoning', description: 'Set reasoning effort', requiresArguments: true },
+	{ id: '/reasoning', label: 'Reasoning', description: 'Choose reasoning effort' },
 	{ id: '/permissions', label: 'Permissions', description: 'Switch read-only, default, or full mode', requiresArguments: true },
 	{ id: '/new', label: 'New session', description: 'Start a clean session' },
 	{ id: '/sessions', label: 'Sessions', description: 'Browse saved sessions' },
@@ -152,7 +154,9 @@ export function commandPaletteSelection(item: ICommandPaletteItem): { value: str
 		: { value: item.id, execute: true };
 }
 
-const FOOTER_HELP = ' enter send · shift+tab mode · ctrl+o details · esc cancel · ctrl-c exit · ↑/↓/pgup/pgdn scroll · / commands';
+// The mode label leads the footer in its own colour and is rendered separately; this is the
+// remainder of the hint list. Scrolling is the terminal's own now, so it is not advertised here.
+const FOOTER_HELP = 'shift+tab mode · ctrl+o details · / commands';
 const TRANSCRIPT_FIRST_ROW = 6;
 
 function PromptInput(props: {
@@ -299,6 +303,22 @@ export interface ITranscriptViewportLine {
 	toolItemId?: string;
 	selected?: boolean;
 }
+
+/**
+ * An entry in the permanently-flushed <Static> region: the one-time startup banner followed by
+ * every settled transcript line. Ink writes each of these exactly once, so they land in the
+ * terminal's real scrollback and stay readable after scrolling off screen.
+ */
+export interface ICliReasoningOption {
+	level: string;
+	enabled: boolean;
+	native?: boolean;
+	disabledReason?: string;
+}
+
+export type ICliStaticItem =
+	| { type: 'banner'; key: string }
+	| { type: 'line'; key: string; line: ITranscriptViewportLine };
 
 export function transcriptToolGroupIds(entries: readonly ICliTranscriptEntry[]): string[] {
 	const ids: string[] = [];
@@ -494,6 +514,22 @@ function wrapViewportText(value: string, width: number): string[] {
 	return result.length > 0 ? result : [''];
 }
 
+/**
+ * Collapses runs of blank lines in a user/assistant turn to a single paragraph break, and trims
+ * leading and trailing ones.
+ *
+ * A streamed turn accumulates newlines from two sources: the model's own text, which usually
+ * already ends a paragraph with a newline, and `LiveTurnBuffer.appendText`, which inserts a
+ * blank line when the text phase changes. Together they routinely produce three or four
+ * consecutive newlines, and every one past the first rendered as an empty row — the visible gap
+ * between two paragraphs of an answer.
+ *
+ * Applies only to turn prose. Tool output and diffs keep their exact spacing.
+ */
+export function normalizeTurnProse(content: string): string {
+	return content.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').replace(/^\n+|\n+$/g, '');
+}
+
 export function transcriptViewportLines(
 	entries: readonly ICliTranscriptEntry[],
 	width: number,
@@ -515,7 +551,7 @@ export function transcriptViewportLines(
 	};
 	const pushTurn = (entry: ICliTranscriptEntry, kind: 'user' | 'assistant', marker: string) => {
 		const continuationIndent = ' '.repeat(marker.length + 1);
-		for (const [index, text] of wrapViewportText(entry.content, Math.max(1, safeWidth - continuationIndent.length)).entries()) {
+		for (const [index, text] of wrapViewportText(normalizeTurnProse(entry.content), Math.max(1, safeWidth - continuationIndent.length)).entries()) {
 			lines.push({
 				key: `${entry.id}-${kind}-${index}`,
 				kind,
@@ -767,6 +803,70 @@ function SyntaxDiffText({ text, color, backgroundColor }: { text: string; color:
 	);
 }
 
+export interface IMarkdownSegment {
+	text: string;
+	bold?: boolean;
+	code?: boolean;
+}
+
+/**
+ * Splits one already-wrapped line into styled runs for `**bold**` and `` `code` `` spans.
+ *
+ * Deliberately line-local: transcript text is wrapped into physical rows before it reaches the
+ * renderer, so a span opened on one row and closed on the next cannot be paired here. Only
+ * balanced spans are styled; anything unmatched is left verbatim rather than guessed at, so a
+ * stray asterisk in prose or code never eats the rest of the line.
+ */
+export function markdownSegments(text: string): IMarkdownSegment[] {
+	const segments: IMarkdownSegment[] = [];
+	const pattern = /\*\*([^*]+)\*\*|`([^`]+)`/g;
+	let lastIndex = 0;
+	let match: RegExpExecArray | null;
+	while ((match = pattern.exec(text)) !== null) {
+		if (match.index > lastIndex) {
+			segments.push({ text: text.slice(lastIndex, match.index) });
+		}
+		if (match[1] !== undefined) {
+			segments.push({ text: match[1], bold: true });
+		} else {
+			segments.push({ text: match[2], code: true });
+		}
+		lastIndex = match.index + match[0].length;
+	}
+	if (lastIndex < text.length) {
+		segments.push({ text: text.slice(lastIndex) });
+	}
+	return segments.length > 0 ? segments : [{ text }];
+}
+
+/** Strips a leading ATX heading marker (`## Title`), reporting whether one was present. */
+export function stripMarkdownHeading(text: string): { text: string; isHeading: boolean } {
+	const match = /^(\s*)#{1,6}[ \t]+(.*)$/.exec(text);
+	return match ? { text: `${match[1]}${match[2]}`, isHeading: true } : { text, isHeading: false };
+}
+
+function MarkdownText({ text, width, prefix }: { text: string; width: number; prefix?: React.ReactNode }) {
+	const heading = stripMarkdownHeading(text);
+	const segments = markdownSegments(heading.text);
+	const prefixWidth = prefix ? 2 : 0;
+	const padding = ' '.repeat(Math.max(0, width - prefixWidth - heading.text.length));
+	return (
+		<Text>
+			{prefix}
+			{segments.map((segment, index) => (
+				<Text
+					key={index}
+					bold={heading.isHeading || segment.bold}
+					color={segment.code ? COLORS.warning : heading.isHeading ? COLORS.accent : undefined}
+				>
+					{segment.text}
+				</Text>
+			))}
+			{padding}
+		</Text>
+	);
+}
+
 function TranscriptViewportLine({ line, width }: { line: ITranscriptViewportLine; width: number }) {
 	const text = line.text.padEnd(Math.max(1, width));
 	switch (line.kind) {
@@ -775,9 +875,9 @@ function TranscriptViewportLine({ line, width }: { line: ITranscriptViewportLine
 		case 'user':
 			return <Text color={COLORS.accent} bold>{text}</Text>;
 		case 'assistant':
-			return text.startsWith('↳ ')
-				? <Text><Text color={COLORS.success} bold>↳ </Text>{text.slice(2)}</Text>
-				: <Text>{text}</Text>;
+			return line.text.startsWith('↳ ')
+				? <MarkdownText text={line.text.slice(2)} width={width} prefix={<Text color={COLORS.success} bold>↳ </Text>} />
+				: <MarkdownText text={line.text} width={width} />;
 		case 'reasoning':
 			return <Text color={COLORS.muted}>{text}</Text>;
 		case 'tool':
@@ -1020,6 +1120,44 @@ function SessionPicker({ sessions, onSelect, onDelete, onCancel }: {
 	);
 }
 
+function ReasoningPicker({ options, current, onSelect, onCancel }: {
+	options: ICliReasoningOption[];
+	current: string;
+	onSelect: (level: string) => void;
+	onCancel: () => void;
+}) {
+	const selectable = options.filter(option => option.enabled);
+	const initial = Math.max(0, selectable.findIndex(option => option.level === current));
+	const [selected, setSelected] = useState(initial);
+	useInput((_input, key) => {
+		if (key.upArrow) {
+			setSelected(value => Math.max(0, value - 1));
+		} else if (key.downArrow) {
+			setSelected(value => Math.min(selectable.length - 1, value + 1));
+		} else if (key.return && selectable[selected]) {
+			onSelect(selectable[selected].level);
+		} else if (key.escape) {
+			onCancel();
+		}
+	});
+	return (
+		<Box borderStyle="round" borderColor={COLORS.accent} flexDirection="column" paddingX={1} marginTop={1}>
+			<Text bold>Reasoning effort</Text>
+			{selectable.map((option, index) => (
+				<Text key={option.level} inverse={selected === index}>
+					{selected === index ? '› ' : '  '}{option.level}{option.level === current ? '  ✓' : ''}
+				</Text>
+			))}
+			{/* Levels the active model rejects are listed but not selectable, so the set is not
+			    silently different from one model to the next. */}
+			{options.filter(option => !option.enabled).map(option => (
+				<Text key={option.level} color={COLORS.muted}>  {option.level} — unsupported</Text>
+			))}
+			<Text color={COLORS.muted}>↑/↓ select · enter apply · esc close</Text>
+		</Box>
+	);
+}
+
 function ModelPicker({ models, current, onSelect, onCancel }: {
 	models: string[];
 	current?: string;
@@ -1060,6 +1198,12 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const sessionRef = useRef(initialSession);
 	const [transcript, setTranscript] = useState<ICliTranscriptEntry[]>(initialSession.transcript);
 	const [liveText, setLiveText] = useState('');
+	// What the provider has delivered so far. `liveText` is the paced subset actually shown:
+	// providers flush in bursts, so rendering every delta as it lands makes a whole paragraph
+	// appear at once instead of typing out.
+	const liveTargetRef = useRef('');
+	const revealRef = useRef(new CleanSlateStreamReveal());
+	const revealTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 	const liveTurnRef = useRef(new LiveTurnBuffer());
 	const [input, setInput] = useState('');
 	const [commandSelection, setCommandSelection] = useState(0);
@@ -1073,6 +1217,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const allowCommandsRef = useRef(false);
 	const [showSessions, setShowSessions] = useState(false);
 	const [models, setModels] = useState<string[] | undefined>();
+	const [reasoningOptions, setReasoningOptions] = useState<ICliReasoningOption[] | undefined>();
 	const initialInteractiveMode: CliInteractiveMode = args.permissionMode === 'full' ? 'accept-edits' : 'manual';
 	const [mode, setMode] = useState<CliInteractiveMode>(initialInteractiveMode);
 	const modeRef = useRef<CliInteractiveMode>(initialInteractiveMode);
@@ -1088,6 +1233,14 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const abortRef = useRef<AbortController | undefined>(undefined);
 	const runtimeRef = useRef<CleanSlateNodeAgentRuntime | undefined>(undefined);
 	const turnStartedAtRef = useRef<number | undefined>(undefined);
+	// Index into `transcript` where the turn currently being streamed began. Entries at or after
+	// this index still mutate in place (tool status running -> completed), so they must stay out
+	// of the permanently-flushed <Static> region until the turn settles.
+	const turnStartIndexRef = useRef(0);
+	// Bumped when the transcript is replaced wholesale (/clear, session switch) without
+	// remounting, so <Static> restarts from an empty history instead of diffing against lines it
+	// has already flushed.
+	const [transcriptEpoch, setTranscriptEpoch] = useState(0);
 	const initialTaskStarted = useRef(false);
 	const projectContext = useMemo(() => new CliProjectContext(args.cwd), [args.cwd]);
 	const workspaceReview = useMemo(() => new CliWorkspaceReview(args.cwd), [args.cwd]);
@@ -1138,9 +1291,42 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 
 	const append = (entry: ICliTranscriptEntry) => replaceTranscript(entries => [...entries, entry]);
 
-	const updateLiveText = (value: string) => {
-		setLiveText(value);
+	const stopRevealTicker = () => {
+		if (revealTimerRef.current !== undefined) {
+			clearInterval(revealTimerRef.current);
+			revealTimerRef.current = undefined;
+		}
 	};
+
+	/**
+	 * Records newly delivered text and starts (or keeps) the paced reveal ticker. The ticker
+	 * advances by rate x elapsed time, so a late frame catches up instead of falling behind, and
+	 * stops itself once the revealed text has caught up with everything delivered.
+	 */
+	const updateLiveText = (value: string) => {
+		const previous = liveTargetRef.current;
+		liveTargetRef.current = value;
+		// An edit or reset (rather than an append) invalidates the paced position.
+		if (!revealRef.current.isContinuationOf(value, previous)) {
+			revealRef.current.reset();
+		}
+		if (value.length === 0) {
+			stopRevealTicker();
+			setLiveText('');
+			return;
+		}
+		if (revealTimerRef.current === undefined) {
+			revealTimerRef.current = setInterval(() => {
+				const target = liveTargetRef.current;
+				setLiveText(revealRef.current.advance(target));
+				if (revealRef.current.hasCaughtUp(target)) {
+					stopRevealTicker();
+				}
+			}, REVEAL_TICK_MS);
+		}
+	};
+
+	useEffect(() => stopRevealTicker, []);
 
 	const flushWorkingTurn = () => {
 		const working = liveTurnRef.current.flushWorking();
@@ -1372,6 +1558,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		if (!runtime) {
 			return;
 		}
+		turnStartIndexRef.current = transcript.length;
 		append(transcriptEntry('user', task));
 		turnStartedAtRef.current = Date.now();
 		setModelTermination(undefined);
@@ -1395,6 +1582,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		if (!paused || !runtime || running) {
 			return;
 		}
+		turnStartIndexRef.current = transcript.length;
 		setModelTermination(undefined);
 		setRunning(true);
 		turnStartedAtRef.current = Date.now();
@@ -1412,6 +1600,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		sessionRef.current = next;
 		setSession(next);
 		setTranscript(next.transcript);
+		setTranscriptEpoch(value => value + 1);
 		setExpandedToolGroups(new Set());
 		setExpandedToolEntries(new Set());
 		setSelectedToolItemId(undefined);
@@ -1435,6 +1624,18 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			switchSession(replacement);
 		}
 		return store.delete(target.id);
+	};
+
+	/** Reasoning levels the active provider/model actually accepts, from the shared capability table. */
+	const currentReasoningOptions = (): ICliReasoningOption[] =>
+		resolveCleanSlateReasoningLevelOptions({ provider: args.provider, model: args.model ?? '', flavor: args.provider === 'custom' ? 'custom' : undefined }) as ICliReasoningOption[];
+
+	const applyReasoningLevel = (level: string) => {
+		setReasoningOptions(undefined);
+		args.reasoningLevel = level as ICliArguments['reasoningLevel'];
+		createRuntime(sessionRef.current);
+		onConfigurationChange?.(args);
+		append(transcriptEntry('system', `Reasoning level set to ${level}.`));
 	};
 
 	const switchModel = (model: string) => {
@@ -1535,14 +1736,22 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		}
 		if (value.startsWith('/reasoning ')) {
 			const reasoning = value.slice('/reasoning '.length).trim();
-			if (!['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(reasoning)) {
-				append(transcriptEntry('error', 'Reasoning must be none, minimal, low, medium, high, xhigh, or max.'));
+			const supported = currentReasoningOptions();
+			const match = supported.find(option => option.level === reasoning);
+			if (!match) {
+				append(transcriptEntry('error', `Unknown reasoning level "${reasoning}". Run /reasoning to pick one.`));
 				return;
 			}
-			args.reasoningLevel = reasoning as ICliArguments['reasoningLevel'];
-			createRuntime(sessionRef.current);
-			onConfigurationChange?.(args);
-			append(transcriptEntry('system', `Reasoning level set to ${reasoning}.`));
+			if (!match.enabled) {
+				append(transcriptEntry('error', match.disabledReason ?? `${args.model} does not support ${reasoning} reasoning.`));
+				return;
+			}
+			applyReasoningLevel(reasoning);
+			return;
+		}
+		if (value === '/reasoning') {
+			// No argument: show what this model actually supports rather than failing silently.
+			setReasoningOptions(currentReasoningOptions());
 			return;
 		}
 		if (value.startsWith('/mode ')) {
@@ -1647,6 +1856,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			runtimeRef.current?.clearConversation();
 			sessionRef.current.runtimeSnapshot = undefined;
 			replaceTranscript(() => []);
+			setTranscriptEpoch(value => value + 1);
 			setContextUsage(undefined);
 			return;
 		}
@@ -1712,13 +1922,11 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		const paletteSize = commandItems.length;
-		if (wheelDirection < 0) {
-			setScrollOffset(value => value + 3);
-		} else if (wheelDirection > 0) {
-			setScrollOffset(value => Math.max(0, value - 3));
-		} else if (isTerminalMouseEvent(inputValue)) {
+		// No wheel/arrow/page scrolling for the transcript: settled turns live in the terminal's
+		// own scrollback now, so the terminal scrolls them.
+		if (isTerminalMouseEvent(inputValue)) {
 			if (mouse?.action === 'press' && mouse.button === 0) {
-				const line = renderedLines[mouse.y - TRANSCRIPT_FIRST_ROW];
+				const line = liveLines[mouse.y - TRANSCRIPT_FIRST_ROW];
 				const itemId = line?.toolItemId ?? line?.toolGroupId;
 				if (itemId) {
 					toggleToolItem(itemId);
@@ -1750,14 +1958,6 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				persist();
 				exit();
 			}
-		} else if (key.upArrow) {
-			setScrollOffset(value => value + 3);
-		} else if (key.downArrow) {
-			setScrollOffset(value => Math.max(0, value - 3));
-		} else if (key.pageUp) {
-			setScrollOffset(value => value + Math.max(5, Math.floor(terminalSize.rows / 2)));
-		} else if (key.pageDown) {
-			setScrollOffset(value => Math.max(0, value - Math.max(5, Math.floor(terminalSize.rows / 2))));
 		}
 	});
 
@@ -1778,20 +1978,34 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 						: 0;
 	const footerRows = Math.max(1, Math.ceil(FOOTER_HELP.length / viewportColumns));
 	const contentRows = Math.max(1, viewportRows - 9 - footerRows - overlayRows - (modelTermination ? 1 : 0));
-	const viewportEntries = useMemo<ICliTranscriptEntry[]>(() => {
-		const entries = [...transcript];
-		if (running && liveText) {
-			entries.push({ id: 'live-answer', kind: 'assistant', content: liveText, timestamp: 0 });
-		}
-		return entries;
-	}, [transcript, running, liveText]);
-	const visibleLines = useMemo(
-		() => visibleTranscriptLines(viewportEntries, contentWidth, contentRows, scrollOffset, expandedToolGroups, activeToolItemId, expandedToolEntries),
-		[viewportEntries, contentWidth, contentRows, scrollOffset, expandedToolGroups, expandedToolEntries, activeToolItemId]
+	// Settled turns: safe to flush once into the terminal's real scrollback and never repaint.
+	// While a turn runs, entries at/after turnStartIndexRef are still mutating and stay out.
+	const staticEntries = useMemo<ICliTranscriptEntry[]>(
+		() => running ? transcript.slice(0, Math.min(turnStartIndexRef.current, transcript.length)) : transcript,
+		[transcript, running]
 	);
-	const renderedLines = useMemo(
-		() => visibleLines.length > 0 ? padTranscriptViewportLines(visibleLines, contentRows) : [],
-		[visibleLines, contentRows]
+	// The turn being streamed right now, plus its live answer preview — fully dynamic.
+	const liveEntries = useMemo<ICliTranscriptEntry[]>(() => {
+		if (!running) {
+			return [];
+		}
+		const tail = transcript.slice(Math.min(turnStartIndexRef.current, transcript.length));
+		return liveText ? [...tail, { id: 'live-answer', kind: 'assistant', content: liveText, timestamp: 0 }] : tail;
+	}, [transcript, running, liveText]);
+	const staticLines = useMemo(
+		() => transcriptViewportLines(staticEntries, contentWidth, expandedToolGroups, undefined, expandedToolEntries),
+		[staticEntries, contentWidth, expandedToolGroups, expandedToolEntries]
+	);
+	const liveLines = useMemo(
+		() => transcriptViewportLines(liveEntries, contentWidth, expandedToolGroups, activeToolItemId, expandedToolEntries),
+		[liveEntries, contentWidth, expandedToolGroups, expandedToolEntries, activeToolItemId]
+	);
+	const staticItems = useMemo<ICliStaticItem[]>(
+		() => [
+			{ type: 'banner', key: 'cleanslate-banner' },
+			...staticLines.map(line => ({ type: 'line' as const, key: line.key, line }))
+		],
+		[staticLines]
 	);
 	const activeDiffReview = diffReviews?.[Math.min(diffReviewIndex, diffReviews.length - 1)];
 	const contextStatus = [
@@ -1801,27 +2015,38 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const headerModeLabel = formatHeaderModeLabel(mode);
 
 	return (
-		<Box flexDirection="column" height={viewportRows} overflow="hidden">
-			<Box borderStyle="round" borderColor={COLORS.accent} paddingX={1} flexDirection="column">
-				<Box justifyContent="space-between">
-					<Box alignItems="center">
-						<CleanSlateTerminalLogo />
-						<Text color={COLORS.accent} bold>CLEANSLATE</Text>
-					</Box>
-					<Box flexShrink={1}>
-						<Text color={COLORS.muted} wrap="truncate-middle">{args.provider}/{args.model}</Text>
-						{headerModeLabel && <Text color={COLORS.warning} bold> · {headerModeLabel}</Text>}
-					</Box>
-				</Box>
-				<Box justifyContent="space-between">
-					<Box flexGrow={1} flexShrink={1}>
-						<Text color={COLORS.muted} wrap="truncate-middle">{session.title} · {session.id.slice(0, 8)} · {displayPath(args.cwd)}</Text>
-					</Box>
-					{contextStatus && <Text color={COLORS.muted}> {contextStatus}</Text>}
-				</Box>
-			</Box>
+		<Box flexDirection="column">
+			{/*
+				Banner first, then settled conversation. Everything here is flushed exactly once,
+				so it lands in the terminal's real scrollback: the banner scrolls up and away with
+				the history above it and stays readable when scrolled back to. A flushed row is
+				never repainted, so live values (mode, context) sit beside the prompt instead.
+			*/}
+			<Static items={staticItems} key={`${session.id}:${transcriptEpoch}`}>
+				{item => item.type === 'banner'
+					? (
+						// Explicit width: a <Static> item renders standalone, outside the root
+						// Box, so it has no parent to stretch against and would otherwise shrink
+						// to fit its text instead of spanning the terminal.
+						<Box key={item.key} width={viewportColumns} borderStyle="round" borderColor={COLORS.accent} paddingX={1} flexDirection="column">
+							<Box justifyContent="space-between">
+								<Box alignItems="center">
+									<CleanSlateTerminalLogo />
+									<Text color={COLORS.accent} bold>CLEANSLATE</Text>
+								</Box>
+								<Box flexShrink={1}>
+									<Text color={COLORS.muted} wrap="truncate-middle">{args.provider}/{args.model}</Text>
+								</Box>
+							</Box>
+							<Box>
+								<Text color={COLORS.muted} wrap="truncate-middle">{session.title} · {session.id.slice(0, 8)} · {displayPath(args.cwd)}</Text>
+							</Box>
+						</Box>
+					)
+					: <TranscriptViewportLine key={item.key} line={item.line} width={contentWidth} />}
+			</Static>
 
-			<Box flexDirection="column" paddingX={1} height={contentRows} overflow="hidden">
+			<Box flexDirection="column" paddingX={1}>
 				{activeDiffReview && diffReviews
 					? <DiffViewer
 						review={activeDiffReview}
@@ -1832,14 +2057,14 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 						rows={contentRows}
 					/>
 					: <>
-						{visibleLines.length === 0 && (
+						{staticEntries.length === 0 && liveEntries.length === 0 && (
 							<>
-								{contentRows >= 1 && <Text bold>What are we building?</Text>}
-								{contentRows >= 2 && <Text color={COLORS.muted}>Describe a task.</Text>}
-								{contentRows >= 3 && <Text color={COLORS.muted}>Type /help for commands.</Text>}
+								<Text bold>What are we building?</Text>
+								<Text color={COLORS.muted}>Describe a task.</Text>
+								<Text color={COLORS.muted}>Type /help for commands.</Text>
 							</>
 						)}
-						{renderedLines.map(line => <TranscriptViewportLine key={line.key} line={line} width={contentWidth} />)}
+						{liveLines.map(line => <TranscriptViewportLine key={line.key} line={line} width={contentWidth} />)}
 					</>}
 			</Box>
 
@@ -1847,6 +2072,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			{editApproval && <EditApprovalBox approval={editApproval} decide={decideEditApproval} maxDiffRows={editPreviewRows} topRow={TRANSCRIPT_FIRST_ROW + contentRows} />}
 			{showSessions && <SessionPicker sessions={store.list()} onSelect={switchSession} onDelete={deleteSessionFromPicker} onCancel={() => setShowSessions(false)} />}
 			{models && <ModelPicker models={models} current={args.model} onSelect={switchModel} onCancel={() => setModels(undefined)} />}
+			{reasoningOptions && <ReasoningPicker options={reasoningOptions} current={args.reasoningLevel} onSelect={applyReasoningLevel} onCancel={() => setReasoningOptions(undefined)} />}
 			{!approval && !editApproval && !showSessions && !models && !modelTermination && !diffReviews && commandItems.length > 0 && (
 				<CommandPalette items={commandItems} selected={visibleCommandSelection} />
 			)}
@@ -1855,8 +2081,16 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				<ModelTerminationNotice message={modelTermination.message} />
 			)}
 
+			{/* Active model, right-aligned on its own row above the prompt. */}
+			{!approval && !editApproval && !showSessions && !models && !modelTermination && !diffReviews && (
+				<Box paddingX={1} justifyContent="flex-end">
+					<Text color={COLORS.muted} wrap="truncate-middle">{args.provider}/{args.model}</Text>
+				</Box>
+			)}
+
 			{!approval && !editApproval && !showSessions && !models && !modelTermination && (
-				<Box borderStyle="round" borderColor={running ? COLORS.muted : COLORS.accent} paddingX={1}>
+				<Box borderStyle="round" borderColor={running ? COLORS.muted : COLORS.accent} paddingX={1} justifyContent="space-between">
+					<Box flexGrow={1} flexShrink={1}>
 					{diffReviews
 						? <Text color={COLORS.muted}>←/→ view · ↑/↓ file · j/k scroll · PgUp/PgDn page · Esc close</Text>
 						: running
@@ -1890,9 +2124,29 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 								placeholder="Ask CleanSlate…"
 							/>
 						</>}
+					</Box>
+					{/*
+						Context usage rides inside the prompt frame, right-aligned. flexShrink={0}
+						is required: the input wrapper beside it uses flexGrow, which would
+						otherwise claim the whole row and collapse this to zero width.
+					*/}
+					{contextStatus && (
+						<Box flexShrink={0}>
+							<Text color={COLORS.muted}>  {contextStatus}</Text>
+						</Box>
+					)}
 				</Box>
 			)}
-			<Text color={COLORS.muted}>{FOOTER_HELP}</Text>
+			{/*
+				One <Text> with nested spans, deliberately NOT a flex <Box>: as Box children each
+				span becomes its own flex item and wraps independently, which on a narrow terminal
+				splits words and clips the mode label. Nested inside a single Text they share one
+				wrapping pass and break only at spaces.
+			*/}
+			<Text color={COLORS.muted}>
+				{headerModeLabel ? <Text color={COLORS.warning} bold>{` ${headerModeLabel} · `}</Text> : ' '}
+				{FOOTER_HELP}
+			</Text>
 		</Box>
 	);
 }

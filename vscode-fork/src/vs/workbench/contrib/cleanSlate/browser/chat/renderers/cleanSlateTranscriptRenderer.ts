@@ -5,6 +5,7 @@
 
 import * as dom from '../../../../../../base/browser/dom.js';
 import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
+import { REVEAL_TICK_MS, revealCutPoint } from '@cleanslate/sdk/agent/cleanSlateStreamReveal.js';
 import { IDisposable } from '../../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { IMarkdownRendererService } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
@@ -988,56 +989,7 @@ export class CleanSlateTranscriptRenderer {
         this.setMarkdownIfChanged(el, content, `assistant-text:${block.id}:${content}`);
     }
 
-    // Streaming reveal. Providers deliver text in bursts, so the transcript
-    // paces it out instead of rendering each delta as it lands. The reveal is
-    // expressed as a typing *rate* over elapsed wall time rather than a fixed
-    // number of characters per tick, so a dropped or late frame catches up on
-    // its own instead of falling permanently behind the stream.
-    private static readonly REVEAL_TICK_MS = 24;
     private static readonly REASONING_COMPLETION_HOLD_MS = 1800;
-
-    // Characters per second. The rate rises with the size of the backlog so a
-    // long burst drains quickly, but it grows sub-linearly (square root) so the
-    // text keeps a readable cadence rather than snapping to the end. Tune
-    // REVEAL_CEILING_CPS for the fastest acceptable reveal.
-    private static readonly REVEAL_FLOOR_CPS = 45;
-    private static readonly REVEAL_CEILING_CPS = 320;
-    private static readonly REVEAL_BACKLOG_GAIN = 17;
-    // How far back the cut may retreat to land on a word boundary.
-    private static readonly REVEAL_BOUNDARY_REACH = 12;
-
-    private revealRateForBacklog(backlog: number): number {
-        const rate = CleanSlateTranscriptRenderer.REVEAL_FLOOR_CPS
-            + Math.sqrt(Math.max(0, backlog)) * CleanSlateTranscriptRenderer.REVEAL_BACKLOG_GAIN;
-        return Math.min(CleanSlateTranscriptRenderer.REVEAL_CEILING_CPS, rate);
-    }
-
-    /**
-     * Cut point for this frame: advance by rate × elapsed time, then walk back
-     * to the nearest preceding whitespace so the visible text never ends inside
-     * a word. Falls through to the raw cut when no boundary is close enough.
-     */
-    private revealCutPoint(text: string, shown: number, elapsedMs: number): number {
-        const backlog = text.length - shown;
-        if (backlog <= 0) {
-            return text.length;
-        }
-        const seconds = Math.max(elapsedMs, 1) / 1000;
-        const advance = Math.max(1, Math.round(this.revealRateForBacklog(backlog) * seconds));
-        const cut = Math.min(text.length, shown + advance);
-        if (cut >= text.length) {
-            return text.length;
-        }
-        const floor = Math.max(shown + 1, cut - CleanSlateTranscriptRenderer.REVEAL_BOUNDARY_REACH);
-        for (let i = cut; i > floor; i--) {
-            const ch = text.charCodeAt(i - 1);
-            // space, tab, newline, carriage return
-            if (ch === 32 || ch === 9 || ch === 10 || ch === 13) {
-                return i;
-            }
-        }
-        return cut;
-    }
 
     private renderAssistantMarkdownProgressively(blockId: string, el: HTMLElement, content: string, isStreaming: boolean, onDidRender?: () => void): void {
         let state = this.assistantMarkdownStreamStates.get(blockId);
@@ -1078,11 +1030,11 @@ export class CleanSlateTranscriptRenderer {
         // First frame of a block has no previous render to measure from; treat it
         // as one tick so the reveal starts at the floor rate instead of jumping.
         const elapsedMs = state.lastRenderTime === 0
-            ? CleanSlateTranscriptRenderer.REVEAL_TICK_MS
+            ? REVEAL_TICK_MS
             : Math.min(Date.now() - state.lastRenderTime, 250);
         const end = content.length <= shownLength
             ? content.length
-            : this.revealCutPoint(content, shownLength, elapsedMs);
+            : revealCutPoint(content, shownLength, elapsedMs);
         const revealed = content.slice(0, end);
 
         // Render the streaming reveal as markdown, but MORPH the existing DOM to match
@@ -1333,7 +1285,7 @@ export class CleanSlateTranscriptRenderer {
                 return;
             }
             this.renderAssistantMarkdownProgressively(blockId, el, state.targetContent, state.isStreaming, state.onDidRender);
-        }, CleanSlateTranscriptRenderer.REVEAL_TICK_MS);
+        }, REVEAL_TICK_MS);
     }
 
     private updateTerminalBlock(block: InteractionBlock, el: HTMLElement): void {

@@ -6,7 +6,9 @@
 const ENTER_ALTERNATE_SCREEN = '\u001b[?1006l\u001b[?1000l\u001b[?1049h\u001b[?1007h\u001b[2J\u001b[H';
 const LEAVE_ALTERNATE_SCREEN = '\u001b[?1006l\u001b[?1000l\u001b[?1007l\u001b[?25h\u001b[?1049l';
 const CLEAR_SCREEN = '\u001b[2J\u001b[H';
-const ENGINE_LOG_PREFIX = '[CleanSlateAgent]';
+// Every runtime log prefix, not just the agent loop: [CleanSlateEdit], [CleanSlateService] and
+// [CleanSlateSync] reach the same console and corrupt Ink's frame in exactly the same way.
+const ENGINE_LOG_PREFIX_RE = /^\[CleanSlate[A-Za-z]*\]/;
 const SGR_MOUSE_EVENT = /^\u001b?\[<(\d+);(\d+);(\d+)([Mm])$/;
 
 export interface ITerminalMouseEvent {
@@ -51,6 +53,46 @@ export function clearInteractiveScreen(output: NodeJS.WriteStream = process.stdo
 	}
 }
 
+/**
+ * Silences the runtime's `[CleanSlateAgent] …` console output for the lifetime of an
+ * interactive render. Ink owns the cursor while it draws, so an unrelated `console.log`
+ * lands mid-frame: it scrolls the live region, strands rows the renderer still believes
+ * it owns, and corrupts the layout. Returns a restore function.
+ *
+ * Kept separate from {@link enterInteractiveScreen} because the main chat TUI needs the
+ * log suppression WITHOUT the alternate screen (the alternate screen has no scrollback,
+ * which is what put earlier conversation out of reach).
+ *
+ * Install this AFTER Ink's `render()`: Ink's own `patchConsole` replaces the console
+ * methods when its instance is constructed, so suppressing first would simply be
+ * overwritten and the engine lines would surface above the live frame.
+ */
+export function suppressEngineLogs(): () => void {
+	const originalLog = console.log;
+	const originalInfo = console.info;
+	const originalWarn = console.warn;
+	const suppressEngineLog = (original: (...data: any[]) => void) => (...data: any[]) => {
+		if (typeof data[0] === 'string' && ENGINE_LOG_PREFIX_RE.test(data[0])) {
+			return;
+		}
+		original(...data);
+	};
+	console.log = suppressEngineLog(originalLog);
+	console.info = suppressEngineLog(originalInfo);
+	console.warn = suppressEngineLog(originalWarn);
+
+	let restored = false;
+	return () => {
+		if (restored) {
+			return;
+		}
+		restored = true;
+		console.log = originalLog;
+		console.info = originalInfo;
+		console.warn = originalWarn;
+	};
+}
+
 export function enterInteractiveScreen(output: NodeJS.WriteStream = process.stdout): () => void {
 	if (!output.isTTY) {
 		return () => undefined;
@@ -63,18 +105,7 @@ export function enterInteractiveScreen(output: NodeJS.WriteStream = process.stdo
 	const handleResize = () => output.write(CLEAR_SCREEN);
 	output.on('resize', handleResize);
 
-	const originalLog = console.log;
-	const originalInfo = console.info;
-	const originalWarn = console.warn;
-	const suppressEngineLog = (original: (...data: any[]) => void) => (...data: any[]) => {
-		if (typeof data[0] === 'string' && data[0].startsWith(ENGINE_LOG_PREFIX)) {
-			return;
-		}
-		original(...data);
-	};
-	console.log = suppressEngineLog(originalLog);
-	console.info = suppressEngineLog(originalInfo);
-	console.warn = suppressEngineLog(originalWarn);
+	const restoreEngineLogs = suppressEngineLogs();
 
 	let disposed = false;
 	return () => {
@@ -83,9 +114,7 @@ export function enterInteractiveScreen(output: NodeJS.WriteStream = process.stdo
 		}
 		disposed = true;
 		output.off('resize', handleResize);
-		console.log = originalLog;
-		console.info = originalInfo;
-		console.warn = originalWarn;
+		restoreEngineLogs();
 		output.write(LEAVE_ALTERNATE_SCREEN);
 	};
 }

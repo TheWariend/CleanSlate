@@ -10,6 +10,9 @@ import {
 	diffSyntaxTokens,
 	formatActivityStatus,
 	formatElapsedTime,
+	markdownSegments,
+	normalizeTurnProse,
+	stripMarkdownHeading,
 	padTranscriptViewportLines,
 	transcriptToolGroupIds,
 	transcriptToolItemIds,
@@ -144,6 +147,46 @@ test('TUI formats elapsed labels and tokenizes code in diffs', () => {
 	assert.equal(tokens.some(token => token.kind === 'keyword' && token.text === 'const'), true);
 	assert.equal(tokens.some(token => token.kind === 'string' && token.text === '"done"'), true);
 	assert.equal(tokens.some(token => token.kind === 'comment'), true);
+});
+
+test('TUI styles inline markdown and strips heading markers', () => {
+	assert.deepEqual(markdownSegments('plain text'), [{ text: 'plain text' }]);
+	assert.deepEqual(markdownSegments('a **bold** b'), [
+		{ text: 'a ' },
+		{ text: 'bold', bold: true },
+		{ text: ' b' }
+	]);
+	assert.deepEqual(markdownSegments('use `npm run build` now'), [
+		{ text: 'use ' },
+		{ text: 'npm run build', code: true },
+		{ text: ' now' }
+	]);
+
+	// A span split across wrapped rows cannot be paired, so it is left verbatim
+	// rather than guessed at.
+	assert.deepEqual(markdownSegments('an **unclosed span'), [{ text: 'an **unclosed span' }]);
+
+	assert.deepEqual(stripMarkdownHeading('## Mind_Sort'), { text: 'Mind_Sort', isHeading: true });
+	assert.deepEqual(stripMarkdownHeading('### Core Features'), { text: 'Core Features', isHeading: true });
+	assert.deepEqual(stripMarkdownHeading('not # a heading'), { text: 'not # a heading', isHeading: false });
+	assert.deepEqual(stripMarkdownHeading('#nospace'), { text: '#nospace', isHeading: false });
+});
+
+// Regression: a streamed turn collects newlines from the model's own text AND from
+// LiveTurnBuffer's phase-change separator, so 3-4 consecutive newlines were common and every
+// one past the first rendered as an empty row — a visible gap mid-answer.
+test('TUI collapses blank-line runs inside a turn to one paragraph break', () => {
+	assert.equal(normalizeTurnProse('a\n\n\n\nb'), 'a\n\nb');
+	assert.equal(normalizeTurnProse('a\n\nb'), 'a\n\nb', 'a single paragraph break is preserved');
+	assert.equal(normalizeTurnProse('a\nb'), 'a\nb', 'a plain line break is preserved');
+	assert.equal(normalizeTurnProse('\n\na\n\n'), 'a', 'leading and trailing blanks are trimmed');
+	assert.equal(normalizeTurnProse('a\r\n\r\n\r\nb'), 'a\n\nb', 'CRLF is normalised first');
+
+	const rendered = transcriptViewportLines(
+		[{ id: 'live', kind: 'assistant', content: 'first para\n\n\n\nsecond para', timestamp: 0 }],
+		90
+	);
+	assert.equal(rendered.filter(line => line.text.trim() === '').length, 1);
 });
 
 test('TUI exposes active edit tools as editing activity', () => {

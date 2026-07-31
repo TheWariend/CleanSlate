@@ -20,7 +20,7 @@ import { CliConfigStore, CliCredentialStore, getCleanSlateWorkspaceStorageHome, 
 import { authenticateCleanSlateInBrowser } from './managedAuth.js';
 import { CliSessionStore, ICliSession, transcriptEntry } from './sessions.js';
 import { CleanSlateModelSetupTui, CleanSlateSetupTui, ICliSetupResult } from './setupTui.js';
-import { clearInteractiveScreen, enterInteractiveScreen } from './terminalScreen.js';
+import { clearInteractiveScreen, enterInteractiveScreen, suppressEngineLogs } from './terminalScreen.js';
 import { CleanSlateTui } from './tui.js';
 import { CliProjectContext } from './projectContext.js';
 import { cliDoctorReport } from './doctor.js';
@@ -298,8 +298,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 		return 0;
 	}
 
-	const leaveInteractiveScreen = useTui ? enterInteractiveScreen() : undefined;
-	try {
 	let initialSession = args.sessionId
 		? sessionStore.load(args.sessionId)
 		: args.resume ? sessionStore.latest() : undefined;
@@ -320,13 +318,21 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 	if (args.setup && !useTui) {
 		throw new Error('--setup requires an interactive terminal.');
 	}
+	// The setup wizard is a genuinely temporary full-screen form that exits before returning, so
+	// it keeps the alternate screen: it has no history worth preserving and wants a clipped
+	// viewport of its own. The chat loop below deliberately does not.
 	if (useTui && (args.setup || providerSetupRequired(args))) {
-		const setup = await runInteractiveSetup(args.provider);
-		if (!setup) {
-			return 130;
-		}
-		if (!await completeInteractiveSetup(args, setup, credentialStore, configStore)) {
-			return 130;
+		const leaveSetupScreen = enterInteractiveScreen();
+		try {
+			const setup = await runInteractiveSetup(args.provider);
+			if (!setup) {
+				return 130;
+			}
+			if (!await completeInteractiveSetup(args, setup, credentialStore, configStore)) {
+				return 130;
+			}
+		} finally {
+			leaveSetupScreen();
 		}
 	}
 	validateProvider(args);
@@ -339,6 +345,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 		let pendingInitialTask = args.task;
 		while (true) {
 			let setupRequested = false;
+			// No alternate screen: CleanSlateTui flushes settled turns once through Ink's
+			// <Static>, so finished conversation lands in the terminal's own scrollback and
+			// stays reachable with the wheel and scrollbar. The alternate screen has no
+			// scrollback in any terminal, which is what put earlier history out of reach.
+			//
+			// A plain erase-screen (CSI 2J, cursor home) still runs so the session opens on a
+			// clean viewport instead of under the shell prompt. Unlike the alternate screen this
+			// is non-destructive: everything drawn afterwards scrolls into real scrollback.
 			clearInteractiveScreen();
 			const app = render(createElement(CleanSlateTui, {
 				args,
@@ -352,15 +366,28 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 				onDoctor: () => cliDoctorReport(args, credentialStore),
 				onRequestSetup: () => { setupRequested = true; }
 			}), { exitOnCtrlC: false });
+			// MUST come after render(): Ink's `patchConsole` (on by default) replaces the console
+			// methods when its instance is constructed and re-renders whatever it captures ABOVE
+			// the live frame. Suppressing first would just be overwritten, and `[CleanSlateAgent]`
+			// lines would surface above the UI with a reserved gap beneath them. Wrapping Ink's
+			// patch instead drops those lines before they reach it, while genuine console output
+			// still routes through Ink safely.
+			const restoreEngineLogs = suppressEngineLogs();
 			await app.waitUntilExit();
 			app.clear();
-			clearInteractiveScreen();
+			restoreEngineLogs();
 			pendingInitialTask = undefined;
 			if (!setupRequested) {
 				return 0;
 			}
 
-			const setup = await runInteractiveSetup(args.provider);
+			const leaveSetupScreen = enterInteractiveScreen();
+			let setup: ICliSetupResult | undefined;
+			try {
+				setup = await runInteractiveSetup(args.provider);
+			} finally {
+				leaveSetupScreen();
+			}
 			if (setup) {
 				if (!await completeInteractiveSetup(args, setup, credentialStore, configStore)) {
 					continue;
@@ -375,9 +402,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
 	validateOneShot(args);
 	return runOneShot(args, initialSession, sessionStore);
-	} finally {
-		leaveInteractiveScreen?.();
-	}
 }
 
 function applyStoredConfig(args: ICliArguments, config: ICliConfig): void {
