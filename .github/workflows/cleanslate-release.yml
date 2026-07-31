@@ -228,6 +228,21 @@ jobs:
           git tag -a "$RELEASE_TAG" -m "CleanSlate $RELEASE_VERSION"
           git push origin "$RELEASE_TAG"
 
+      - name: Publish source release entry
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          notes="Download the signed and notarized macOS build from https://github.com/${RELEASES_REPOSITORY}/releases/tag/${RELEASE_TAG}."
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --latest --title "CleanSlate $RELEASE_VERSION" --notes "$notes"
+          else
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest --title "CleanSlate $RELEASE_VERSION" --notes "$notes"
+          fi
+
   # build-windows:
   #   name: Build Windows app
   #   if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'windows' || inputs.target == 'all' }}
