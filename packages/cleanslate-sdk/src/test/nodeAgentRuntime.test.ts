@@ -7,8 +7,31 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { Emitter } from '../core/event.js';
 import { CleanSlateNodeAgentRuntime, createNodeProviderConfiguration } from '../node/cleanSlateNodeAgentRuntime.js';
+import { getCleanSlateContextDefaults } from '../protocol/cleanSlateModelCapabilities.js';
 
 describe('CleanSlateNodeAgentRuntime', () => {
+	test('uses the same model context defaults as the IDE configuration', () => {
+		const configuration = createNodeProviderConfiguration({
+			provider: 'cleanslate',
+			model: 'deepseek-v4-flash',
+			reasoningLevel: 'low'
+		});
+		const expected = getCleanSlateContextDefaults({
+			provider: 'cleanslate',
+			model: 'deepseek-v4-flash',
+			planMode: false,
+			reasoningLevel: 'low'
+		});
+
+		assert.equal(configuration.modelContextWindow, 1_000_000);
+		assert.equal(configuration.contextWindow, expected.contextWindowTokens);
+		assert.equal(configuration.modelContextWindow, expected.modelContextWindowTokens);
+		assert.equal(configuration.maxInputTokens, expected.maxInputTokens);
+		assert.equal(configuration.autoCompactReserveTokens, expected.autoCompactReserveTokens);
+		assert.equal(configuration.fileTruncation, expected.fileTruncationChars);
+		assert.equal(configuration.globalContextBudget, expected.globalContextBudgetChars);
+	});
+
 	test('loads CleanSlate managed models and persists a refreshed account token', async () => {
 		const requests: string[] = [];
 		let refreshedToken: string | undefined;

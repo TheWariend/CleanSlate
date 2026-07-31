@@ -14,7 +14,7 @@ import { apiKeyFromEnvironment, ICliArguments, SUPPORTED_PROVIDERS } from './arg
 import { CleanSlateTerminalLogo } from './brand.js';
 import { LiveTurnBuffer } from './liveTurn.js';
 import { CleanSlateStreamReveal, REVEAL_TICK_MS } from '@cleanslate/sdk/agent/cleanSlateStreamReveal.js';
-import { resolveCleanSlateReasoningLevelOptions } from '@cleanslate/sdk/protocol/cleanSlateModelCapabilities.js';
+import { getCleanSlateContextDefaults, resolveCleanSlateReasoningLevelOptions } from '@cleanslate/sdk/protocol/cleanSlateModelCapabilities.js';
 import { CliProjectContext } from './projectContext.js';
 import {
 	CliWorkspaceReview,
@@ -71,6 +71,48 @@ interface IPendingEditApproval {
 interface IModelTerminationNotice {
 	message: string;
 	mode: 'execution' | 'planning';
+}
+
+interface ICliContextMessage {
+	role?: unknown;
+	content?: unknown;
+	renderPayload?: unknown;
+}
+
+function estimateContextChars(value: unknown): number {
+	if (typeof value === 'string') {
+		return value.length;
+	}
+	if (Array.isArray(value)) {
+		return value.reduce((total, item) => total + estimateContextChars(item), 0);
+	}
+	if (value && typeof value === 'object') {
+		try {
+			return JSON.stringify(value).length;
+		} catch {
+			return 0;
+		}
+	}
+	return 0;
+}
+
+/** Mirrors the IDE composer meter: visible thread history and the current draft at four chars/token. */
+export function estimateCliContextWindowUsage(
+	messages: readonly ICliContextMessage[],
+	inputValue: string,
+	contextWindowTokens: number
+): { usedTokens: number; maxTokens: number; percentage: number } {
+	const maxTokens = Math.max(1, Math.floor(contextWindowTokens));
+	const charCount = messages.reduce((total, message) => total
+		+ estimateContextChars(message.role)
+		+ estimateContextChars(message.content)
+		+ estimateContextChars(message.renderPayload), estimateContextChars(inputValue));
+	const usedTokens = Math.ceil(charCount / 4);
+	return {
+		usedTokens,
+		maxTokens,
+		percentage: Math.max(0, Math.min(100, (usedTokens / maxTokens) * 100))
+	};
 }
 
 const COLORS = {
@@ -1209,7 +1251,6 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const [commandSelection, setCommandSelection] = useState(0);
 	const [running, setRunning] = useState(false);
 	const [status, setStatus] = useState('ready');
-	const [contextUsage, setContextUsage] = useState<number | undefined>();
 	const [approval, setApproval] = useState<IPendingApproval | undefined>();
 	const [editApproval, setEditApproval] = useState<IPendingEditApproval | undefined>();
 	const [modelTermination, setModelTermination] = useState<IModelTerminationNotice | undefined>();
@@ -1466,9 +1507,6 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				switch (part.type) {
 					case 'assistant_turn_start':
 						setStatus('thinking');
-						break;
-					case 'context_usage':
-						setContextUsage(part.percentage);
 						break;
 					case 'reasoning':
 						liveTurnRef.current.appendReasoning(part.content);
@@ -1824,7 +1862,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			append(transcriptEntry('system', [
 				`Project instructions: ${inventory.instructionFiles.join(', ') || 'none'}`,
 				'Attach workspace files by mentioning them as @path/to/file in your prompt.',
-				`Context usage: ${contextUsage === undefined ? 'waiting for provider usage data' : `${Math.round(contextUsage)}%`}`
+				`Context usage: ${Math.round(contextUsage)}%`
 			].join('\n')));
 			return;
 		}
@@ -1864,7 +1902,6 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			sessionRef.current.runtimeSnapshot = undefined;
 			replaceTranscript(() => []);
 			setTranscriptEpoch(value => value + 1);
-			setContextUsage(undefined);
 			return;
 		}
 		await executeTask(value);
@@ -2015,8 +2052,22 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		[staticLines]
 	);
 	const activeDiffReview = diffReviews?.[Math.min(diffReviewIndex, diffReviews.length - 1)];
+	const contextDefaults = getCleanSlateContextDefaults({
+		provider: args.provider,
+		model: args.model,
+		planMode: mode === 'planning',
+		reasoningLevel: args.reasoningLevel
+	});
+	const contextMessages = runtimeRef.current?.getSessionSnapshot().threadHistory
+		?? session.runtimeSnapshot?.threadHistory
+		?? [];
+	const contextUsage = estimateCliContextWindowUsage(
+		liveText ? [...contextMessages, { role: 'assistant', content: liveText }] : contextMessages,
+		input,
+		contextDefaults.contextWindowTokens
+	).percentage;
 	const contextStatus = [
-		contextUsage !== undefined ? `context ${Math.round(contextUsage)}%` : '',
+		`context ${Math.round(contextUsage)}%`,
 		allowCommandsForSession ? 'commands allowed' : ''
 	].filter(Boolean).join(' · ');
 	const headerModeLabel = formatHeaderModeLabel(mode);
@@ -2036,13 +2087,10 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 						// Box, so it has no parent to stretch against and would otherwise shrink
 						// to fit its text instead of spanning the terminal.
 						<Box key={item.key} width={viewportColumns} borderStyle="round" borderColor={COLORS.accent} paddingX={1} flexDirection="column">
-							<Box justifyContent="space-between">
+							<Box>
 								<Box alignItems="center">
 									<CleanSlateTerminalLogo />
 									<Text color={COLORS.accent} bold>CLEANSLATE</Text>
-								</Box>
-								<Box flexShrink={1}>
-									<Text color={COLORS.muted} wrap="truncate-middle">{args.provider}/{args.model}</Text>
 								</Box>
 							</Box>
 							<Box>
@@ -2088,7 +2136,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				<ModelTerminationNotice message={modelTermination.message} />
 			)}
 
-			{/* Active model, right-aligned on its own row above the prompt. */}
+			{/* Active model remains visible above the prompt; it is intentionally omitted only from the banner. */}
 			{!approval && !editApproval && !showSessions && !models && !modelTermination && !diffReviews && (
 				<Box paddingX={1} justifyContent="flex-end">
 					<Text color={COLORS.muted} wrap="truncate-middle">{args.provider}/{args.model}</Text>

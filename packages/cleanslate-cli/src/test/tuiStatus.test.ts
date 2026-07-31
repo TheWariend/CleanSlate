@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToString } from 'ink';
 import { test } from 'node:test';
-import { commandPaletteSelection, formatActivityStatus, formatHeaderModeLabel, formatModelTerminationMessage, ModelTerminationNotice, nextInteractiveMode, runtimeModeForInteractiveMode } from '../tui.js';
+import { commandPaletteSelection, estimateCliContextWindowUsage, formatActivityStatus, formatHeaderModeLabel, formatModelTerminationMessage, ModelTerminationNotice, nextInteractiveMode, runtimeModeForInteractiveMode } from '../tui.js';
 
 test('TUI activity status stays concise and hides internal turn details', () => {
 	assert.equal(formatActivityStatus('thinking'), 'Thinking…');
@@ -21,6 +21,20 @@ test('TUI header exposes the active interactive mode', () => {
 	assert.equal(formatHeaderModeLabel('planning'), 'PLAN');
 	assert.equal(formatHeaderModeLabel('accept-edits'), 'ACCEPT EDITS');
 	assert.equal(formatHeaderModeLabel('manual'), 'MANUAL');
+});
+
+test('CLI context usage follows the IDE composer calculation', () => {
+	const usage = estimateCliContextWindowUsage([
+		{ role: 'user', content: 'hi' },
+		{ role: 'assistant', content: 'Hello!', renderPayload: { visible: true } }
+	], 'next question', 968_000);
+
+	const expectedChars = 'user'.length + 'hi'.length
+		+ 'assistant'.length + 'Hello!'.length + JSON.stringify({ visible: true }).length
+		+ 'next question'.length;
+	assert.equal(usage.usedTokens, Math.ceil(expectedChars / 4));
+	assert.equal(usage.maxTokens, 968_000);
+	assert.equal(Math.round(usage.percentage), 0);
 });
 
 test('command palette executes complete commands with one Enter and keeps argument commands editable', () => {

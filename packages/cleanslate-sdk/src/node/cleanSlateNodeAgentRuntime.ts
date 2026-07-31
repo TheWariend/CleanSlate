@@ -25,6 +25,7 @@ import {
 	ICleanSlatePendingAgentInteraction,
 	IChatMessagePart
 } from '../protocol/cleanSlateAI.js';
+import { getCleanSlateContextDefaults } from '../protocol/cleanSlateModelCapabilities.js';
 import { CleanSlateService } from '../protocol/cleanSlateService.js';
 import { CleanSlateTaskSessionService, ICleanSlateTaskSessionSnapshot } from '../services/cleanSlateTaskSessionService.js';
 import { ICleanSlateThreadMessage } from '../services/cleanSlateThreadService.js';
@@ -419,6 +420,13 @@ export function createNodeProviderConfiguration(options: {
 	azureEmbeddingDeploymentName?: string;
 }): ICleanSlateConfiguration {
 	const provider = options.provider;
+	const reasoningLevel = options.reasoningLevel ?? 'low';
+	const contextDefaults = getCleanSlateContextDefaults({
+		provider,
+		model: options.model,
+		planMode: false,
+		reasoningLevel
+	});
 	const common = { model: options.model, apiKey: options.apiKey, baseUrl: options.baseUrl };
 	const embeddingProvider = options.embeddingProvider
 		?? (provider === 'openai' || provider === 'gemini' ? provider : undefined)
@@ -433,7 +441,14 @@ export function createNodeProviderConfiguration(options: {
 		embeddingProvider,
 		embeddingModel,
 		ragEnabled: !!embeddingProvider,
-		reasoningLevel: options.reasoningLevel ?? 'low',
+		contextWindow: contextDefaults.contextWindowTokens,
+		modelContextWindow: contextDefaults.modelContextWindowTokens,
+		modelMaxOutputTokens: contextDefaults.modelMaxOutputTokens,
+		maxInputTokens: contextDefaults.maxInputTokens,
+		autoCompactReserveTokens: contextDefaults.autoCompactReserveTokens,
+		fileTruncation: contextDefaults.fileTruncationChars,
+		globalContextBudget: contextDefaults.globalContextBudgetChars,
+		reasoningLevel,
 		planMode: false,
 		maxTurns: options.maxTurns,
 		providers: {
