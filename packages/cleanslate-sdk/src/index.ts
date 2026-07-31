@@ -105,6 +105,8 @@ export type {
 	ICleanSlateManagedEntitlements,
 	ICleanSlateManagedModel
 } from './protocol/cleanSlateAI.js';
+export { CleanSlateCodeParser } from './protocol/cleanSlateCodeParser.js';
+export type { ICleanSlateCodeChunk } from './protocol/cleanSlateCodeParser.js';
 
 //#endregion
 

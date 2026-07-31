@@ -102,5 +102,15 @@ describe('CLI argv', () => {
 		assert.equal(args.azureEndpoint, 'https://example.openai.azure.com');
 		assert.equal(args.reasoningLevel, 'xhigh');
 		assert.equal(args.apiKey, 'secret');
+
+		const embeddings = parseArguments([], {
+			CLEANSLATE_EMBEDDING_PROVIDER: 'azure',
+			CLEANSLATE_EMBEDDING_MODEL: 'embedding-deployment',
+			AZURE_OPENAI_EMBEDDING_ENDPOINT: 'https://embedding.openai.azure.com',
+			AZURE_OPENAI_API_KEY: 'embedding-secret'
+		});
+		assert.equal(embeddings.embeddingProvider, 'azureOpenAI');
+		assert.equal(embeddings.azureEmbeddingDeploymentName, 'embedding-deployment');
+		assert.equal(embeddings.embeddingApiKey, 'embedding-secret');
 	});
 });

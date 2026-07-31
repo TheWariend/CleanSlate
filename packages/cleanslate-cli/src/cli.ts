@@ -192,7 +192,14 @@ async function loadProviderModels(args: ICliArguments, setup: ICliSetupResult): 
 			bedrockCredentialMode: args.bedrockProfile ? 'profile' : 'default',
 			bedrockProfile: args.bedrockProfile,
 			azureEndpoint: args.azureEndpoint,
-			azureApiVersion: args.azureApiVersion
+			azureApiVersion: args.azureApiVersion,
+			embeddingProvider: args.embeddingProvider,
+			embeddingModel: args.embeddingModel,
+			embeddingApiKey: args.embeddingApiKey,
+			embeddingBaseUrl: args.embeddingBaseUrl,
+			azureEmbeddingEndpoint: args.azureEmbeddingEndpoint,
+			azureEmbeddingApiVersion: args.azureEmbeddingApiVersion,
+			azureEmbeddingDeploymentName: args.azureEmbeddingDeploymentName
 		}),
 		approveCommand: async () => false
 	});
@@ -490,7 +497,14 @@ async function runOneShot(
 			bedrockProfile: args.bedrockProfile,
 			azureEndpoint: args.azureEndpoint,
 			azureApiVersion: args.azureApiVersion,
-			azureDeploymentName: args.model
+			azureDeploymentName: args.model,
+			embeddingProvider: args.embeddingProvider,
+			embeddingModel: args.embeddingModel,
+			embeddingApiKey: args.embeddingApiKey,
+			embeddingBaseUrl: args.embeddingBaseUrl,
+			azureEmbeddingEndpoint: args.azureEmbeddingEndpoint,
+			azureEmbeddingApiVersion: args.azureEmbeddingApiVersion,
+			azureEmbeddingDeploymentName: args.azureEmbeddingDeploymentName
 		}),
 		additionalContext: task => new CliProjectContext(args.cwd).build(task),
 		resolveAttachments: task => new CliProjectContext(args.cwd).imageAttachments(task).map(attachment => ({

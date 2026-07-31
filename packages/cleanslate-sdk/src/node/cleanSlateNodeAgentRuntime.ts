@@ -15,6 +15,7 @@ import { CleanSlateQueryRunner } from '../agent/cleanSlateQueryRunner.js';
 import { Event } from '../core/event.js';
 import {
 	AIProvider,
+	CleanSlateEmbeddingProvider,
 	ICleanSlateConfiguration,
 	ICleanSlateConfigurationService,
 	ICleanSlateAgentRuntimeSnapshot,
@@ -199,6 +200,7 @@ export class CleanSlateNodeAgentRuntime {
 			workspaceStorageHome: options.workspaceStorageHome,
 			configuration: options.configuration,
 			browserHeadless: options.browserHeadless,
+			fetcher: options.fetcher,
 			tools: ALL_TOOLS,
 			cleanSlateService,
 			contextService: this.contextService,
@@ -408,28 +410,58 @@ export function createNodeProviderConfiguration(options: {
 	azureEndpoint?: string;
 	azureApiVersion?: string;
 	azureDeploymentName?: string;
+	embeddingProvider?: CleanSlateEmbeddingProvider;
+	embeddingModel?: string;
+	embeddingApiKey?: string;
+	embeddingBaseUrl?: string;
+	azureEmbeddingEndpoint?: string;
+	azureEmbeddingApiVersion?: string;
+	azureEmbeddingDeploymentName?: string;
 }): ICleanSlateConfiguration {
 	const provider = options.provider;
 	const common = { model: options.model, apiKey: options.apiKey, baseUrl: options.baseUrl };
+	const embeddingProvider = options.embeddingProvider
+		?? (provider === 'openai' || provider === 'gemini' ? provider : undefined)
+		?? (provider === 'azureOpenAI' && options.azureEmbeddingDeploymentName ? 'azureOpenAI' : undefined);
+	const embeddingModel = options.embeddingModel || (embeddingProvider === 'gemini'
+		? 'gemini-embedding-001'
+		: embeddingProvider ? 'text-embedding-3-small' : undefined);
+	const embeddingApiKey = options.embeddingApiKey ?? (embeddingProvider === provider ? options.apiKey : undefined);
 	return {
 		provider,
 		model: options.model,
+		embeddingProvider,
+		embeddingModel,
+		ragEnabled: !!embeddingProvider,
 		reasoningLevel: options.reasoningLevel ?? 'low',
 		planMode: false,
 		maxTurns: options.maxTurns,
 		providers: {
 			...(provider === 'cleanslate' ? { cleanslate: common } : {}),
 			...(provider === 'openai' ? { openai: common } : {}),
+			...(embeddingProvider === 'openai' && provider !== 'openai' ? {
+				openai: { apiKey: embeddingApiKey, baseUrl: options.embeddingBaseUrl }
+			} : {}),
 			...(provider === 'azureOpenAI' ? {
 				azureOpenAI: {
 					apiKey: options.apiKey,
 					endpoint: options.azureEndpoint,
 					apiVersion: options.azureApiVersion,
-					deploymentName: options.azureDeploymentName ?? options.model
+					deploymentName: options.azureDeploymentName ?? options.model,
+					embeddingDeploymentName: options.azureEmbeddingDeploymentName
+				}
+			} : {}),
+			...(embeddingProvider === 'azureOpenAI' && provider !== 'azureOpenAI' ? {
+				azureOpenAI: {
+					apiKey: embeddingApiKey,
+					endpoint: options.azureEmbeddingEndpoint,
+					apiVersion: options.azureEmbeddingApiVersion,
+					embeddingDeploymentName: options.azureEmbeddingDeploymentName
 				}
 			} : {}),
 			...(provider === 'anthropic' ? { anthropic: common } : {}),
 			...(provider === 'gemini' ? { gemini: { model: options.model, apiKey: options.apiKey } } : {}),
+			...(embeddingProvider === 'gemini' && provider !== 'gemini' ? { gemini: { apiKey: embeddingApiKey } } : {}),
 			...(provider === 'grok' ? { grok: common } : {}),
 			...(provider === 'nvidia' ? { nvidia: common } : {}),
 			...(provider === 'openrouter' ? { openrouter: common } : {}),

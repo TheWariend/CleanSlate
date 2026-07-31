@@ -29,13 +29,16 @@ describe('CleanSlateNodeAgentRuntime', () => {
 				headers: { 'Content-Type': 'application/json' }
 			});
 		}) as typeof fetch;
+		const configuration = createNodeProviderConfiguration({
+			provider: 'cleanslate',
+			model: 'managed-model',
+			apiKey: 'expired-token'
+		});
+		assert.equal(configuration.ragEnabled, false);
+		assert.equal(configuration.embeddingProvider, undefined);
 		const runtime = new CleanSlateNodeAgentRuntime({
 			rootPath: process.cwd(),
-			configuration: createNodeProviderConfiguration({
-				provider: 'cleanslate',
-				model: 'managed-model',
-				apiKey: 'expired-token'
-			}),
+			configuration,
 			fetcher,
 			onManagedTokenRefresh: token => { refreshedToken = token; }
 		});
@@ -47,13 +50,17 @@ describe('CleanSlateNodeAgentRuntime', () => {
 	});
 
 	test('the Node host refuses commands when no approval policy is supplied', async () => {
+		const configuration = createNodeProviderConfiguration({
+			provider: 'openai',
+			model: 'gpt-4o',
+			apiKey: 'test'
+		});
+		assert.equal(configuration.ragEnabled, true);
+		assert.equal(configuration.embeddingProvider, 'openai');
+		assert.equal(configuration.embeddingModel, 'text-embedding-3-small');
 		const runtime = new CleanSlateNodeAgentRuntime({
 			rootPath: process.cwd(),
-			configuration: createNodeProviderConfiguration({
-				provider: 'openai',
-				model: 'gpt-4o',
-				apiKey: 'test'
-			})
+			configuration
 		});
 		const context = (runtime as any).headlessRuntime.getToolContext();
 		assert.equal(await context.requestCommandApproval({ command: 'echo unsafe' }), false);

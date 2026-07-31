@@ -11,7 +11,7 @@ import { IWorkspaceFolder } from '../host/workspace.js';
 import { CleanSlateNodeFileService, CleanSlateNodeModelService, CleanSlateNodeTextFileService } from './cleanSlateNodeFileServices.js';
 import { CleanSlateNodeCommandService } from './cleanSlateNodeCommandService.js';
 import { CleanSlateNodeBrowserAutomation } from './cleanSlateNodeBrowserAutomation.js';
-import { CleanSlateNodeIndexService } from './cleanSlateNodeIndexService.js';
+import { CleanSlateNodeIndexService, ICleanSlateEmbeddingRequest } from './cleanSlateNodeIndexService.js';
 import { CleanSlateNodeMcpClient } from './cleanSlateNodeMcpClient.js';
 import { CleanSlateNodeLanguageCommands } from './cleanSlateNodeLanguageCommands.js';
 import { CleanSlateNodeSearchService } from './cleanSlateNodeSearchService.js';
@@ -59,6 +59,8 @@ export interface ICleanSlateNodeRuntimeOptions {
 	configuration: Record<string, any>;
 	/** Whether browser automation should run without a visible browser window. */
 	browserHeadless?: boolean;
+	/** Host fetch implementation used only by the terminal embedding transport. */
+	fetcher?: typeof fetch;
 	/**
 	 * Decides whether a command may run. Defaults to refusing everything, so a
 	 * host that forgets to supply a policy fails safe rather than executing
@@ -66,6 +68,22 @@ export interface ICleanSlateNodeRuntimeOptions {
 	 */
 	approveCommand?: (request: { command: string; cwd?: string; reason?: string }) => Promise<boolean>;
 	onProgress?: (event: { type: string;[key: string]: any }) => void;
+}
+
+async function fetchEmbeddingRequest(request: ICleanSlateEmbeddingRequest, fetcher: typeof fetch = fetch): Promise<{ statusCode: number; data: string }> {
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
+	try {
+		const response = await fetcher(request.url, {
+			method: request.method,
+			headers: request.headers,
+			body: request.body,
+			signal: controller.signal
+		});
+		return { statusCode: response.status, data: await response.text() };
+	} finally {
+		clearTimeout(timeout);
+	}
 }
 
 /**
@@ -83,7 +101,10 @@ export function createCleanSlateNodeToolContext(options: ICleanSlateNodeRuntimeO
 	const workspaceContextService = new CleanSlateNodeWorkspaceService(options.rootPath);
 	const commandExecutionService = new CleanSlateNodeCommandService(path.resolve(options.rootPath));
 	const browserAutomationService = new CleanSlateNodeBrowserAutomation({ headless: options.browserHeadless });
-	const indexService = new CleanSlateNodeIndexService(path.resolve(options.rootPath));
+	const indexService = new CleanSlateNodeIndexService(path.resolve(options.rootPath), {
+		configuration: options.configuration as any,
+		embeddingTransport: { request: request => fetchEmbeddingRequest(request, options.fetcher) }
+	});
 	const mcpClientService = new CleanSlateNodeMcpClient(path.resolve(options.rootPath), options.configuration.mcpServers);
 	const commandService = new CleanSlateNodeLanguageCommands(path.resolve(options.rootPath));
 	const searchService = new CleanSlateNodeSearchService(path.resolve(options.rootPath));

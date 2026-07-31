@@ -97,6 +97,24 @@ AWS_PROFILE=my-profile cleanslate -p bedrock -m model-id --aws-region us-east-1
 Provider/model availability changes over time; use the IDs enabled for your
 account.
 
+Semantic search uses the SDK's embeddings indexer. OpenAI and Gemini sessions
+reuse the active provider credential with `text-embedding-3-small` and
+`gemini-embedding-001` respectively. Other chat providers can opt into a
+separate verified embeddings endpoint without changing the saved chat setup:
+
+```sh
+CLEANSLATE_EMBEDDING_PROVIDER=openai \
+CLEANSLATE_EMBEDDING_MODEL=text-embedding-3-small \
+CLEANSLATE_EMBEDDING_API_KEY=... \
+CLEANSLATE_EMBEDDING_BASE_URL=https://api.openai.com/v1 \
+cleanslate
+```
+
+Azure additionally requires `AZURE_OPENAI_EMBEDDING_ENDPOINT` and
+`AZURE_OPENAI_EMBEDDING_DEPLOYMENT`. CleanSlate does not assume that a chat
+endpoint supports embeddings; RAG stays disabled until an embedding-capable
+provider is configured.
+
 ## Interactive use
 
 Run `cleanslate` in a terminal to open the TUI. Useful commands:

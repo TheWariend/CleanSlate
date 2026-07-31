@@ -26,6 +26,13 @@ export interface ICliArguments {
 	bedrockProfile?: string;
 	azureEndpoint?: string;
 	azureApiVersion?: string;
+	embeddingProvider?: 'openai' | 'azureOpenAI' | 'gemini';
+	embeddingModel?: string;
+	embeddingApiKey?: string;
+	embeddingBaseUrl?: string;
+	azureEmbeddingEndpoint?: string;
+	azureEmbeddingApiVersion?: string;
+	azureEmbeddingDeploymentName?: string;
 	tui?: boolean;
 	json: boolean;
 	resume: boolean;
@@ -63,6 +70,17 @@ function inferredProvider(env: NodeJS.ProcessEnv): CliProvider {
 		return 'openai';
 	}
 	return 'cleanslate';
+}
+
+function inferredEmbeddingProvider(env: NodeJS.ProcessEnv): ICliArguments['embeddingProvider'] {
+	const configured = env['CLEANSLATE_EMBEDDING_PROVIDER']?.trim().toLowerCase();
+	if (configured === 'azure' || configured === 'azureopenai') {
+		return 'azureOpenAI';
+	}
+	if (configured === 'openai' || configured === 'gemini') {
+		return configured;
+	}
+	return undefined;
 }
 
 export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.env): ICliArguments {
@@ -236,6 +254,14 @@ export function parseArguments(argv: string[], env: NodeJS.ProcessEnv = process.
 	result.bedrockProfile ??= env['AWS_PROFILE'];
 	result.azureEndpoint ??= env['AZURE_OPENAI_ENDPOINT'];
 	result.azureApiVersion ??= env['AZURE_OPENAI_API_VERSION'];
+	result.embeddingProvider ??= inferredEmbeddingProvider(env);
+	result.embeddingModel ??= env['CLEANSLATE_EMBEDDING_MODEL'];
+	result.embeddingBaseUrl ??= env['CLEANSLATE_EMBEDDING_BASE_URL'];
+	result.azureEmbeddingEndpoint ??= env['AZURE_OPENAI_EMBEDDING_ENDPOINT'] || env['AZURE_OPENAI_ENDPOINT'];
+	result.azureEmbeddingApiVersion ??= env['AZURE_OPENAI_EMBEDDING_API_VERSION'] || env['AZURE_OPENAI_API_VERSION'];
+	result.azureEmbeddingDeploymentName ??= env['AZURE_OPENAI_EMBEDDING_DEPLOYMENT'] || (result.embeddingProvider === 'azureOpenAI' ? result.embeddingModel : undefined);
+	result.embeddingApiKey ??= env['CLEANSLATE_EMBEDDING_API_KEY']
+		|| (result.embeddingProvider ? apiKeyFromEnvironment(result.embeddingProvider, env) : undefined);
 	return result;
 }
 
