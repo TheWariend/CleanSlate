@@ -9,7 +9,7 @@
 <p align="center">The open source coding agent.</p>
 <p align="center">
   <a href="vscode-fork/LICENSE.txt"><img alt="License" src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
-  <a href="https://github.com/TheWariend/CleanSlate-Releases/releases"><img alt="Release" src="https://img.shields.io/badge/release-macOS%20arm64-blue?style=flat-square" /></a>
+  <a href="https://github.com/TheWariend/CleanSlate-Releases/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/TheWariend/CleanSlate-Releases?display_name=tag&style=flat-square&label=release" /></a>
   <img alt="Built on VS Code" src="https://img.shields.io/badge/built%20on-VS%20Code-007ACC?style=flat-square" />
 </p>
 
@@ -19,11 +19,11 @@
 
 ### Installation
 
-Download the latest build from the [releases page](https://github.com/TheWariend/CleanSlate-Releases/releases).
+The current release is **CleanSlate 1.0.1**. See the [release notes](https://github.com/TheWariend/CleanSlate-Releases/releases/tag/v1.0.1) or download it directly:
 
 | Platform | Download |
 | -------- | -------- |
-| macOS (Apple Silicon) | `CleanSlate-darwin-arm64.dmg` or `.zip` |
+| macOS (Apple Silicon) | [DMG](https://github.com/TheWariend/CleanSlate-Releases/releases/latest/download/CleanSlate-darwin-arm64.dmg) · [ZIP](https://github.com/TheWariend/CleanSlate-Releases/releases/latest/download/CleanSlate-darwin-arm64.zip) |
 
 Builds are signed and notarized.
 
@@ -70,12 +70,12 @@ See [packages/cleanslate-sdk](packages/cleanslate-sdk).
 
 | Package | Version |
 | ------- | ------- |
-| [`@cleanslate/cli`](https://www.npmjs.com/package/@cleanslate/cli) | ![npm](https://img.shields.io/npm/v/@cleanslate/cli?style=flat-square&label=) |
-| [`@cleanslate/sdk`](https://www.npmjs.com/package/@cleanslate/sdk) | ![npm](https://img.shields.io/npm/v/@cleanslate/sdk?style=flat-square&label=) |
+| [`@cleanslate/cli`](https://www.npmjs.com/package/@cleanslate/cli) | `1.0.1` · ![npm](https://img.shields.io/npm/v/@cleanslate/cli?style=flat-square&label=npm) |
+| [`@cleanslate/sdk`](https://www.npmjs.com/package/@cleanslate/sdk) | `1.0.1` · ![npm](https://img.shields.io/npm/v/@cleanslate/sdk?style=flat-square&label=npm) |
 
 > [!NOTE]
-> Both packages are `0.x`. The host interfaces are still settling, so expect
-> breaking changes between minor versions.
+> The CLI and SDK follow semantic versioning. Breaking changes require a major
+> version release.
 
 ### Building from source
 

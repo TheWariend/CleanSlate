@@ -7,8 +7,7 @@ host. It is the engine behind [CleanSlate](https://github.com/TheWariend/CleanSl
 It has no editor dependency. A surface supplies host capabilities; the runtime
 drives the loop.
 
-> **Status: 0.x.** The host interfaces are still settling. Expect breaking
-> changes between minor versions.
+> **Current release: 1.0.1.** The SDK follows semantic versioning.
 
 ## Install
 
