@@ -26,7 +26,7 @@ import { CliProjectContext } from './projectContext.js';
 import { cliDoctorReport } from './doctor.js';
 import { CliPermissionPolicy } from './permissions.js';
 
-const VERSION = '0.1.0';
+const VERSION = '1.0.1';
 let activeApprovalPrompt: readline.Interface | undefined;
 
 export async function requestCommandApproval(
