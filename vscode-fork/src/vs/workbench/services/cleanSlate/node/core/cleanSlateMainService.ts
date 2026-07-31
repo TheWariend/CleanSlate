@@ -53,6 +53,12 @@ import { CleanSlateThreadPersistenceStore } from './cleanSlateThreadPersistenceS
 import { CleanSlateWebRetrievalService } from './cleanSlateWebRetrievalService.js';
 import { CleanSlateLocalEmbeddingService } from './cleanSlateLocalEmbeddingService.js';
 import { CleanSlateProviderSchemaNormalizer } from '@cleanslate/sdk/node/cleanSlateProviderSchemaNormalizer.js';
+import {
+    findModelsDevMetadata,
+    isValidModelsDevCatalog,
+    MODELS_DEV_CACHE_TTL_MS,
+    MODELS_DEV_CATALOG_URL
+} from '@cleanslate/sdk/protocol/cleanSlateModelsDevCatalog.js';
 import { CleanSlateOpenAIMessageAdapter } from '@cleanslate/sdk/node/cleanSlateOpenAIMessageAdapter.js';
 import { CleanSlateAnthropicMessageAdapter } from '@cleanslate/sdk/node/cleanSlateAnthropicMessageAdapter.js';
 
@@ -78,8 +84,6 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
     declare readonly _serviceBrand: undefined;
     private static readonly MODEL_LIST_TIMEOUT_MS = 30_000;
     private static readonly PROVIDER_STREAM_IDLE_TIMEOUT_MS = 120_000;
-    private static readonly MODELS_DEV_CATALOG_URL = 'https://models.dev/api.json';
-    private static readonly MODELS_DEV_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
     private readonly commandExecutionService = this._register(new CleanSlateCommandExecutionService());
     private readonly browserService: CleanSlatePlaywrightBrowserService;
@@ -182,19 +186,7 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
         if (!normalizedModel) {
             return undefined;
         }
-        const catalog = await this.getModelsDevCatalog(token);
-        if (!catalog) {
-            return undefined;
-        }
-        const providerKeys = this.getModelsDevProviderKeys(provider);
-        for (const providerKey of providerKeys) {
-            const entry = catalog[providerKey]?.models?.[normalizedModel];
-            const metadata = this.toModelsDevMetadata(providerKey, normalizedModel, entry);
-            if (metadata) {
-                return metadata;
-            }
-        }
-        return undefined;
+        return findModelsDevMetadata(await this.getModelsDevCatalog(token), provider, normalizedModel);
     }
 
     private async getModelsDevCatalog(token: CancellationToken): Promise<Record<string, any> | undefined> {
@@ -205,7 +197,7 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
             this.modelsDevCatalogRequest = (async () => {
                 try {
                     const context = await this.requestService.request({
-                        url: NodeCleanSlateMainService.MODELS_DEV_CATALOG_URL,
+                        url: MODELS_DEV_CATALOG_URL,
                         type: 'GET',
                         timeout: NodeCleanSlateMainService.MODEL_LIST_TIMEOUT_MS,
                         disableCache: true
@@ -215,11 +207,11 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
                         throw new Error(`HTTP ${statusCode}`);
                     }
                     const parsed = JSON.parse((await streamToBuffer(context.stream)).toString());
-                    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                    if (!isValidModelsDevCatalog(parsed)) {
                         throw new Error('invalid catalog shape');
                     }
                     this.modelsDevCatalogCache = {
-                        expiresAt: Date.now() + NodeCleanSlateMainService.MODELS_DEV_CACHE_TTL_MS,
+                        expiresAt: Date.now() + MODELS_DEV_CACHE_TTL_MS,
                         value: parsed
                     };
                     return parsed;
@@ -232,49 +224,6 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
             })();
         }
         return this.modelsDevCatalogRequest;
-    }
-
-    private getModelsDevProviderKeys(provider: AIProvider): string[] {
-        switch (provider) {
-            case 'azureOpenAI': return ['azure', 'openai'];
-            case 'bedrock': return ['amazon-bedrock', 'anthropic'];
-            case 'openrouter': return ['openrouter'];
-            case 'anthropic': return ['anthropic'];
-            case 'openai': return ['openai'];
-            default: return [provider];
-        }
-    }
-
-    private toModelsDevMetadata(provider: string, model: string, entry: any): ICleanSlateModelsDevModelMetadata | undefined {
-        if (!entry || typeof entry !== 'object') {
-            return undefined;
-        }
-        const allowedEfforts = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
-        const effortOption = Array.isArray(entry.reasoning_options)
-            ? entry.reasoning_options.find((option: any) => option?.type === 'effort')
-            : undefined;
-        const reasoningEfforts = Array.isArray(effortOption?.values)
-            ? effortOption.values.filter((value: unknown) => typeof value === 'string' && allowedEfforts.has(value))
-            : undefined;
-        const positiveInteger = (value: unknown): number | undefined => Number.isSafeInteger(value) && (value as number) > 0 ? value as number : undefined;
-        const nonNegativeFinite = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
-        return {
-            id: typeof entry.id === 'string' ? entry.id : model,
-            provider,
-            releaseDate: typeof entry.release_date === 'string' ? entry.release_date : undefined,
-            reasoning: typeof entry.reasoning === 'boolean' ? entry.reasoning : undefined,
-            reasoningEfforts,
-            toolCall: typeof entry.tool_call === 'boolean' ? entry.tool_call : undefined,
-            structuredOutput: typeof entry.structured_output === 'boolean' ? entry.structured_output : undefined,
-            temperature: typeof entry.temperature === 'boolean' ? entry.temperature : undefined,
-            contextWindowTokens: positiveInteger(entry.limit?.context),
-            maxInputTokens: positiveInteger(entry.limit?.input),
-            maxOutputTokens: positiveInteger(entry.limit?.output),
-            inputCostPer1MTokens: nonNegativeFinite(entry.cost?.input),
-            outputCostPer1MTokens: nonNegativeFinite(entry.cost?.output),
-            cacheReadCostPer1MTokens: nonNegativeFinite(entry.cost?.cache_read),
-            cacheWriteCostPer1MTokens: nonNegativeFinite(entry.cost?.cache_write)
-        };
     }
 
     webSearch(options: ICleanSlateWebSearchOptions, token: CancellationToken): Promise<ICleanSlateWebSearchResponse> {

@@ -44,6 +44,12 @@ import { CleanSlateOpenAIMessageAdapter } from './cleanSlateOpenAIMessageAdapter
 import { CleanSlateProviderSchemaNormalizer } from './cleanSlateProviderSchemaNormalizer.js';
 import { normalizeToolName } from '../protocol/cleanSlateProviderMessageTransforms.js';
 import { CleanSlateNodeWebRetrieval } from './cleanSlateNodeWebRetrieval.js';
+import {
+	findModelsDevMetadata,
+	isValidModelsDevCatalog,
+	MODELS_DEV_CACHE_TTL_MS,
+	MODELS_DEV_CATALOG_URL
+} from '../protocol/cleanSlateModelsDevCatalog.js';
 
 interface IReasoningTagSplitState {
 	inside: boolean;
@@ -70,6 +76,8 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 	private readonly anthropicMessageAdapter = new CleanSlateAnthropicMessageAdapter(this.providerSchemaNormalizer);
 	private readonly commandService: CleanSlateNodeCommandService;
 	private readonly webRetrieval = new CleanSlateNodeWebRetrieval();
+	private modelsDevCatalogCache: { expiresAt: number; value: Record<string, any> } | undefined;
+	private modelsDevCatalogRequest: Promise<Record<string, any> | undefined> | undefined;
 	readonly onDidPublishThreadSession: Event<ICleanSlateThreadSessionUpdate> = Event.None;
 
 	constructor(rootPath: string = process.cwd()) {
@@ -87,8 +95,48 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 		});
 	}
 
-	getModelsDevModelMetadata(_provider: AIProvider, _model: string, _token: CancellationToken): Promise<ICleanSlateModelsDevModelMetadata | undefined> {
-		return Promise.resolve(undefined);
+	/**
+	 * Per-model facts from models.dev — notably which reasoning efforts the model accepts, which
+	 * `resolveCleanSlateModelCapabilities` turns into `supportedReasoningEfforts`. This used to
+	 * return `undefined`, so the terminal host reported every model as having no reasoning
+	 * options and fell back to local limit guesses.
+	 */
+	async getModelsDevModelMetadata(provider: AIProvider, model: string, token: CancellationToken): Promise<ICleanSlateModelsDevModelMetadata | undefined> {
+		if (!model.trim()) {
+			return undefined;
+		}
+		return findModelsDevMetadata(await this.getModelsDevCatalog(token), provider, model);
+	}
+
+	private async getModelsDevCatalog(token: CancellationToken): Promise<Record<string, any> | undefined> {
+		if (this.modelsDevCatalogCache && this.modelsDevCatalogCache.expiresAt > Date.now()) {
+			return this.modelsDevCatalogCache.value;
+		}
+		// One in-flight request shared by concurrent callers; the catalog is a single document.
+		this.modelsDevCatalogRequest ??= (async () => {
+			const abort = this.createProviderAbortController(token, NodeCleanSlateMainService.MODEL_LIST_TIMEOUT_MS);
+			try {
+				const response = await fetch(MODELS_DEV_CATALOG_URL, { signal: abort.signal });
+				if (!response.ok) {
+					throw new Error(`HTTP ${response.status}`);
+				}
+				const parsed = await response.json();
+				if (!isValidModelsDevCatalog(parsed)) {
+					throw new Error('invalid catalog shape');
+				}
+				this.modelsDevCatalogCache = { expiresAt: Date.now() + MODELS_DEV_CACHE_TTL_MS, value: parsed };
+				return parsed;
+			} catch (error) {
+				// Non-fatal: capability resolution falls back to the local tables, so offline and
+				// air-gapped installs keep working without catalog-derived facts.
+				console.warn(`[CleanSlateService] models.dev capability catalog unavailable; using local fallbacks: ${String(error)}`);
+				return undefined;
+			} finally {
+				abort.dispose();
+				this.modelsDevCatalogRequest = undefined;
+			}
+		})();
+		return this.modelsDevCatalogRequest;
 	}
 
 	async listOpenAICompatibleModels(options: ICleanSlateOpenAICompatibleListModelsOptions, token: CancellationToken): Promise<string[]> {
