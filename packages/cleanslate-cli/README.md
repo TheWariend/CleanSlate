@@ -19,7 +19,7 @@ the same set the editor has, not a reduced subset:
 Editing and command execution pass through an approval gate that **refuses by
 default** — see [Permissions](#interactive-use).
 
-> **Current release: 1.0.1.** The CLI follows semantic versioning.
+> **Current release: 1.0.2.** The CLI follows semantic versioning.
 
 ## Install
 
