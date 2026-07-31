@@ -97,6 +97,12 @@ jobs:
           npm config set fetch-retry-maxtimeout 120000
           npm ci
 
+      - name: Build CleanSlate SDK
+        working-directory: ${{ github.workspace }}/packages/cleanslate-sdk
+        run: |
+          npm ci
+          npm run build
+
       - name: Download built-in extensions
         run: npm run download-builtin-extensions
 
