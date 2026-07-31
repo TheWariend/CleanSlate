@@ -54,6 +54,13 @@ import { CleanSlateWebRetrievalService } from './cleanSlateWebRetrievalService.j
 import { CleanSlateLocalEmbeddingService } from './cleanSlateLocalEmbeddingService.js';
 import { CleanSlateProviderSchemaNormalizer } from '@cleanslate/sdk/node/cleanSlateProviderSchemaNormalizer.js';
 import {
+    buildCleanSlateRuntimeConfig,
+    CleanSlateEnvLookup,
+    normalizeBaseUrlValue,
+    normalizeEnvValue,
+    resolveCleanSlateManagedBaseUrl
+} from '@cleanslate/sdk/protocol/cleanSlateRuntimeConfig.js';
+import {
     findModelsDevMetadata,
     isValidModelsDevCatalog,
     MODELS_DEV_CACHE_TTL_MS,
@@ -112,25 +119,9 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
     }
 
     getRuntimeConfig(): Promise<ICleanSlateRuntimeConfig> {
-        const authWebUrl = this.resolveCleanSlateUrl('CLEANSLATE_AUTH_WEB_URL', 'https://thewariend.com/auth');
-        const apiBaseUrl = this.resolveCleanSlateUrl('CLEANSLATE_API_BASE_URL', 'https://api.thewariend.com/api');
-        const proCheckoutUrl = this.resolveCleanSlateUrl('CLEANSLATE_PRO_CHECKOUT_URL', 'https://api.thewariend.com/checkout/cleanslate/pro');
-        return Promise.resolve({ authWebUrl, apiBaseUrl, managedAIBaseUrl: `${apiBaseUrl}/cleanslate`, proCheckoutUrl });
+        return Promise.resolve(buildCleanSlateRuntimeConfig(this.envLookup));
     }
 
-    private resolveCleanSlateUrl(name: string, fallback: string): string {
-        const value = (this.getCleanSlateEnvValue(name) || fallback).replace(/\/+$/, '');
-        let parsed: URL;
-        try {
-            parsed = new URL(value);
-        } catch {
-            throw new Error(`${name} must be an absolute HTTP(S) URL.`);
-        }
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-            throw new Error(`${name} must use HTTP or HTTPS.`);
-        }
-        return value;
-    }
 
     async proxyRequest(options: IRequestOptions, token: CancellationToken): Promise<ICleanSlateBufferedRequestResponse> {
         const context = await this.requestService.request(options, token);
@@ -1047,22 +1038,22 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
 
     private resolveOpenAICompatibleBaseUrl(options: ICleanSlateOpenAICompatibleListModelsOptions): string | undefined {
         if (this.isCleanSlateManagedProviderName(options.providerName)) {
-            return `${this.resolveCleanSlateUrl('CLEANSLATE_API_BASE_URL', 'https://api.thewariend.com/api')}/cleanslate`;
+            return resolveCleanSlateManagedBaseUrl(this.envLookup);
         }
-        const configured = this.normalizeEnvValue(options.baseUrl);
+        const configured = normalizeBaseUrlValue(options.baseUrl);
         if (configured) {
             return configured;
         }
 
         if (this.isNvidiaProviderName(options.providerName)) {
-            return this.getCleanSlateEnvValue('CLEANSLATE_NVIDIA_BASE_URL')
-                || this.getCleanSlateEnvValue('NVIDIA_BASE_URL')
+            return normalizeBaseUrlValue(this.envLookup('CLEANSLATE_NVIDIA_BASE_URL'))
+                || normalizeBaseUrlValue(this.envLookup('NVIDIA_BASE_URL'))
                 || 'https://integrate.api.nvidia.com/v1';
         }
 
         if (this.isOpenRouterProviderName(options.providerName)) {
-            return this.getCleanSlateEnvValue('CLEANSLATE_OPENROUTER_BASE_URL')
-                || this.getCleanSlateEnvValue('OPENROUTER_BASE_URL')
+            return normalizeBaseUrlValue(this.envLookup('CLEANSLATE_OPENROUTER_BASE_URL'))
+                || normalizeBaseUrlValue(this.envLookup('OPENROUTER_BASE_URL'))
                 || 'https://openrouter.ai/api/v1';
         }
 
@@ -1085,13 +1076,10 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
         return typeof providerName === 'string' && providerName.toLowerCase() === 'cleanslate pro';
     }
 
-    private getCleanSlateEnvValue(name: string): string | undefined {
-        const processValue = this.normalizeEnvValue(process.env[name]);
-        if (processValue) {
-            return processValue;
-        }
-        return this.normalizeEnvValue(this.getCleanSlateEnv().get(name));
-    }
+
+    private readonly envLookup: CleanSlateEnvLookup = name => {
+        return normalizeEnvValue(process.env[name]) ?? normalizeEnvValue(this.getCleanSlateEnv().get(name));
+    };
 
     private getCleanSlateEnv(): Map<string, string> {
         if (this.cleanSlateEnvCache) {
@@ -1143,13 +1131,6 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
         return paths;
     }
 
-    private normalizeEnvValue(value: string | undefined): string | undefined {
-        if (typeof value !== 'string') {
-            return undefined;
-        }
-        const trimmed = value.trim();
-        return trimmed.length > 0 ? trimmed : undefined;
-    }
 
     private async createAnthropicClient(options: ICleanSlateAnthropicListModelsOptions): Promise<any> {
         const anthropicModule = await this.importExternalModule<any>('@anthropic-ai/sdk');

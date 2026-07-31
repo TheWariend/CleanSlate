@@ -45,6 +45,13 @@ import { CleanSlateProviderSchemaNormalizer } from './cleanSlateProviderSchemaNo
 import { normalizeToolName } from '../protocol/cleanSlateProviderMessageTransforms.js';
 import { CleanSlateNodeWebRetrieval } from './cleanSlateNodeWebRetrieval.js';
 import {
+	buildCleanSlateRuntimeConfig,
+	CleanSlateEnvLookup,
+	normalizeBaseUrlValue,
+	normalizeEnvValue,
+	resolveCleanSlateManagedBaseUrl
+} from '../protocol/cleanSlateRuntimeConfig.js';
+import {
 	findModelsDevMetadata,
 	isValidModelsDevCatalog,
 	MODELS_DEV_CACHE_TTL_MS,
@@ -84,15 +91,10 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 		this.commandService = new CleanSlateNodeCommandService(rootPath);
 	}
 
+	private readonly envLookup: CleanSlateEnvLookup = name => normalizeEnvValue(process.env[name]);
+
 	getRuntimeConfig(): Promise<ICleanSlateRuntimeConfig> {
-		const apiBaseUrl = this.normalizeEnvValue(process.env['CLEANSLATE_API_BASE_URL']) ?? 'https://api.thewariend.com/api';
-		const authWebUrl = this.normalizeEnvValue(process.env['CLEANSLATE_AUTH_WEB_URL']) ?? 'https://thewariend.com/auth';
-		return Promise.resolve({
-			authWebUrl,
-			apiBaseUrl,
-			managedAIBaseUrl: `${apiBaseUrl}/cleanslate`,
-			proCheckoutUrl: 'https://api.thewariend.com/checkout/cleanslate/pro'
-		});
+		return Promise.resolve(buildCleanSlateRuntimeConfig(this.envLookup));
 	}
 
 	/**
@@ -1226,20 +1228,20 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 
 	private resolveOpenAICompatibleBaseUrl(options: ICleanSlateOpenAICompatibleListModelsOptions): string | undefined {
 		if (this.isCleanSlateManagedProviderName(options.providerName)) {
-			return `${this.normalizeEnvValue(process.env['CLEANSLATE_API_BASE_URL']) ?? 'https://api.thewariend.com/api'}/cleanslate`;
+			return resolveCleanSlateManagedBaseUrl(this.envLookup);
 		}
-		const configured = this.normalizeEnvValue(options.baseUrl);
+		const configured = normalizeBaseUrlValue(options.baseUrl);
 		if (configured) {
 			return configured;
 		}
 		if (this.isNvidiaProviderName(options.providerName)) {
-			return this.normalizeEnvValue(process.env['CLEANSLATE_NVIDIA_BASE_URL'])
-				|| this.normalizeEnvValue(process.env['NVIDIA_BASE_URL'])
+			return normalizeBaseUrlValue(process.env['CLEANSLATE_NVIDIA_BASE_URL'])
+				|| normalizeBaseUrlValue(process.env['NVIDIA_BASE_URL'])
 				|| 'https://integrate.api.nvidia.com/v1';
 		}
 		if (this.isOpenRouterProviderName(options.providerName)) {
-			return this.normalizeEnvValue(process.env['CLEANSLATE_OPENROUTER_BASE_URL'])
-				|| this.normalizeEnvValue(process.env['OPENROUTER_BASE_URL'])
+			return normalizeBaseUrlValue(process.env['CLEANSLATE_OPENROUTER_BASE_URL'])
+				|| normalizeBaseUrlValue(process.env['OPENROUTER_BASE_URL'])
 				|| 'https://openrouter.ai/api/v1';
 		}
 		return undefined;
@@ -1256,10 +1258,6 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 	}
 	private isCleanSlateManagedProviderName(providerName: string | undefined): boolean {
 		return typeof providerName === 'string' && providerName.toLowerCase() === 'cleanslate pro';
-	}
-	private normalizeEnvValue(value: string | undefined): string | undefined {
-		const trimmed = value?.trim();
-		return trimmed ? trimmed.replace(/\/+$/, '') : undefined;
 	}
 
 	private async importExternalModule<T>(specifier: string): Promise<T> {
