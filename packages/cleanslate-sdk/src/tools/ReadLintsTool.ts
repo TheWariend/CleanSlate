@@ -5,7 +5,7 @@
 
 import { MarkerSeverity } from '../host/diagnostics.js';
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
-import { resolvePathToUri } from './utils.js';
+import { resolvePathToUriAsync } from './utils.js';
 
 /**
  * Tool: read_lints
@@ -30,7 +30,7 @@ export const readLintsTool: CleanSlateTool = {
         const resources = [];
         for (const path of uniquePaths) {
             try {
-                resources.push(resolvePathToUri(path, context));
+                resources.push(await resolvePathToUriAsync(path, context));
             } catch (error) {
                 return { success: false, message: `Invalid path: ${path}` };
             }

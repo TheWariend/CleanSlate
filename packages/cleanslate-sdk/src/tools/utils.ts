@@ -86,23 +86,28 @@ export async function resolveCommandCwd(requested: string | undefined, context: 
 }
 
 /**
- * Helper to resolve paths reliably across workspace folders
+ * Shared prefix of path resolution: virtual artifacts, exact in-workspace matches, and
+ * workspace-relative paths are unambiguous and require no filesystem I/O to resolve.
+ * A genuine absolute path that falls outside every workspace folder is left as an
+ * `outsideWorkspaceAbsolute` outcome for the caller (sync or async) to decide on.
  */
-export function resolvePathToUri(path: string, context: CleanSlateToolContext, options: ResolvePathToUriOptions = {}): URI {
+type PathResolutionOutcome =
+    | { kind: 'resolved'; uri: URI }
+    | { kind: 'outsideWorkspaceAbsolute'; potentialUri: URI; isPosixAbsolutePath: boolean; firstFolder: { toResource(relativePath: string): URI } };
+
+function resolvePathCore(path: string, context: CleanSlateToolContext): PathResolutionOutcome {
     if (typeof path !== 'string' || !path.trim()) {
         throw new Error('Path must be a non-empty string.');
     }
     const requestedPath = path.trim();
 
-    const allowWorkspaceRootRelativeAbsolute = options.allowWorkspaceRootRelativeAbsolute ?? true;
-
     // 1. Special check for virtual artifacts (must be first to avoid URI.file errors)
     if (isVirtualArtifactPath(requestedPath)) {
         const normalizedArtifactPath = requestedPath.replace(/^\/+/, '');
-        return URI.from({
-            scheme: CLEANSLATE_ARTIFACT_SCHEME,
-            path: `/${normalizedArtifactPath}`
-        });
+        return {
+            kind: 'resolved',
+            uri: URI.from({ scheme: CLEANSLATE_ARTIFACT_SCHEME, path: `/${normalizedArtifactPath}` })
+        };
     }
 
     const workspaceFolders = context.workspaceContextService.getWorkspace().folders;
@@ -110,7 +115,7 @@ export function resolvePathToUri(path: string, context: CleanSlateToolContext, o
 
     const matchingFolder = context.workspaceContextService.getWorkspaceFolder(potentialUri);
     if (matchingFolder) {
-        return potentialUri;
+        return { kind: 'resolved', uri: potentialUri };
     }
 
     if (workspaceFolders.length === 0) {
@@ -129,18 +134,77 @@ export function resolvePathToUri(path: string, context: CleanSlateToolContext, o
         if (!resolvedFolder) {
             throw new Error(`Resolved path is outside the workspace: ${requestedPath}`);
         }
-        return resolved;
+        return { kind: 'resolved', uri: resolved };
+    }
+
+    return { kind: 'outsideWorkspaceAbsolute', potentialUri, isPosixAbsolutePath, firstFolder };
+}
+
+/**
+ * Helper to resolve paths reliably across workspace folders.
+ *
+ * Synchronous — does no filesystem I/O, so a genuine absolute path outside the workspace
+ * is only ever handled via the legacy workspace-root-relative compatibility mapping (or
+ * rejected outright when `allowWorkspaceRootRelativeAbsolute` is false). Mutation tools use
+ * this: they intentionally cannot target another project's files by surprise. Read tools
+ * should prefer {@link resolvePathToUriAsync}, which can actually check whether the literal
+ * path exists on disk and access it.
+ */
+export function resolvePathToUri(path: string, context: CleanSlateToolContext, options: ResolvePathToUriOptions = {}): URI {
+    const allowWorkspaceRootRelativeAbsolute = options.allowWorkspaceRootRelativeAbsolute ?? true;
+    const outcome = resolvePathCore(path, context);
+    if (outcome.kind === 'resolved') {
+        return outcome.uri;
     }
 
     // POSIX absolute path outside workspace.
     // In compatibility mode, allow `/foo/bar` to map into the first workspace as `foo/bar`.
-    if (isPosixAbsolutePath && allowWorkspaceRootRelativeAbsolute) {
-        const relativePath = requestedPath.replace(/^\/+/, '');
-        const resolved = firstFolder.toResource(relativePath);
-        return resolved;
+    if (outcome.isPosixAbsolutePath && allowWorkspaceRootRelativeAbsolute) {
+        const relativePath = path.trim().replace(/^\/+/, '');
+        return outcome.firstFolder.toResource(relativePath);
     }
 
-    throw new Error(`Path is outside the workspace and cannot be resolved safely: ${requestedPath}`);
+    throw new Error(`Path is outside the workspace and cannot be resolved safely: ${path.trim()}`);
+}
+
+/**
+ * Async counterpart to {@link resolvePathToUri}, for read-only tools. A path outside every
+ * workspace folder is not automatically a dead end: a genuine absolute path (e.g. a sibling
+ * repo on disk while a different project is the active workspace) should resolve to itself
+ * when it actually exists, rather than being silently remapped into a nonexistent path inside
+ * the current workspace. Falls back to the legacy workspace-root-relative interpretation (for
+ * hallucinated `/foo` paths that meant "workspace root/foo") only when the literal path is not
+ * found on disk, and only ever widens access for reads — write tools keep calling the sync,
+ * strictly-scoped `resolvePathToUri` above.
+ */
+export async function resolvePathToUriAsync(path: string, context: CleanSlateToolContext, options: ResolvePathToUriOptions = {}): Promise<URI> {
+    const allowWorkspaceRootRelativeAbsolute = options.allowWorkspaceRootRelativeAbsolute ?? true;
+    const outcome = resolvePathCore(path, context);
+    if (outcome.kind === 'resolved') {
+        return outcome.uri;
+    }
+
+    if (!allowWorkspaceRootRelativeAbsolute) {
+        throw new Error(`Path is outside the workspace and cannot be resolved safely: ${path.trim()}`);
+    }
+
+    const realExists = await context.fileService.exists(outcome.potentialUri).catch(() => false);
+    if (realExists) {
+        return outcome.potentialUri;
+    }
+
+    if (outcome.isPosixAbsolutePath) {
+        const relativePath = path.trim().replace(/^\/+/, '');
+        const compatUri = outcome.firstFolder.toResource(relativePath);
+        const compatExists = await context.fileService.exists(compatUri).catch(() => false);
+        if (compatExists) {
+            return compatUri;
+        }
+    }
+
+    // Neither the literal path nor the legacy compat mapping exists on disk; return the
+    // literal absolute path so the resulting not-found error names the path actually given.
+    return outcome.potentialUri;
 }
 
 /**

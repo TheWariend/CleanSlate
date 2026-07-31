@@ -3,9 +3,10 @@
  * Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { URI } from '../core/uri.js';
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
 import { isFileMatch, resultIsMatch } from '../host/workspace.js';
-import { resolvePathToUri } from './utils.js';
+import { resolvePathToUriAsync } from './utils.js';
 import { isStaleGeneratedDiagnosticPath } from './cleanSlateStaleDiagnosticPolicy.js';
 
 /**
@@ -38,17 +39,21 @@ export const grepSearchTool: CleanSlateTool = {
             return []; // No workspace, no search
         }
 
-        const normalizedScope = (() => {
-            const requestedScope = input.path?.trim() || input.SearchPath?.trim();
-            if (!requestedScope) {
-                return undefined;
-            }
+        // A scope resolves to the literal path even when it lives outside the active
+        // workspace (see resolvePathToUriAsync) — used as the search root directly below
+        // instead of a post-hoc filter, so a cross-project scope actually gets crawled
+        // rather than silently matching nothing.
+        const requestedScope = input.path?.trim() || input.SearchPath?.trim();
+        let scopeUri: URI | undefined;
+        let normalizedScope: string | undefined;
+        if (requestedScope) {
             try {
-                return resolvePathToUri(requestedScope, context).fsPath.replace(/\\/g, '/').toLowerCase();
+                scopeUri = await resolvePathToUriAsync(requestedScope, context);
+                normalizedScope = scopeUri.fsPath.replace(/\\/g, '/').toLowerCase();
             } catch {
-                return undefined;
+                // Unresolvable scope: fall back to searching the whole workspace unfiltered.
             }
-        })();
+        }
 
         const resultsMap = new Map<string, any[]>();
 
@@ -61,8 +66,10 @@ export const grepSearchTool: CleanSlateTool = {
                     isRegExp: isRegex,
                     isWordMatch: false
                 },
-                folderQueries: workspaceFolders.map((f: any) => ({ folder: f.uri })),
-                surroundingContext: 0 
+                folderQueries: scopeUri
+                    ? [{ folder: scopeUri }]
+                    : workspaceFolders.map((f: any) => ({ folder: f.uri })),
+                surroundingContext: 0
             }, undefined, (progress) => {
                 if (isFileMatch(progress)) {
                     const resourcePath = progress.resource.fsPath;

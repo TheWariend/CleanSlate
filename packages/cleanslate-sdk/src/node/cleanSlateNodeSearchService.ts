@@ -122,16 +122,20 @@ export class CleanSlateNodeSearchService implements ISearchHost {
 		return { results, limitHit };
 	}
 
+	/**
+	 * Roots to crawl. An explicit `folderQuery` is honored as given, including one that
+	 * points outside this workspace's root — that only happens when a tool has resolved and
+	 * validated the path itself (e.g. grep_search's scope after `resolvePathToUriAsync`
+	 * confirms it exists), not from an unvalidated model-supplied string. With no
+	 * folderQueries at all, default to searching the whole workspace.
+	 */
 	private searchRoots(query: ITextQuery): string[] {
+		if (query.folderQueries.length === 0) {
+			return [this.rootPath];
+		}
 		const roots = new Set<string>();
 		for (const folderQuery of query.folderQueries) {
-			const candidate = path.resolve(folderQuery.folder.fsPath);
-			if (this.isInsideWorkspace(candidate)) {
-				roots.add(candidate);
-			}
-		}
-		if (roots.size === 0 && query.folderQueries.length === 0) {
-			roots.add(this.rootPath);
+			roots.add(path.resolve(folderQuery.folder.fsPath));
 		}
 		return [...roots];
 	}
@@ -194,11 +198,6 @@ export class CleanSlateNodeSearchService implements ISearchHost {
 			}
 			return matches;
 		};
-	}
-
-	private isInsideWorkspace(candidate: string): boolean {
-		const relative = path.relative(this.rootPath, candidate);
-		return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 	}
 
 	private isCancelled(token: unknown): boolean {

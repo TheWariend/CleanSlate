@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
-import { resolvePathToUri } from './utils.js';
+import { resolvePathToUriAsync } from './utils.js';
 import { Position } from '../core/position.js';
 import { buildSymbolContext, getOwnerHierarchyForLine } from './symbolContext.js';
 import { fireDefinitionProvider, resolveBackgroundLanguageFeatureModel } from './languageFeatureActivation.js';
@@ -36,7 +36,7 @@ export const getDefinitionsTool: CleanSlateTool = {
             return { success: false, message: 'Language features command and provider services are not available.' };
         }
 
-        const uri = resolvePathToUri(input.path, context);
+        const uri = await resolvePathToUriAsync(input.path, context);
         const line = Number.isFinite(input.line) ? Math.max(1, Math.floor(input.line)) : Math.max(1, Math.floor(Number(input.line) || 1));
         const column = Number.isFinite(input.column) ? Math.max(1, Math.floor(input.column)) : Math.max(1, Math.floor(Number(input.column) || 1));
         const position = new Position(line, column);

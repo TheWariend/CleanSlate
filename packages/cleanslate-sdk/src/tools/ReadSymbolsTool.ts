@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
-import { resolvePathToUri } from './utils.js';
+import { resolvePathToUriAsync } from './utils.js';
 import { buildSymbolContext, symbolKindToLabel } from './symbolContext.js';
 import { fireDocumentSymbolProvider, resolveBackgroundLanguageFeatureModel } from './languageFeatureActivation.js';
 import { cancellationTokenFromAbortSignal } from '../services/cleanSlateCancellation.js';
@@ -33,7 +33,7 @@ export const readSymbolsTool: CleanSlateTool = {
             return { success: false, message: 'Language features command and provider services are not available.' };
         }
 
-        const uri = resolvePathToUri(input.path, context);
+        const uri = await resolvePathToUriAsync(input.path, context);
         const firedSymbols = await fireDocumentSymbolProvider(uri, context);
         const model = await resolveBackgroundLanguageFeatureModel(uri, context);
         if (!model) {

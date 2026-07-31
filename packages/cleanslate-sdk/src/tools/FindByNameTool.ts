@@ -5,7 +5,7 @@
 
 import { URI } from '../core/uri.js';
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
-import { resolvePathToUri } from './utils.js';
+import { resolvePathToUriAsync } from './utils.js';
 
 /**
  * Tool: find_by_name
@@ -62,7 +62,7 @@ export const findByNameTool: CleanSlateTool = {
         const scopedPath = input.path?.trim();
         if (scopedPath) {
             try {
-                const scopedUri = resolvePathToUri(scopedPath, context);
+                const scopedUri = await resolvePathToUriAsync(scopedPath, context);
                 const stat = await context.fileService.resolve(scopedUri);
                 if (stat.isDirectory) {
                     await crawl(scopedUri, 0);

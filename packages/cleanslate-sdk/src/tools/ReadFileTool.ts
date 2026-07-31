@@ -5,7 +5,7 @@
 
 import { CLEANSLATE_ARTIFACT_SCHEME } from '../protocol/cleanSlateAI.js';
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
-import { getVirtualArtifactType, resolvePathToUri } from './utils.js';
+import { getVirtualArtifactType, resolvePathToUriAsync } from './utils.js';
 import { isStaleGeneratedDiagnosticPath, STALE_GENERATED_DIAGNOSTIC_WARNING } from './cleanSlateStaleDiagnosticPolicy.js';
 import { CLEANSLATE_MAX_FILE_READ_LINES, CLEANSLATE_MAX_FULL_FILE_READ_BYTES, estimateCleanSlateFileReadTokens, estimateCleanSlateUtf8Bytes, resolveCleanSlateFileReadBudget, takeCleanSlateBoundedLineSlice } from './cleanSlateFileReadPolicy.js';
 
@@ -26,7 +26,7 @@ export const readFileTool: CleanSlateTool = {
         if (!path) throw new Error('read_file requires a "path" parameter');
 
         try {
-            const uri = resolvePathToUri(path, context);
+            const uri = await resolvePathToUriAsync(path, context);
             context.onProgress?.({ type: 'read', path: uri.fsPath });
             let content = '';
             let languageId = 'plaintext';

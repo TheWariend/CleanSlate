@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
-import { resolvePathToUri } from './utils.js';
+import { resolvePathToUriAsync } from './utils.js';
 
 /**
  * Tool: list_dir
@@ -21,7 +21,7 @@ export const listDirTool: CleanSlateTool = {
         if (!path) throw new Error('list_dir requires a "path" parameter');
 
         try {
-            const uri = resolvePathToUri(path, context);
+            const uri = await resolvePathToUriAsync(path, context);
             const stat = await context.fileService.resolve(uri);
             if (!stat.children) return [];
 

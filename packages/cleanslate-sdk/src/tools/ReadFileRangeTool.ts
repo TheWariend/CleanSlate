@@ -5,7 +5,7 @@
 
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
 import { CLEANSLATE_MAX_FILE_READ_LINES, resolveCleanSlateFileReadBudget, takeCleanSlateBoundedLineSlice } from './cleanSlateFileReadPolicy.js';
-import { resolvePathToUri } from './utils.js';
+import { resolvePathToUriAsync } from './utils.js';
 
 /**
  * Tool: read_file_range
@@ -41,7 +41,7 @@ export const readFileRangeTool: CleanSlateTool = {
         const cappedEnd = normalizedStart + Math.min(requestedLineCount, CLEANSLATE_MAX_FILE_READ_LINES) - 1;
 
         try {
-            const uri = resolvePathToUri(path, context);
+            const uri = await resolvePathToUriAsync(path, context);
             context.onProgress?.({ type: 'read', path: uri.fsPath });
             let content = '';
             let currentVersionId: number | undefined;

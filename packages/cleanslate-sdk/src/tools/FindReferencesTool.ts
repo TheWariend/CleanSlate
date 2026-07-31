@@ -5,7 +5,7 @@
 
 import { Position } from '../core/position.js';
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
-import { resolvePathToUri } from './utils.js';
+import { resolvePathToUriAsync } from './utils.js';
 import { fireReferenceProvider, resolveBackgroundLanguageFeatureModel } from './languageFeatureActivation.js';
 import { cancellationTokenFromAbortSignal } from '../services/cleanSlateCancellation.js';
 
@@ -41,7 +41,7 @@ export const findReferencesTool: CleanSlateTool = {
 		const column = Number.isFinite(input.column) ? Math.max(1, Math.floor(input.column)) : Math.max(1, Math.floor(Number(input.column) || 1));
 		const includeDeclaration = input.includeDeclaration === true;
 		const position = new Position(line, column);
-		const uri = resolvePathToUri(input.path, context);
+		const uri = await resolvePathToUriAsync(input.path, context);
 		const firedReferences = await fireReferenceProvider(uri, position, context);
 		const model = await resolveBackgroundLanguageFeatureModel(uri, context);
 		if (!model) {
