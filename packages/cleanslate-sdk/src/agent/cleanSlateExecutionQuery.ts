@@ -22,6 +22,7 @@ import { CLEANSLATE_CODING_PROFILE, ICleanSlateDomainProfile } from './cleanSlat
 import { extractPlanFileEntries, planEntryTargetToPath } from '../tools/cleanSlatePlanArtifactPolicy.js';
 import { evaluateExecutionCommandPolicy } from './cleanSlateCommandPolicy.js';
 import { getWebResearchFinalAnswerPrompt } from './cleanSlateRuntimePromptBuilder.js';
+import { orderUserTurnLast } from './cleanSlateProviderMessageOrder.js';
 import { CleanSlateStreamingToolEvent, CleanSlateStreamingToolExecutor, ICleanSlateStreamingToolExecution } from './cleanSlateStreamingToolExecutor.js';
 import { CleanSlateExecutionEditPolicy } from './cleanSlateExecutionEditPolicy.js';
 import { cancellationTokenFromAbortSignal } from '../services/cleanSlateCancellation.js';
@@ -886,7 +887,7 @@ export class CleanSlateExecutionQueryEngine {
         if (projection.result.compacted) {
             console.debug(`[CleanSlateAgent] [${logLabel}] Context budget projected for turn ${visibleTurnIndex}: ${projection.result.beforeChars} -> ${projection.result.afterChars} chars; clampedToolResults=${projection.result.clampedToolResults}; clampedAssistantTurns=${projection.result.clampedAssistantTurns}; droppedTool=${projection.result.droppedToolMessages}; droppedSystem=${projection.result.droppedSystemMessages}; droppedHistory=${projection.result.droppedHistoryMessages}`);
         }
-        return projection.messages;
+        return orderUserTurnLast(projection.messages);
     }
 
     private getEstimatedContextUsage(messages: readonly IChatMessage[], promptOverheadChars: number): { estimatedInputTokens: number; contextWindowTokens: number; autoCompactThresholdTokens: number; percentage: number } {
