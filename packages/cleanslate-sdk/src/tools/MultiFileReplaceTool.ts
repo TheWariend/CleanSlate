@@ -5,7 +5,7 @@
 
 import { ICleanSlateResourceTextEditDescriptor } from './cleanSlateHostTypes.js';
 import { CleanSlateEditService, CleanSlatePlannedEdit } from '../services/cleanSlateEditService.js';
-import { resolvePathToUri, isUriInIdeWorkspace, resolveTextModelHeadless } from './utils.js';
+import { PathOutsideWorkspaceError, buildPathOutsideWorkspaceResult, isUriInIdeWorkspace, resolvePathToUriForMutationAsync, resolveTextModelHeadless } from './utils.js';
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
 import { canonicalizeStructuredEdits } from './structuredEditCanonicalizer.js';
 import { CleanSlateFileHistory, CleanSlateFileHistoryEntry } from '../services/cleanSlateFileHistory.js';
@@ -16,7 +16,7 @@ interface MultiFileStructuredEditRequest extends ApplyEditInput { }
 
 interface PlannedMultiFileEdit {
     path: string;
-    uri: ReturnType<typeof resolvePathToUri>;
+    uri: URI;
     versionId: number;
     beforeContent: string;
     edits: CleanSlatePlannedEdit[];
@@ -106,7 +106,23 @@ export const multiFileReplaceTool: CleanSlateTool = {
             seenPaths.add(pathKey);
 
             try {
-                const uri = resolvePathToUri(requestedPath, context, { allowWorkspaceRootRelativeAbsolute: false });
+                let uri: URI;
+                try {
+                    uri = await resolvePathToUriForMutationAsync(requestedPath, context);
+                } catch (resolveError) {
+                    if (resolveError instanceof PathOutsideWorkspaceError) {
+                        const outside = buildPathOutsideWorkspaceResult(requestedPath, resolveError);
+                        failures.push({
+                            path: requestedPath,
+                            code: outside.code,
+                            diagnostics: [],
+                            recoveryHint: outside.recoveryHint,
+                            message: outside.message
+                        });
+                        continue;
+                    }
+                    throw resolveError;
+                }
 
                 let model = context.modelService.getModel(uri);
                 if (!model) {

@@ -6,7 +6,7 @@
 import { URI } from '../core/uri.js';
 import { Range } from '../core/range.js';
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
-import { resolvePathToUri, isDocumentationFile, isUriInIdeWorkspace } from './utils.js';
+import { PathOutsideWorkspaceError, buildPathOutsideWorkspaceResult, isDocumentationFile, isUriInIdeWorkspace, resolvePathToUriForMutationAsync } from './utils.js';
 import { CleanSlateFileHistory } from '../services/cleanSlateFileHistory.js';
 import { applyEditTool } from './ApplyEditTool.js';
 
@@ -37,8 +37,16 @@ Input: { file_path: string, content: string, open?: boolean }`,
         if (!requestedPath) throw new Error('file_path is required');
         if (content === undefined || content === null) throw new Error('content is required (use empty string for empty files)');
 
+        let uri: URI;
         try {
-            const uri = resolvePathToUri(requestedPath, context, { allowWorkspaceRootRelativeAbsolute: false });
+            uri = await resolvePathToUriForMutationAsync(requestedPath, context);
+        } catch (error) {
+            if (error instanceof PathOutsideWorkspaceError) {
+                return buildPathOutsideWorkspaceResult(requestedPath, error);
+            }
+            throw error;
+        }
+        try {
             const exists = !!context.modelService.getModel(uri) || await context.fileService.exists(uri);
             if (exists) {
                 const result = await applyEditTool.run({

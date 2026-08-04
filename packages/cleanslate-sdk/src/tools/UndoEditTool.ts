@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
-import { resolvePathToUri, isUriInIdeWorkspace } from './utils.js';
+import { PathOutsideWorkspaceError, buildPathOutsideWorkspaceResult, isUriInIdeWorkspace, resolvePathToUriForMutationAsync } from './utils.js';
 import { CleanSlateFileHistory } from '../services/cleanSlateFileHistory.js';
 import { URI } from '../core/uri.js';
 
@@ -19,8 +19,16 @@ export const undoEditTool: CleanSlateTool = {
         required: ['path']
     },
     async run(input: any, context: CleanSlateToolContext) {
-        const uri = resolvePathToUri(input.path, context, { allowWorkspaceRootRelativeAbsolute: false });
-        
+        let uri;
+        try {
+            uri = await resolvePathToUriForMutationAsync(input.path, context);
+        } catch (error) {
+            if (error instanceof PathOutsideWorkspaceError) {
+                return buildPathOutsideWorkspaceResult(input.path, error);
+            }
+            throw error;
+        }
+
         try {
             // Only the visual, editor-based undo may reveal the file. For a
             // cross-project Agent Manager session the editor services are global

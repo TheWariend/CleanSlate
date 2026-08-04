@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
-import { resolvePathToUri, isUriInIdeWorkspace } from './utils.js';
+import { PathOutsideWorkspaceError, buildPathOutsideWorkspaceResult, isUriInIdeWorkspace, resolvePathToUriForMutationAsync } from './utils.js';
 import { Range } from '../core/range.js';
 import { CleanSlateFileHistory } from '../services/cleanSlateFileHistory.js';
 import { URI } from '../core/uri.js';
@@ -42,7 +42,19 @@ Input: { files: [{path: string, content: string}] }
             }
 
             try {
-                const uri = resolvePathToUri(path, context, { allowWorkspaceRootRelativeAbsolute: false });
+                let uri;
+                try {
+                    uri = await resolvePathToUriForMutationAsync(path, context);
+                } catch (resolveError) {
+                    if (resolveError instanceof PathOutsideWorkspaceError) {
+                        // Surface the structured recovery hint on stderr so downstream
+                        // logs are still informative, then treat the file as failed.
+                        console.error('[CleanSlate] create_multiple_files rejected path:', buildPathOutsideWorkspaceResult(path, resolveError));
+                        failed.push(path);
+                        continue;
+                    }
+                    throw resolveError;
+                }
                 if (context.modelService.getModel(uri) || await context.fileService.exists(uri)) {
                     failed.push(path);
                     continue;

@@ -5,7 +5,7 @@
 
 
 import { CleanSlateReadFileState, CleanSlateTool, CleanSlateToolContext } from './types.js';
-import { resolvePathToUri, isUriInIdeWorkspace, resolveTextModelHeadless } from './utils.js';
+import { PathOutsideWorkspaceError, buildPathOutsideWorkspaceResult, isUriInIdeWorkspace, resolvePathToUriForMutationAsync, resolveTextModelHeadless } from './utils.js';
 import { URI } from '../core/uri.js';
 import { ISlateTextModel } from '../host/textModel.js';
 import { CleanSlateEditService, CleanSlatePlannedEdit, CleanSlateStructuredEdit } from '../services/cleanSlateEditService.js';
@@ -51,7 +51,15 @@ export const applyEditTool: CleanSlateTool = {
         const requestedPath = input.file_path ?? input.path;
         if (!requestedPath) throw new Error('apply_edit: The "file_path" parameter is required.');
         input = { ...input, path: requestedPath };
-        const uri = resolvePathToUri(requestedPath, context, { allowWorkspaceRootRelativeAbsolute: false });
+        let uri: URI;
+        try {
+            uri = await resolvePathToUriForMutationAsync(requestedPath, context);
+        } catch (error) {
+            if (error instanceof PathOutsideWorkspaceError) {
+                return buildPathOutsideWorkspaceResult(requestedPath, error);
+            }
+            throw error;
+        }
         // Reveal/decorate the edit in the IDE editor only when the file belongs to the project the
         // IDE currently has open. A cross-project Agent Manager session still applies the edit to
         // disk headlessly; it just must not surface the file in the other project's editor.

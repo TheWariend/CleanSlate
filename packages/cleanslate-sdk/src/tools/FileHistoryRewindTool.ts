@@ -5,7 +5,7 @@
 
 import { CleanSlateFileHistory } from '../services/cleanSlateFileHistory.js';
 import { CleanSlateTool, CleanSlateToolContext } from './types.js';
-import { resolvePathToUri } from './utils.js';
+import { PathOutsideWorkspaceError, buildPathOutsideWorkspaceResult, resolvePathToUriForMutationAsync } from './utils.js';
 import { URI } from '../core/uri.js';
 
 export const fileHistoryRewindTool: CleanSlateTool = {
@@ -21,9 +21,17 @@ export const fileHistoryRewindTool: CleanSlateTool = {
 			throw new Error('file_history_rewind requires either "path" or "historyEntryId".');
 		}
 
-		const resource = input.path
-			? resolvePathToUri(input.path, context, { allowWorkspaceRootRelativeAbsolute: false })
-			: undefined;
+		let resource: URI | undefined;
+		if (input.path) {
+			try {
+				resource = await resolvePathToUriForMutationAsync(input.path, context);
+			} catch (error) {
+				if (error instanceof PathOutsideWorkspaceError) {
+					return buildPathOutsideWorkspaceResult(input.path, error);
+				}
+				throw error;
+			}
+		}
 		const workspaceRoot = resource
 			? context.workspaceContextService.getWorkspaceFolder(resource)?.uri
 			: context.workspaceContextService.getWorkspace().folders[0]?.uri;
