@@ -55,6 +55,10 @@ export function normalizePhaseForExecutionFlow(input: IExecutionFlowPhaseInput):
 		return CLEANSLATE_PHASE.EXECUTION;
 	}
 
+	if (input.currentPhase === CLEANSLATE_PHASE.EXECUTION && input.usePlanningForCurrentTurn) {
+		return CLEANSLATE_PHASE.PLANNING;
+	}
+
 	return input.currentPhase;
 }
 

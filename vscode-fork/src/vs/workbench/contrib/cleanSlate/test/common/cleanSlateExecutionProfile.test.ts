@@ -63,6 +63,20 @@ suite('CleanSlateExecutionFlow', () => {
 		assert.strictEqual(result, CLEANSLATE_PHASE.PLANNING);
 	});
 
+	test('plan mode re-enters planning from execution for the current turn', () => {
+		const result = normalizePhaseForExecutionFlow({
+			currentPhase: CLEANSLATE_PHASE.EXECUTION,
+			isAwaitingApproval: false,
+			currentTaskKind: CleanSlateTaskKind.MODIFY_EXISTING,
+			turnIntent: CleanSlateTurnIntent.CONTINUE_CURRENT,
+			planMode: true,
+			usePlanningPhase: true,
+			usePlanningForCurrentTurn: true
+		});
+
+		assert.strictEqual(result, CLEANSLATE_PHASE.PLANNING);
+	});
+
 	test('plan mode is bypassed when the current turn explicitly skips planning', () => {
 		const result = normalizePhaseForExecutionFlow({
 			currentPhase: CLEANSLATE_PHASE.PLANNING,
