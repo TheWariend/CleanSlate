@@ -27,6 +27,7 @@ import { CleanSlateStreamingToolEvent, CleanSlateStreamingToolExecutor, ICleanSl
 import { CleanSlateExecutionEditPolicy } from './cleanSlateExecutionEditPolicy.js';
 import { cancellationTokenFromAbortSignal } from '../services/cleanSlateCancellation.js';
 import { estimateCleanSlateFileReadTokens } from '../tools/cleanSlateFileReadPolicy.js';
+import type { ICleanSlatePullRequestMetadata } from '../tools/PreparePullRequestTool.js';
 
 type IExecutionToolExecution = ICleanSlateStreamingToolExecution;
 type IExecutionToolStreamEvent = CleanSlateStreamingToolEvent;
@@ -45,6 +46,8 @@ interface IExecutionQueryState {
     pendingRecoveryPrompt?: string;
     recoveryNoToolTurns: number;
     noToolTurns: number;
+    /** Semantic PR metadata explicitly prepared by the agent after verified source mutations. */
+    pullRequest?: ICleanSlatePullRequestMetadata;
 }
 
 interface IExecutionGuardState {
@@ -111,6 +114,8 @@ export interface ICleanSlateExecutionQueryCompletionState {
     verificationIssueCount: number;
     successfulMutationsInPhase: number;
     summary?: string;
+    /** Exact reviewer-facing metadata submitted through prepare_pull_request. */
+    pullRequest?: ICleanSlatePullRequestMetadata;
     /** File targets named by the approved implementation plan, when one exists. */
     plannedFileTargets?: string[];
     /** Planned files with no mutation this run — the auditor requires each to be explicitly accounted for. */
@@ -630,7 +635,7 @@ export class CleanSlateExecutionQueryEngine {
                         executionFlow,
                         verified: true,
                         completionSource: 'host_finalized',
-                        completionState: this.buildCompletionState(guardState, currentResponse, queryState.plannedFileTargets)
+                        completionState: this.buildCompletionState(guardState, currentResponse, queryState.plannedFileTargets, queryState.pullRequest)
                     }
                 };
                 return;
@@ -1232,6 +1237,32 @@ export class CleanSlateExecutionQueryEngine {
             }
         }
 
+        if (toolCall.toolName === 'prepare_pull_request') {
+            const preparationError = guardState.mutatedPaths.size === 0
+                ? {
+                    code: 'pull_request_not_applicable',
+                    message: 'No SDK-tracked repository source changes were made. Do not prepare a pull request for a run, inspection, or verification-only task.'
+                }
+                : guardState.pendingVerificationPaths.size > 0
+                    || guardState.postEditCommandIssues.length > 0
+                    || !guardState.postEditCommandVerified
+                    ? {
+                        code: 'pull_request_requires_verification',
+                        message: 'Repository changes must pass verification before pull request metadata is prepared.'
+                    }
+                    : undefined;
+            if (preparationError) {
+                const result = { success: false, ...preparationError };
+                toolCallLedger.recordResult(toolCall, result);
+                yield this.nativeToolTranscript.attachToolCallId({
+                    type: 'tool_result',
+                    toolName: toolCall.toolName,
+                    result
+                }, toolCall.id);
+                return;
+            }
+        }
+
         if (queryState.pendingRecoveryPrompt
             && this.profile.structuredEditTools.has(toolCall.toolName)
             && this.editPolicy.countStructuredEdits(toolCall) !== 1) {
@@ -1261,12 +1292,25 @@ export class CleanSlateExecutionQueryEngine {
                 lastToolResult = part.result;
                 toolCallLedger.recordResult(executableToolCall, part.result);
                 this.recordToolResultForGuardrails(executableToolCall, part.result, guardState);
+                if (this.options.executionSupport.isConfirmedMutationResult(executableToolCall.toolName, executableToolCall.input, part.result)) {
+                    queryState.pullRequest = undefined;
+                }
                 const recoveryPrompt = this.editPolicy.buildFailedEditRecoveryPrompt(executableToolCall, part.result);
                 if (recoveryPrompt) {
                     this.appendPendingRecoveryPrompt(queryState, recoveryPrompt);
                 }
             }
             yield this.nativeToolTranscript.attachToolCallId(part, executableToolCall.id);
+        }
+
+        if (executableToolCall.toolName === 'prepare_pull_request'
+            && lastToolResult?.success === true
+            && typeof lastToolResult?.pullRequest?.title === 'string'
+            && typeof lastToolResult?.pullRequest?.body === 'string') {
+            queryState.pullRequest = {
+                title: lastToolResult.pullRequest.title,
+                body: lastToolResult.pullRequest.body
+            };
         }
 
         if (queryState.planMode && executableToolCall.toolName === this.profile.completionTool) {
@@ -1408,7 +1452,8 @@ export class CleanSlateExecutionQueryEngine {
             'EXECUTION VERIFICATION COMPLETE: post-mutation verification passed.',
             `Verified target files: ${targetCount}.`,
             'Do not stop merely because this one edit verified.',
-			'If the full user request is implemented, write the visible final answer as normal assistant text and stop without a completion tool.',
+            'If the full user request is implemented, first call prepare_pull_request exactly once with a semantic title and reviewer-facing body for the actual implementation. Never copy the user prompt or chat title, and never include transcript, reasoning, or progress narration. Use concise Summary and Verification sections.',
+            'After prepare_pull_request succeeds, write the visible final answer as normal assistant text and stop.',
             'If any planned work remains, continue with concrete tool_calls only.'
         ].join('\n');
     }
@@ -1469,7 +1514,7 @@ export class CleanSlateExecutionQueryEngine {
 		return result?.code === 'tool_call_loop_detected';
 	}
 
-	private buildCompletionState(guardState: IExecutionGuardState, finalAnswer: string, plannedFileTargets?: readonly string[]): ICleanSlateExecutionQueryCompletionState {
+	private buildCompletionState(guardState: IExecutionGuardState, finalAnswer: string, plannedFileTargets?: readonly string[], pullRequest?: ICleanSlatePullRequestMetadata): ICleanSlateExecutionQueryCompletionState {
         const proofSummaries = this.buildHostProofSummaries(guardState);
 		return {
 			touchedPaths: Array.from(guardState.touchedPaths),
@@ -1481,6 +1526,7 @@ export class CleanSlateExecutionQueryEngine {
             verificationIssueCount: guardState.verificationSummaries.reduce((sum, summary) => sum + summary.markerIssueCount, 0),
             successfulMutationsInPhase: guardState.successfulMutationsInPhase,
             summary: this.normalizeCompletionSummary(finalAnswer),
+			...(pullRequest ? { pullRequest } : {}),
             ...(plannedFileTargets?.length ? {
                 plannedFileTargets: [...plannedFileTargets],
                 unmutatedPlannedFiles: this.getUnmutatedPlannedFiles(plannedFileTargets, guardState.mutatedPaths)

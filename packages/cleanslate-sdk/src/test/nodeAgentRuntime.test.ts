@@ -99,7 +99,9 @@ describe('CleanSlateNodeAgentRuntime', () => {
 				apiKey: 'test'
 			})
 		});
-		(runtime as any).mainService.openAICompatibleChatStream = () => {
+		let request: any;
+		(runtime as any).mainService.openAICompatibleChatStream = (options: any) => {
+			request = options;
 			const emitter = new Emitter<any>();
 			setTimeout(() => {
 				emitter.fire('data: {"type":"text","content":"All done.","phase":"final_answer"}\n\n');
@@ -113,9 +115,39 @@ describe('CleanSlateNodeAgentRuntime', () => {
 			parts.push(part);
 		}
 
-		assert.equal(runtime.getAvailableToolCount(), 59);
+		assert.equal(runtime.getAvailableToolCount(), 60);
+		assert.equal(request.options.tools.some((tool: any) => tool.name === 'prepare_pull_request'), true);
 		assert.equal(parts.some(part => part.type === 'chat_text' && part.content === 'All done.' && part.kind === 'final_answer'), true);
 		assert.equal(parts.some(part => part.type === 'task_complete'), true);
+		runtime.dispose();
+	});
+
+	test('carries agent-authored pull request metadata through task completion', () => {
+		const runtime = new CleanSlateNodeAgentRuntime({
+			rootPath: process.cwd(),
+			configuration: createNodeProviderConfiguration({
+				provider: 'openai',
+				model: 'gpt-4o',
+				apiKey: 'test'
+			})
+		});
+		const pullRequest = {
+			title: 'Improve recommendation card accessibility',
+			body: '## Summary\n\nImprove keyboard navigation.\n\n## Verification\n\n- Tests passed.'
+		};
+		const part = (runtime as any).queryRunner.enrichCompletion({ type: 'task_complete', result: {} }, {
+			touchedPaths: ['src/card.tsx'],
+			mutatedPaths: ['src/card.tsx'],
+			mutationSummaries: [],
+			terminalSummaries: [],
+			proofSummaries: ['Tests passed'],
+			completionSource: 'host_finalized',
+			verificationIssueCount: 0,
+			successfulMutationsInPhase: 1,
+			pullRequest
+		}, []);
+
+		assert.deepEqual(part.result.completionSummary.pullRequest, pullRequest);
 		runtime.dispose();
 	});
 

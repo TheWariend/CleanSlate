@@ -127,6 +127,7 @@ export class CleanSlateQueryRunner {
 					...(filesModified ?? {}),
 					...(hasChangeEvidenceGap ? { changeEvidenceStatus: 'incomplete' } : {}),
 					...(completionState.proofSummaries.length > 0 ? { proofSummaries: completionState.proofSummaries } : {}),
+					...(completionState.pullRequest ? { pullRequest: completionState.pullRequest } : {}),
 					...(completionState.summary ? { summary: completionState.summary } : {})
 				}
 			}
