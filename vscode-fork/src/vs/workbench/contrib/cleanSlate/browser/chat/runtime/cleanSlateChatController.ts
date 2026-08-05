@@ -12,7 +12,7 @@ import { IWorkspaceContextService } from '../../../../../../platform/workspace/c
 
 import { CleanSlateAgent } from '../../agent/cleanSlateAgent.js';
 import { CleanSlateThreadService } from '@cleanslate/sdk/services/cleanSlateThreadService.js';
-import { CleanSlateTaskSessionService } from '@cleanslate/sdk/services/cleanSlateTaskSessionService.js';
+import { CleanSlateTaskSessionService, type ICleanSlateTaskFileChange } from '@cleanslate/sdk/services/cleanSlateTaskSessionService.js';
 import { AgentPhase } from '@cleanslate/sdk/agent/cleanSlatePrompts.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { Disposable } from '../../../../../../base/common/lifecycle.js';
@@ -366,14 +366,18 @@ export class CleanSlateChatController extends Disposable {
     private reconcileCompletedFilesWidget(
         timeline: InteractionBlock[],
         turnId: string | undefined,
-        mode: string
+        mode: string,
+        allowTaskStateFallback = false,
+        baselineExecutionFilesChanged: readonly ICleanSlateTaskFileChange[] = []
     ): boolean {
-        const taskChanges = this.taskSessionService.getExecutionFilesChanged().map(change => ({
-            ...change,
-            path: this.completionTimelineBuilder.canonicalWorkspaceFilePath(change.path)
-        }));
-        const ledgerChanges = this.fileChangeLedger.getChanges();
-        const filesChanged = this.filesModifiedService.mergeFileChanges(taskChanges, ledgerChanges);
+        const ledgerChanges = this.fileChangeLedger.getChanges(turnId);
+        const taskChanges = ledgerChanges.length === 0 && allowTaskStateFallback
+            ? this.getExecutionFilesChangedDelta(baselineExecutionFilesChanged).map(change => ({
+                ...change,
+                path: this.completionTimelineBuilder.canonicalWorkspaceFilePath(change.path)
+            }))
+            : [];
+        const filesChanged = this.filesModifiedService.mergeFileChanges(ledgerChanges, taskChanges);
         if (filesChanged.length === 0) {
             return false;
         }
@@ -390,6 +394,64 @@ export class CleanSlateChatController extends Disposable {
             this.usesPlanningFlow(mode),
             true
         );
+    }
+
+    private getExecutionFilesChangedDelta(baselineExecutionFilesChanged: readonly ICleanSlateTaskFileChange[]): ICleanSlateTaskFileChange[] {
+        const currentExecutionFilesChanged = this.taskSessionService.getExecutionFilesChanged();
+        if (baselineExecutionFilesChanged.length === 0) {
+            return currentExecutionFilesChanged;
+        }
+
+        const baselineByPath = new Map<string, ICleanSlateTaskFileChange>();
+        for (const change of baselineExecutionFilesChanged) {
+            if (!change || typeof change.path !== 'string') {
+                continue;
+            }
+            const normalizedPath = change.path.trim().replace(/\\/g, '/').toLowerCase();
+            if (!normalizedPath) {
+                continue;
+            }
+            baselineByPath.set(normalizedPath, change);
+        }
+
+        const delta: ICleanSlateTaskFileChange[] = [];
+        for (const change of currentExecutionFilesChanged) {
+            if (!change || typeof change.path !== 'string') {
+                continue;
+            }
+            const normalizedPath = change.path.trim().replace(/\\/g, '/').toLowerCase();
+            if (!normalizedPath) {
+                continue;
+            }
+
+            const baseline = baselineByPath.get(normalizedPath);
+            if (!baseline) {
+                delta.push(change);
+                continue;
+            }
+
+            const added = this.subtractExecutionFileChangeStat(change.added, baseline.added);
+            const deleted = this.subtractExecutionFileChangeStat(change.deleted, baseline.deleted);
+            if (typeof added !== 'number' && typeof deleted !== 'number') {
+                continue;
+            }
+
+            delta.push({
+                path: change.path,
+                ...(typeof added === 'number' ? { added } : {}),
+                ...(typeof deleted === 'number' ? { deleted } : {})
+            });
+        }
+
+        return delta;
+    }
+
+    private subtractExecutionFileChangeStat(current: number | undefined, baseline: number | undefined): number | undefined {
+        if (typeof current !== 'number') {
+            return undefined;
+        }
+        const delta = current - (typeof baseline === 'number' ? baseline : 0);
+        return delta > 0 ? delta : undefined;
     }
 
     private normalizeMode(mode: string | undefined): CleanSlateExecutionFlow {

@@ -99,7 +99,7 @@ export class CleanSlateCompletionTimelineBuilder {
     }
 
     public upsertFinishTaskSummaryBlock(timeline: InteractionBlock[], turnId: string | undefined, result: any, forceRoot = false, hideSummary = false, allowTimelineFileFallback = false): boolean {
-        const finishBlock = this.buildFinishTaskBlock(timeline, result, allowTimelineFileFallback);
+        const finishBlock = this.buildFinishTaskBlock(timeline, turnId, result, allowTimelineFileFallback);
         if (!finishBlock) {
             return false;
         }
@@ -228,9 +228,9 @@ export class CleanSlateCompletionTimelineBuilder {
         return undefined;
     }
 
-    public buildFinishTaskBlock(timeline: InteractionBlock[], result: any, allowTimelineFileFallback = false): InteractionBlock | undefined {
+    public buildFinishTaskBlock(timeline: InteractionBlock[], turnId: string | undefined, result: any, allowTimelineFileFallback = false): InteractionBlock | undefined {
         const completionSummary = this.getCompletionSummary(result);
-        const ledgerChanges = this.fileChangeLedger.getChanges();
+        const ledgerChanges = this.fileChangeLedger.getChanges(turnId);
         if (!completionSummary && ledgerChanges.length === 0) {
             return undefined;
         }

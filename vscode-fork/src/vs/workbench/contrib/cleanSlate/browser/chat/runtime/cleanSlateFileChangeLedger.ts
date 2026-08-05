@@ -26,13 +26,18 @@ export class CleanSlateFileChangeLedger {
 		}
 	}
 
-	getChanges(): ICleanSlateFileChange[] {
-		return Array.from(this.records.values()).map(record => ({
-			path: record.path,
-			diff: record.diff,
-			beforeContent: record.beforeContent,
-			afterContent: record.afterContent
-		}));
+	getChanges(_turnId?: string): ICleanSlateFileChange[] {
+		// The completed-files widget is scoped to the current user request, not
+		// to an individual internal assistant/model turn. A single request can
+		// span multiple assistant turns, so filtering here by turnId would drop
+		// legitimate edits from earlier phases of the same request.
+		return Array.from(this.records.values())
+			.map(record => ({
+				path: record.path,
+				diff: record.diff,
+				beforeContent: record.beforeContent,
+				afterContent: record.afterContent
+			}));
 	}
 
 	private recordEntry(toolName: string, entry: any, canonicalizePath: (path: string | undefined) => string, turnId?: string): void {

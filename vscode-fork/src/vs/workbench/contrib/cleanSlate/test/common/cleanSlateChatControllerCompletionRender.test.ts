@@ -177,6 +177,40 @@ suite('CleanSlateChatController completion rendering', () => {
 		]);
 	});
 
+	test('retains request-scoped file changes when the finishing assistant turn differs from the mutation turn', () => {
+		const taskSessionService = new CleanSlateTaskSessionService();
+		const controller = createController(taskSessionService);
+		const timeline: InteractionBlock[] = [];
+
+		(controller as any).fileChangeLedger.recordMutationResult(
+			'apply_edit',
+			{
+				success: true,
+				appliedBlocks: 1,
+				path: '/tmp/workspace/lib/screens/request_turn_one.dart',
+				beforeContent: 'old request turn\n',
+				afterContent: 'new request turn\n'
+			},
+			(path: string | undefined) => (controller as any).completionTimelineBuilder.canonicalWorkspaceFilePath(path),
+			'execution-4a'
+		);
+
+		const didRender = (controller as any).completionTimelineBuilder.upsertFinishTaskSummaryBlock(
+			timeline,
+			'execution-4b',
+			{ success: true },
+			false,
+			true
+		);
+
+		assert.strictEqual(didRender, true);
+		const finishBlock = timeline.find(block => block.id === 'finish-task-summary-execution-4b');
+		assert.strictEqual(finishBlock?.type, 'finish');
+		assert.deepStrictEqual(finishBlock?.fileChanges?.map(change => change.path), [
+			'/tmp/workspace/lib/screens/request_turn_one.dart'
+		]);
+	});
+
 	test('reconciles the completed-files widget from host task state in normal mode', () => {
 		const taskSessionService = new CleanSlateTaskSessionService();
 		taskSessionService.recordExecutionFilesChanged([{
@@ -187,7 +221,7 @@ suite('CleanSlateChatController completion rendering', () => {
 		const controller = createController(taskSessionService);
 		const timeline: InteractionBlock[] = [];
 
-		const didRender = (controller as any).reconcileCompletedFilesWidget(timeline, 'execution-5', 'normal');
+		const didRender = (controller as any).reconcileCompletedFilesWidget(timeline, 'execution-5', 'normal', true);
 
 		assert.strictEqual(didRender, true);
 		const finishBlock = timeline.find(block => block.id === 'finish-task-summary-execution-5');
@@ -202,6 +236,77 @@ suite('CleanSlateChatController completion rendering', () => {
 		}]);
 	});
 
+	test('reconciles the completed-files widget per turn without leaking prior turn edits', () => {
+		const taskSessionService = new CleanSlateTaskSessionService();
+		taskSessionService.recordExecutionFilesChanged([{
+			path: 'lib/screens/previous_turn.dart',
+			added: 10,
+			deleted: 3
+		}]);
+		const controller = createController(taskSessionService);
+		const timeline: InteractionBlock[] = [];
+		(controller as any).fileChangeLedger.recordMutationResult(
+			'apply_edit',
+			{
+				success: true,
+				appliedBlocks: 1,
+				path: '/tmp/workspace/lib/screens/current_turn.dart',
+				beforeContent: 'old\n',
+				afterContent: 'new\n'
+			},
+			(path: string | undefined) => (controller as any).completionTimelineBuilder.canonicalWorkspaceFilePath(path),
+			'execution-7'
+		);
+
+		const didRender = (controller as any).reconcileCompletedFilesWidget(timeline, 'execution-7', 'normal', true);
+
+		assert.strictEqual(didRender, true);
+		const finishBlock = timeline.find(block => block.id === 'finish-task-summary-execution-7');
+		assert.deepStrictEqual(finishBlock?.fileChanges?.map(change => change.path), [
+			'/tmp/workspace/lib/screens/current_turn.dart'
+		]);
+	});
+
+	test('reconciles only the current turn task-state delta when prior turns already changed files', () => {
+		const taskSessionService = new CleanSlateTaskSessionService();
+		taskSessionService.recordExecutionFilesChanged([{
+			path: 'lib/screens/previous_turn.dart',
+			added: 10,
+			deleted: 3
+		}]);
+		const baselineExecutionFilesChanged = taskSessionService.getExecutionFilesChanged();
+		taskSessionService.recordExecutionFilesChanged([
+			...baselineExecutionFilesChanged,
+			{
+				path: 'lib/screens/current_turn.dart',
+				added: 2,
+				deleted: 1
+			}
+		]);
+		const controller = createController(taskSessionService);
+		const timeline: InteractionBlock[] = [];
+
+		const didRender = (controller as any).reconcileCompletedFilesWidget(
+			timeline,
+			'execution-8',
+			'normal',
+			true,
+			baselineExecutionFilesChanged
+		);
+
+		assert.strictEqual(didRender, true);
+		const finishBlock = timeline.find(block => block.id === 'finish-task-summary-execution-8');
+		assert.deepStrictEqual(finishBlock?.fileChanges?.map(change => ({
+			path: change.path,
+			added: change.added,
+			deleted: change.deleted
+		})), [{
+			path: '/tmp/workspace/lib/screens/current_turn.dart',
+			added: 2,
+			deleted: 1
+		}]);
+	});
+
 	test('reconciles the completed-files widget from host task state after approved-plan execution', () => {
 		const taskSessionService = new CleanSlateTaskSessionService();
 		taskSessionService.recordExecutionFilesChanged([{
@@ -212,7 +317,7 @@ suite('CleanSlateChatController completion rendering', () => {
 		const controller = createController(taskSessionService);
 		const timeline: InteractionBlock[] = [];
 
-		const didRender = (controller as any).reconcileCompletedFilesWidget(timeline, 'execution-6', 'planning');
+		const didRender = (controller as any).reconcileCompletedFilesWidget(timeline, 'execution-6', 'planning', true);
 
 		assert.strictEqual(didRender, true);
 		const finishBlock = timeline.find(block => block.id === 'finish-task-summary-final');
