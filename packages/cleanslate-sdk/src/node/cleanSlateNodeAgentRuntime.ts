@@ -288,6 +288,22 @@ export class CleanSlateNodeAgentRuntime {
 		yield* this.runMessages(this.agentSession.getMutableMessages(), objective, phase, signal);
 	}
 
+	async *approvePlan(signal?: AbortSignal): AsyncIterable<CleanSlateStreamPart> {
+		if (!this.taskSessionService.isAwaitingApproval()) {
+			throw new Error('There is no pending plan to approve.');
+		}
+		const snapshot = this.agentSession.getSnapshot();
+		const objective = snapshot?.objective?.trim() || 'Continue the current task.';
+		this.taskSessionService.approvePlan();
+		const approvalMessages = this.agentSession.continueWithLatestUserMessage([
+			{
+				role: 'user',
+				content: 'The implementation plan is approved. Continue with execution. Do not call submit_artifact again unless the user asks for a new or revised artifact.'
+			}
+		], { objective, mode: 'Execution', phase: AgentPhase.EXECUTION });
+		yield* this.runMessages(approvalMessages, objective, AgentPhase.EXECUTION, signal);
+	}
+
 	getPendingQuestion(): ICleanSlatePendingAgentInteraction | undefined {
 		return this.agentSession.getSnapshot()?.pendingInteraction;
 	}

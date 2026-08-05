@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToString } from 'ink';
 import { test } from 'node:test';
-import { commandPaletteSelection, estimateCliContextWindowUsage, formatActivityStatus, formatHeaderModeLabel, formatModelTerminationMessage, ModelTerminationNotice, nextInteractiveMode, runtimeModeForInteractiveMode } from '../tui.js';
+import { commandPaletteSelection, estimateCliContextWindowUsage, executionInteractiveMode, formatActivityStatus, formatHeaderModeLabel, formatModelTerminationMessage, ModelTerminationNotice, nextInteractiveMode, runtimeModeForInteractiveMode } from '../tui.js';
 
 test('TUI activity status stays concise and hides internal turn details', () => {
 	assert.equal(formatActivityStatus('thinking'), 'Thinking…');
@@ -58,6 +58,9 @@ test('Shift+Tab cycles planning, accept-edits, and manual modes', () => {
 	assert.equal(runtimeModeForInteractiveMode('planning'), 'planning');
 	assert.equal(runtimeModeForInteractiveMode('accept-edits'), 'execution');
 	assert.equal(runtimeModeForInteractiveMode('manual'), 'execution');
+	assert.equal(executionInteractiveMode('default'), 'manual');
+	assert.equal(executionInteractiveMode('read-only'), 'manual');
+	assert.equal(executionInteractiveMode('full'), 'accept-edits');
 });
 
 test('model termination is presented as a dedicated notification with a continuation action', () => {

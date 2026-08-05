@@ -73,6 +73,10 @@ interface IModelTerminationNotice {
 	mode: 'execution' | 'planning';
 }
 
+interface IPlanApprovalNotice {
+	message: string;
+}
+
 interface ICliContextMessage {
 	role?: unknown;
 	content?: unknown;
@@ -145,6 +149,18 @@ export function ModelTerminationNotice({ message }: { message: string }): React.
 				<Text color={COLORS.success} bold>Enter · Continue</Text>
 			</Box>
 			<Text color={COLORS.muted} wrap="truncate-end">{formatModelTerminationMessage(message)} · Esc dismiss</Text>
+		</Box>
+	);
+}
+
+export function PlanApprovalNotice({ message }: IPlanApprovalNotice): React.JSX.Element {
+	return (
+		<Box borderStyle="round" borderColor={COLORS.accent} paddingX={1} flexDirection="column">
+			<Box justifyContent="space-between">
+				<Text color={COLORS.accent} bold>Proceed with these steps?</Text>
+				<Text color={COLORS.success} bold>Enter · Approve</Text>
+			</Box>
+			<Text color={COLORS.muted} wrap="truncate-end">{message} · Just type what should change to revise · Esc dismiss</Text>
 		</Box>
 	);
 }
@@ -640,14 +656,17 @@ export function transcriptViewportLines(
 				selected: entry.id === selectedToolItemId
 			};
 		}
-		const result = entry.detail && typeof entry.detail === 'object' && 'result' in entry.detail
-			? (entry.detail as { result?: any }).result
-			: undefined;
-		const resultDetail = typeof result?.output === 'string' && result.output.trim()
-			? result.output
-			: entry.content && entry.content !== 'completed' ? entry.content : '';
-		if (expanded && resultDetail) {
-			pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', `    └ ${compact(resultDetail, 800)}`, 'result');
+		const detailText = toolEntryDetail(entry);
+		if (expanded && detailText) {
+			const detailLines = detailText.split(/\r?\n/);
+			for (const [detailIndex, detailLine] of detailLines.entries()) {
+				pushWrapped(
+					entry,
+					entry.status === 'failed' ? 'toolError' : 'tool',
+					`${detailIndex === 0 ? '    └ ' : '      '}${detailLine}`,
+					`result-${detailIndex}`
+				);
+			}
 		}
 	};
 	for (let entryIndex = 0; entryIndex < entries.length; entryIndex++) {
@@ -791,6 +810,10 @@ export function nextInteractiveMode(mode: CliInteractiveMode): CliInteractiveMod
 
 export function runtimeModeForInteractiveMode(mode: CliInteractiveMode): 'execution' | 'planning' {
 	return mode === 'planning' ? 'planning' : 'execution';
+}
+
+export function executionInteractiveMode(permissionMode: CliPermissionMode): Exclude<CliInteractiveMode, 'planning'> {
+	return permissionMode === 'full' ? 'accept-edits' : 'manual';
 }
 
 type DiffSyntaxKind = 'plain' | 'keyword' | 'string' | 'number' | 'comment';
@@ -1254,12 +1277,13 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const [approval, setApproval] = useState<IPendingApproval | undefined>();
 	const [editApproval, setEditApproval] = useState<IPendingEditApproval | undefined>();
 	const [modelTermination, setModelTermination] = useState<IModelTerminationNotice | undefined>();
+	const [planApproval, setPlanApproval] = useState<IPlanApprovalNotice | undefined>();
 	const [allowCommandsForSession, setAllowCommandsForSession] = useState(false);
 	const allowCommandsRef = useRef(false);
 	const [showSessions, setShowSessions] = useState(false);
 	const [models, setModels] = useState<string[] | undefined>();
 	const [reasoningOptions, setReasoningOptions] = useState<ICliReasoningOption[] | undefined>();
-	const initialInteractiveMode: CliInteractiveMode = args.permissionMode === 'full' ? 'accept-edits' : 'manual';
+	const initialInteractiveMode: CliInteractiveMode = executionInteractiveMode(args.permissionMode);
 	const [mode, setMode] = useState<CliInteractiveMode>(initialInteractiveMode);
 	const modeRef = useRef<CliInteractiveMode>(initialInteractiveMode);
 	const [permissionMode, setPermissionMode] = useState<CliPermissionMode>(args.permissionMode);
@@ -1296,7 +1320,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const toolItemIds = useMemo(() => transcriptToolItemIds(transcript, expandedToolGroups), [transcript, expandedToolGroups]);
 	const activeToolItemId = selectedToolItemId && toolItemIds.includes(selectedToolItemId)
 		? selectedToolItemId
-		: toolGroupIds.at(-1);
+		: toolItemIds.at(-1) ?? toolGroupIds.at(-1);
 	const selectInteractiveMode = (nextMode: CliInteractiveMode) => {
 		modeRef.current = nextMode;
 		setMode(nextMode);
@@ -1427,7 +1451,13 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 					return false;
 				}
 				const isEdit = request.category === 'edit' || request.category === 'creation';
-				if (!isEdit || modeRef.current === 'accept-edits') {
+				if (!isEdit) {
+					return true;
+				}
+				if (runtimeRef.current?.getSessionSnapshot().task?.awaitingApproval) {
+					return false;
+				}
+				if (modeRef.current === 'accept-edits') {
 					return true;
 				}
 				if (modeRef.current === 'planning') {
@@ -1583,9 +1613,14 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				const question = (pendingQuestion.question as any)?.planning_question?.question
 					?? (pendingQuestion.question as any)?.question
 					?? 'The agent needs your input.';
+				setPlanApproval(undefined);
 				append(transcriptEntry('system', `Question: ${String(question)}`));
 				setStatus('waiting for answer');
+			} else if (runtimeRef.current?.getSessionSnapshot().task?.awaitingApproval) {
+				setPlanApproval({ message: 'Approve to continue execution, or type what should change to revise the plan.' });
+				setStatus('awaiting approval');
 			} else {
+				setPlanApproval(undefined);
 				setStatus('ready');
 			}
 		} catch (error) {
@@ -1709,7 +1744,20 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const submit = async (raw: string) => {
 		const value = raw.trim();
 		setInput('');
-		if (!value || running || approval || editApproval) {
+		if (running || approval || editApproval) {
+			return;
+		}
+		if (planApproval || isAwaitingPlanApproval()) {
+			if (!value) {
+				syncPlanApprovalFromRuntime();
+				append(transcriptEntry('system', 'Plan ready. Press Enter to approve, or type what should change to revise it.'));
+				return;
+			}
+			setPlanApproval(undefined);
+			await executeTask(value, 'planning');
+			return;
+		}
+		if (!value) {
 			return;
 		}
 		if (value === '/exit' || value === '/quit') {
@@ -1823,7 +1871,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				return;
 			}
 			setPermissionMode(requested);
-			selectInteractiveMode(requested === 'full' ? 'accept-edits' : 'manual');
+			selectInteractiveMode(executionInteractiveMode(requested));
 			setAllowCommandsForSession(false);
 			allowCommandsRef.current = false;
 			args.permissionMode = requested;
