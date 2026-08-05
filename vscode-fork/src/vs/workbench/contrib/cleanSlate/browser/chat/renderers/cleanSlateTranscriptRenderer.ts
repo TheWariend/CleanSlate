@@ -625,16 +625,7 @@ export class CleanSlateTranscriptRenderer {
     }
 
     private fadeOutWorkingPlaceholder(placeholder: HTMLElement): void {
-        if (placeholder.classList.contains('is-exiting')) {
-            return;
-        }
-
-        placeholder.classList.add('is-exiting');
-        dom.getWindow(placeholder).setTimeout(() => {
-            if (placeholder.classList.contains('is-exiting')) {
-                placeholder.remove();
-            }
-        }, 180);
+        placeholder.remove();
     }
 
     private ensureWorkingPlaceholder(transcript: HTMLElement, label: string): HTMLElement {
