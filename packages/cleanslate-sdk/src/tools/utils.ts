@@ -274,6 +274,18 @@ type PathResolutionOutcome =
     | { kind: 'resolved'; uri: URI }
     | { kind: 'outsideWorkspaceAbsolute'; potentialUri: URI; isPosixAbsolutePath: boolean; firstFolder: { toResource(relativePath: string): URI } };
 
+function tryParseFileLikeUri(value: string): URI | undefined {
+    if (!/^file:\/\//i.test(value)) {
+        return undefined;
+    }
+    try {
+        const parsed = URI.parse(value);
+        return parsed.scheme === 'file' ? parsed : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
 function resolvePathCore(path: string, context: CleanSlateToolContext): PathResolutionOutcome {
     if (typeof path !== 'string' || !path.trim()) {
         throw new Error('Path must be a non-empty string.');
@@ -290,7 +302,7 @@ function resolvePathCore(path: string, context: CleanSlateToolContext): PathReso
     }
 
     const workspaceFolders = context.workspaceContextService.getWorkspace().folders;
-    const potentialUri = URI.file(requestedPath);
+    const potentialUri = tryParseFileLikeUri(requestedPath) ?? URI.file(requestedPath);
 
     // The workbench's own containment check is a URI-prefix match. On macOS
     // that misses paths where the workspace is reached through a symlink

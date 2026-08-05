@@ -80,10 +80,14 @@ export const applyEditTool: CleanSlateTool = {
             let editor: ReturnType<typeof context.codeEditorService.getActiveCodeEditor> = null;
             if (revealInEditor) {
                 const activeEditor = context.codeEditorService.getActiveCodeEditor();
-                if (!activeEditor || activeEditor.getModel()?.uri.toString() !== uri.toString()) {
-                    await context.codeEditorService.openCodeEditor({ resource: uri }, activeEditor);
+                try {
+                    if (!activeEditor || activeEditor.getModel()?.uri.toString() !== uri.toString()) {
+                        await context.codeEditorService.openCodeEditor({ resource: uri }, activeEditor);
+                    }
+                    editor = context.codeEditorService.getActiveCodeEditor();
+                } catch {
+                    editor = null;
                 }
-                editor = context.codeEditorService.getActiveCodeEditor();
                 // No editor means nothing to reveal into — a headless host, or a
                 // reveal the workbench declined. The edit still applies to disk;
                 // only the on-screen diff is skipped.
