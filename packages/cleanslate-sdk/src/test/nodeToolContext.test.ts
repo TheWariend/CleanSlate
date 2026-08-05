@@ -68,11 +68,12 @@ test('headless submit_artifact writes a document file and opens it in a viewer',
 			artifactType: 'implementation_plan'
 		}, context);
 
-		const artifactDir = path.join(root, '.cleanslate', 'artifacts');
+		const artifactDir = path.join(privateHome, 'artifacts');
 		const savedArtifacts = fs.readdirSync(artifactDir);
 		assert.equal(savedArtifacts.length, 1);
 		assert.match(savedArtifacts[0], /^artifact-\d+-implementation_plan\.md$/);
 		assert.equal(fs.readFileSync(path.join(artifactDir, savedArtifacts[0]), 'utf8'), '# Plan\n\nShip it.');
+		assert.equal(fs.existsSync(path.join(root, '.cleanslate', 'artifacts')), false);
 	} finally {
 		if (originalPlatformDescriptor) {
 			Object.defineProperty(process, 'platform', originalPlatformDescriptor);
