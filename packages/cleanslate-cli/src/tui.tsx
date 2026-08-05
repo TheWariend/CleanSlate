@@ -14,6 +14,7 @@ import { apiKeyFromEnvironment, ICliArguments, SUPPORTED_PROVIDERS } from './arg
 import { CleanSlateTerminalLogo } from './brand.js';
 import { LiveTurnBuffer } from './liveTurn.js';
 import { CleanSlateStreamReveal, REVEAL_TICK_MS } from '@cleanslate/sdk/agent/cleanSlateStreamReveal.js';
+import { sanitizeToolResultForRenderer } from '@cleanslate/sdk/agent/cleanSlateToolResultPromptSerializer.js';
 import { getCleanSlateContextDefaults, resolveCleanSlateReasoningLevelOptions } from '@cleanslate/sdk/protocol/cleanSlateModelCapabilities.js';
 import { CliProjectContext } from './projectContext.js';
 import {
@@ -321,6 +322,82 @@ function compact(value: unknown, limit = 180): string {
 	return clean.length <= limit ? clean : `${clean.slice(0, limit - 1)}…`;
 }
 
+function stringifyDetail(value: unknown): string {
+	if (typeof value === 'string') {
+		return value;
+	}
+	if (value === undefined) {
+		return '';
+	}
+	try {
+		return JSON.stringify(value, null, 2);
+	} catch {
+		return String(value);
+	}
+}
+
+function toolInputDetail(input: any): string {
+	if (input === undefined) {
+		return '';
+	}
+	if (typeof input?.command === 'string' && input.command.trim()) {
+		return input.command;
+	}
+	if (typeof input?.file_path === 'string' && input.file_path.trim()) {
+		return input.file_path;
+	}
+	if (typeof input?.path === 'string' && input.path.trim()) {
+		return input.path;
+	}
+	if (typeof input?.query === 'string' && input.query.trim()) {
+		return input.query;
+	}
+	if (typeof input?.pattern === 'string' && input.pattern.trim()) {
+		return input.pattern;
+	}
+	if (typeof input?.name === 'string' && input.name.trim()) {
+		return input.name;
+	}
+	return stringifyDetail(input);
+}
+
+function toolTargetDetail(entry: ICliTranscriptEntry): string {
+	const detail = entry.detail;
+	if (!detail || typeof detail !== 'object') {
+		return '';
+	}
+	const input = 'input' in detail ? (detail as { input?: any }).input : undefined;
+	const result = 'result' in detail ? (detail as { result?: any }).result : undefined;
+	if (typeof input?.command === 'string' && input.command.trim()) {
+		return input.command;
+	}
+	const discoveredPaths = [
+		result?.path,
+		...(Array.isArray(result?.results) ? result.results.map((item: any) => item?.path) : []),
+		...(Array.isArray(result?.files) ? result.files.map((item: any) => item?.path) : []),
+		...(Array.isArray(result?.affectedFiles) ? result.affectedFiles : [])
+	].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+	if (discoveredPaths.length > 0) {
+		return discoveredPaths.length === 1 ? discoveredPaths[0] : `${discoveredPaths[0]} +${discoveredPaths.length - 1}`;
+	}
+	if (typeof input?.file_path === 'string' && input.file_path.trim()) {
+		return input.file_path;
+	}
+	if (typeof input?.path === 'string' && input.path.trim()) {
+		return input.path;
+	}
+	if (typeof input?.name === 'string' && input.name.trim()) {
+		return input.name;
+	}
+	if (typeof input?.pattern === 'string' && input.pattern.trim()) {
+		return input.pattern;
+	}
+	if (typeof input?.query === 'string' && input.query.trim()) {
+		return input.query;
+	}
+	return '';
+}
+
 function toolSummary(part: any): string {
 	const result = part?.result;
 	if (result?.error) {
@@ -336,6 +413,44 @@ function toolSummary(part: any): string {
 		return compact(result.output);
 	}
 	return result?.success === false ? 'failed' : 'completed';
+}
+
+function toolResultDetail(result: any, fallback: string): string {
+	if (typeof result?.output === 'string' && result.output.trim()) {
+		return result.output;
+	}
+	if (typeof result?.error === 'string' && result.error.trim()) {
+		return result.error;
+	}
+	if (typeof result?.message === 'string' && result.message.trim()) {
+		return result.message;
+	}
+	if (result !== undefined) {
+		const serialized = stringifyDetail(result);
+		if (serialized && serialized !== '{}' && serialized !== '[]') {
+			return serialized;
+		}
+	}
+	return fallback;
+}
+
+function toolEntryDetail(entry: ICliTranscriptEntry): string {
+	const detail = entry.detail;
+	if (!detail || typeof detail !== 'object') {
+		return entry.content && entry.content !== 'completed' ? entry.content : '';
+	}
+	const input = 'input' in detail ? (detail as { input?: unknown }).input : undefined;
+	const result = 'result' in detail ? (detail as { result?: unknown }).result : undefined;
+	const sections: string[] = [];
+	const inputDetail = toolInputDetail(input);
+	if (inputDetail) {
+		sections.push(`Input: ${inputDetail}`);
+	}
+	const resultDetail = toolResultDetail(result, entry.content && entry.content !== 'completed' ? entry.content : '');
+	if (resultDetail) {
+		sections.push(`Result: ${resultDetail}`);
+	}
+	return sections.join('\n');
 }
 
 export type TranscriptViewportLineKind =
@@ -624,12 +739,7 @@ export function transcriptViewportLines(
 	};
 	const pushExpandedTool = (entry: ICliTranscriptEntry, expanded: boolean) => {
 		const marker = entry.status === 'running' ? '●' : entry.status === 'failed' ? '×' : '✓';
-		const input = entry.detail && typeof entry.detail === 'object' && 'input' in entry.detail
-			? (entry.detail as { input?: unknown }).input
-			: undefined;
-		const toolInput = input as any;
-		const target = toolInput?.file_path ?? toolInput?.path
-			?? (entry.toolName === 'execute_command' ? toolInput?.command : undefined);
+		const target = toolTargetDetail(entry);
 		const label = ({
 			execute_command: 'Bash',
 			read_file: 'Read',
@@ -1581,7 +1691,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 								durationMs: started ? Date.now() - started.timestamp : undefined,
 								detail: {
 									input: started?.detail,
-									result: part.result
+									result: sanitizeToolResultForRenderer(part.toolName, part.result)
 								}
 							});
 							return index >= 0
@@ -1673,6 +1783,33 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			paused.mode === 'planning' ? runtime.plan('continue', abort.signal) : runtime.run('continue', abort.signal),
 			paused.mode
 		);
+	};
+
+	const isAwaitingPlanApproval = () => Boolean(runtimeRef.current?.getSessionSnapshot().task?.awaitingApproval);
+	const syncPlanApprovalFromRuntime = () => {
+		if (runtimeRef.current?.getSessionSnapshot().task?.awaitingApproval) {
+			setPlanApproval({ message: 'Approve to continue execution, or type what should change to revise the plan.' });
+			setStatus('awaiting approval');
+			return true;
+		}
+		setPlanApproval(undefined);
+		return false;
+	};
+
+	const approvePlan = async () => {
+		const runtime = runtimeRef.current;
+		if (!runtime || running || !isAwaitingPlanApproval()) {
+			return;
+		}
+		selectInteractiveMode(executionInteractiveMode(permissionMode));
+		turnStartIndexRef.current = transcript.length;
+		setPlanApproval(undefined);
+		setRunning(true);
+		turnStartedAtRef.current = Date.now();
+		setStatus('thinking');
+		const abort = new AbortController();
+		abortRef.current = abort;
+		await runStream(runtime.approvePlan(abort.signal), 'execution');
 	};
 
 	const switchSession = (next: ICliSession) => {
@@ -1958,6 +2095,19 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	useInput((inputValue, key) => {
 		const mouse = terminalMouseEvent(inputValue);
 		const wheelDirection = terminalMouseWheelDirection(inputValue);
+		if (planApproval || isAwaitingPlanApproval()) {
+			syncPlanApprovalFromRuntime();
+			if (key.return) {
+				void approvePlan();
+			} else if (key.escape) {
+				setPlanApproval(undefined);
+				setStatus('ready');
+			} else if (inputValue === 'c' && key.ctrl) {
+				persist();
+				exit();
+			}
+			return;
+		}
 		if (modelTermination) {
 			if (key.return) {
 				void continueAfterModelTermination();
@@ -2061,13 +2211,15 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		? 7
 		: editApproval
 			? editPreviewRows + 8
-			: showSessions
-				? Math.min(10, store.list().length) + 3
-				: models
-					? Math.min(10, models.length) + 3
-					: !diffReviews && commandItems.length > 0
-						? Math.min(10, commandItems.length) + 3
-						: 0;
+			: planApproval
+				? 4
+				: showSessions
+					? Math.min(10, store.list().length) + 3
+					: models
+						? Math.min(10, models.length) + 3
+						: !diffReviews && commandItems.length > 0
+							? Math.min(10, commandItems.length) + 3
+							: 0;
 	const footerRows = Math.max(1, Math.ceil(FOOTER_HELP.length / viewportColumns));
 	const contentRows = Math.max(1, viewportRows - 9 - footerRows - overlayRows - (modelTermination ? 1 : 0));
 	// Settled turns: safe to flush once into the terminal's real scrollback and never repaint.
@@ -2173,19 +2325,20 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 
 			{approval && <ApprovalBox approval={approval} decide={decideApproval} topRow={TRANSCRIPT_FIRST_ROW + contentRows + 1} />}
 			{editApproval && <EditApprovalBox approval={editApproval} decide={decideEditApproval} maxDiffRows={editPreviewRows} topRow={TRANSCRIPT_FIRST_ROW + contentRows} />}
+			{planApproval && <PlanApprovalNotice message={planApproval.message} />}
 			{showSessions && <SessionPicker sessions={store.list()} onSelect={switchSession} onDelete={deleteSessionFromPicker} onCancel={() => setShowSessions(false)} />}
 			{models && <ModelPicker models={models} current={args.model} onSelect={switchModel} onCancel={() => setModels(undefined)} />}
 			{reasoningOptions && <ReasoningPicker options={reasoningOptions} current={args.reasoningLevel} onSelect={applyReasoningLevel} onCancel={() => setReasoningOptions(undefined)} />}
-			{!approval && !editApproval && !showSessions && !models && !modelTermination && !diffReviews && commandItems.length > 0 && (
+			{!approval && !editApproval && !planApproval && !showSessions && !models && !modelTermination && !diffReviews && commandItems.length > 0 && (
 				<CommandPalette items={commandItems} selected={visibleCommandSelection} />
 			)}
 
-			{!approval && !editApproval && !showSessions && !models && modelTermination && (
+			{!approval && !editApproval && !planApproval && !showSessions && !models && modelTermination && (
 				<ModelTerminationNotice message={modelTermination.message} />
 			)}
 
 			{/* Active model remains visible above the prompt; it is intentionally omitted only from the banner. */}
-			{!approval && !editApproval && !showSessions && !models && !modelTermination && !diffReviews && (
+			{!approval && !editApproval && !planApproval && !showSessions && !models && !modelTermination && !diffReviews && (
 				<Box paddingX={1} justifyContent="flex-end">
 					<Text color={COLORS.muted} wrap="truncate-middle">{args.provider}/{args.model}</Text>
 				</Box>
