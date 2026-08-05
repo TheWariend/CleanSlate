@@ -1097,6 +1097,7 @@ export class CleanSlateChatController extends Disposable {
 
         try {
             const normalizedMode = this.normalizeMode(mode);
+            const baselineExecutionFilesChanged = this.taskSessionService.getExecutionFilesChanged();
             const messageElement = existingMessageElement ?? renderer.addMessage('', 'cleanSlate');
             let currentTurnText = '';
             let currentTurnAssistantText = '';
@@ -1889,7 +1890,13 @@ export class CleanSlateChatController extends Disposable {
 
             const finalParsed = Object.keys(currentTurnParsed).length > 0 ? currentTurnParsed : lastKnownParsed;
             if (didReceiveTaskFinished || runHasConfirmedMutation) {
-                const didReconcileCompletedFiles = this.reconcileCompletedFilesWidget(timeline, currentTurnId, normalizedMode);
+                const didReconcileCompletedFiles = this.reconcileCompletedFilesWidget(
+                    timeline,
+                    currentTurnId,
+                    normalizedMode,
+                    currentTurnHasConfirmedMutation,
+                    baselineExecutionFilesChanged
+                );
                 if (this.usesPlanningFlow(normalizedMode) && didReconcileCompletedFiles) {
                     didRenderPlanningFinalResult = true;
                 }
