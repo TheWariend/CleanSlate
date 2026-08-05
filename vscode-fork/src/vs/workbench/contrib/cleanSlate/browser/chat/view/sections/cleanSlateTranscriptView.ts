@@ -726,7 +726,11 @@ export class CleanSlateTranscriptView {
 
 	private messageHasVisibleTranscript(message: HTMLElement): boolean {
 		const transcript = message.querySelector('.cleanSlate-message-transcript');
-		return !!transcript && (transcript.children.length > 0 || !!transcript.textContent?.trim());
+		if (transcript && (transcript.children.length > 0 || !!transcript.textContent?.trim())) {
+			return true;
+		}
+
+		return !!message.querySelector('.cleanSlate-working-placeholder.placeholder, .cleanSlate-working-row');
 	}
 
 	private stabilizeAfterContentRender(wasFollowing?: boolean): void {

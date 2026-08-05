@@ -3377,12 +3377,23 @@ export const CLEANSLATE_CHAT_STYLES = `
                 padding: 8px 0;
                 color: var(--vscode-descriptionForeground);
                 font-size: 12px;
+                box-sizing: border-box;
+                min-height: 34px;
             }
 
             .cleanSlate-working-row {
                 display: flex;
                 align-items: center;
                 user-select: none;
+                min-height: 18px;
+                box-sizing: border-box;
+            }
+
+            .cleanSlate-tool-call,
+            .cleanSlate-browser-action-item,
+            .cleanSlate-web-block {
+                min-height: 34px;
+                box-sizing: border-box;
             }
 
             .cleanSlate-working-label,
