@@ -4,7 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { createHash } from 'crypto';
+import * as fs from 'fs';
 import * as path from 'path';
+import { spawn } from 'child_process';
 import { URI } from '../core/uri.js';
 import { Emitter } from '../core/event.js';
 import { IWorkspaceFolder } from '../host/workspace.js';
@@ -86,6 +88,47 @@ async function fetchEmbeddingRequest(request: ICleanSlateEmbeddingRequest, fetch
 	}
 }
 
+function getArtifactWorkspacePath(rootPath: string, workspaceStorageHome: string | undefined, artifactId: string, filename: string): string {
+	const artifactRoot = workspaceStorageHome
+		? path.join(path.resolve(workspaceStorageHome), 'artifacts')
+		: path.join(rootPath, '.cleanslate', 'artifacts');
+	fs.mkdirSync(artifactRoot, { recursive: true, mode: 0o700 });
+	return path.join(artifactRoot, `${artifactId}-${filename}`);
+}
+
+function getViewerCommand(targetPath: string): { command: string; args: string[] } {
+	if (process.platform === 'darwin') {
+		return { command: '/usr/bin/open', args: [targetPath] };
+	}
+	if (process.platform === 'win32') {
+		return { command: 'cmd', args: ['/c', 'start', '', targetPath] };
+	}
+	return { command: 'xdg-open', args: [targetPath] };
+}
+
+async function openArtifactInViewer(rootPath: string, workspaceStorageHome: string | undefined, artifact: { id: string; content: string; metadata?: any }, fallbackName: string): Promise<void> {
+	const filename = typeof artifact.metadata?.filename === 'string' && artifact.metadata.filename.trim().length > 0
+		? path.basename(artifact.metadata.filename)
+		: fallbackName;
+	const artifactPath = getArtifactWorkspacePath(rootPath, workspaceStorageHome, artifact.id, filename);
+	fs.writeFileSync(artifactPath, artifact.content, 'utf8');
+
+	await new Promise<void>((resolve, reject) => {
+		const { command, args } = getViewerCommand(artifactPath);
+		const child = spawn(command, args, { stdio: 'ignore', detached: true });
+		child.once('error', reject);
+		child.once('spawn', () => {
+			child.unref();
+			resolve();
+		});
+		child.once('exit', code => {
+			if (code && code !== 0) {
+				reject(new Error(`Viewer exited with code ${code}`));
+			}
+		});
+	});
+}
+
 /**
  * Assembles the tool context for a headless run.
  *
@@ -122,6 +165,20 @@ export function createCleanSlateNodeToolContext(options: ICleanSlateNodeRuntimeO
 		getActiveCodeEditor: () => null,
 		openCodeEditor: async () => null
 	};
+	const artifactPresentationHost = {
+		openArtifact: async (_resource: URI, artifactId: string) => {
+			const artifact = artifacts.get(artifactId);
+			if (!artifact) {
+				return;
+			}
+			const fallbackName = typeof artifact.type === 'string' && artifact.type === 'analysis'
+				? 'analysis.md'
+				: typeof artifact.type === 'string' && artifact.type === 'walkthrough'
+					? 'walkthrough.md'
+					: 'implementation_plan.md';
+			await openArtifactInViewer(options.rootPath, options.workspaceStorageHome, artifact, fallbackName);
+		}
+	};
 
 	return {
 		surface: 'headless',
@@ -156,6 +213,7 @@ export function createCleanSlateNodeToolContext(options: ICleanSlateNodeRuntimeO
 		instantiationService: {
 			createInstance: (Ctor: any, ...args: any[]) => new Ctor(...args)
 		},
+		artifactPresentationHost,
 		artifactService: {
 			_serviceBrand: undefined,
 			onDidArtifactChange: artifactEmitter.event,
