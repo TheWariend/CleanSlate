@@ -4,14 +4,14 @@ CleanSlate is the terminal surface for the same native agent engine and tool
 registry used by the CleanSlate IDE. It runs directly against a repository
 without building or launching the VS Code fork.
 
-The engine is [`@cleanslate/sdk`](../cleanslate-sdk), and the CLI gets **all 59 tools** —
+The engine is [`@cleanslate/sdk`](../cleanslate-sdk), and the CLI gets **all 60 tools** —
 the same set the editor has, not a reduced subset:
 
 | Group | Count | Examples |
 | --- | --- | --- |
 | Discovery | 12 | read, grep, semantic and codebase search, lints, references |
 | Browser | 26 | open, click, fill, screenshot, diagnostics, tabs, annotations |
-| System | 8 | skills, MCP, sub-agents, todos, questions, artifacts |
+| System | 9 | skills, MCP, sub-agents, todos, questions, artifacts, PR metadata |
 | Edit | 4 | `apply_edit`, `multi_file_replace`, `write_file`, history rewind |
 | Execution | 4 | foreground and background commands |
 | Symbols, context, creation | 5 | definitions, symbols, undo, open files, bulk create |
@@ -19,7 +19,7 @@ the same set the editor has, not a reduced subset:
 Editing and command execution pass through an approval gate that **refuses by
 default** — see [Permissions](#interactive-use).
 
-> **Current release: 1.0.4.** The CLI follows semantic versioning.
+> **Current release: 1.0.5.** The CLI follows semantic versioning.
 
 ## Install
 
