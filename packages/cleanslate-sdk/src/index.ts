@@ -94,6 +94,7 @@ export type {
 
 export { ALL_TOOLS, getToolByName } from './tools/registry.js';
 export type { CleanSlateTool, CleanSlateToolContext } from './tools/types.js';
+export type { ICleanSlatePullRequestMetadata } from './tools/PreparePullRequestTool.js';
 
 export { CleanSlateExecutionQueryEngine } from './agent/cleanSlateExecutionQuery.js';
 export { CleanSlateEditService } from './services/cleanSlateEditService.js';

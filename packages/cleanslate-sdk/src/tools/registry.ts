@@ -20,6 +20,7 @@ import { createMultipleFilesTool } from './CreateMultipleFilesTool.js';
 import { multiFileReplaceTool } from './MultiFileReplaceTool.js';
 import { updateTodoTool } from './UpdateTodoTool.js';
 import { submitArtifactTool } from './SubmitArtifactTool.js';
+import { preparePullRequestTool } from './PreparePullRequestTool.js';
 import { askQuestionTool } from './AskQuestionTool.js';
 import { spawnWorkerTool } from './SpawnWorkerTool.js';
 import { readReferenceTool } from './ReadReferenceTool.js';
@@ -114,6 +115,7 @@ export const ALL_TOOLS: CleanSlateTool[] = [
     readReferenceTool,
     updateTodoTool,
     askQuestionTool,
+    preparePullRequestTool,
     submitArtifactTool,
     readLintsTool,
     readSymbolsTool,
