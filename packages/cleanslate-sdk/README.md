@@ -7,7 +7,7 @@ host. It is the engine behind [CleanSlate](https://github.com/TheWariend/CleanSl
 It has no editor dependency. A surface supplies host capabilities; the runtime
 drives the loop.
 
-> **Current release: 1.0.4.** The SDK follows semantic versioning.
+> **Current release: 1.0.5.** The SDK follows semantic versioning.
 
 ## Install
 
@@ -21,7 +21,7 @@ Node 20 or later.
 
 - **The execution loop** — turn management, budgets, an evidence ledger, and the
   completion boundary that decides when a task is actually finished.
-- **59 tools**, listed below.
+- **60 tools**, listed below.
 - **The edit engine** — exact-string matching with anchors, version guards and
   atomic multi-file application.
 - **A Node host** — filesystem-backed text models and child-process commands, so
@@ -29,14 +29,14 @@ Node 20 or later.
 
 ## The tools
 
-`ALL_TOOLS` exports 59 tools. Availability depends on what the host provides —
+`ALL_TOOLS` exports 60 tools. Availability depends on what the host provides —
 a surface with no browser has no browser tools.
 
 | Group | Count | Tools |
 | --- | --- | --- |
 | Discovery | 12 | `read_file`, `read_file_range`, `semantic_search`, `search_workspace`, `search_codebase`, `find_by_name`, `grep_search`, `web_search`, `web_fetch`, `list_dir`, `read_lints`, `find_references` |
 | Browser | 26 | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_type`, `browser_key`, `browser_scroll`, `browser_screenshot`, `browser_diagnostics`, tab and annotation control, … |
-| System | 8 | `spawn_worker`, `list_skills`, `mcp_list_tools`, `mcp_call_tool`, `read_reference`, `update_todo`, `ask_question`, `submit_artifact` |
+| System | 9 | `spawn_worker`, `list_skills`, `mcp_list_tools`, `mcp_call_tool`, `read_reference`, `update_todo`, `ask_question`, `submit_artifact`, `prepare_pull_request` |
 | Edit | 4 | `apply_edit`, `multi_file_replace`, `write_file`, `file_history_rewind` |
 | Execution | 4 | `execute_command`, `start_background_command`, `read_background_command`, `stop_background_command` |
 | Symbols | 3 | `read_symbols`, `get_definitions`, `undo_edit` |
@@ -46,7 +46,7 @@ a surface with no browser has no browser tools.
 ```js
 import { ALL_TOOLS, getToolByName } from '@cleanslate/sdk';
 
-ALL_TOOLS.length;                  // 59
+ALL_TOOLS.length;                  // 60
 getToolByName('multi_file_replace');
 ```
 

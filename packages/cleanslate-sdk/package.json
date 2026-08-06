@@ -1,6 +1,6 @@
 {
   "name": "@cleanslate/sdk",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Slate agent runtime: execution loop, tool protocol, edit engine and Node host.",
   "license": "MIT",
   "type": "module",
