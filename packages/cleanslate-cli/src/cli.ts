@@ -25,8 +25,15 @@ import { CleanSlateTui } from './tui.js';
 import { CliProjectContext } from './projectContext.js';
 import { cliDoctorReport } from './doctor.js';
 import { CliPermissionPolicy } from './permissions.js';
+import {
+	CleanSlateUpdatePrompt,
+	installLatestCli,
+	isNewerVersion,
+	latestCliVersion,
+	UpdatePromptChoice
+} from './updatePrompt.js';
 
-const VERSION = '1.0.5';
+export const VERSION = '1.0.5';
 let activeApprovalPrompt: readline.Interface | undefined;
 
 export async function requestCommandApproval(
@@ -125,6 +132,20 @@ async function runModelSetup(provider: ICliArguments['provider'], models: string
 	app.clear();
 	clearInteractiveScreen();
 	return result;
+}
+
+async function runUpdatePrompt(currentVersion: string, latestVersion: string): Promise<UpdatePromptChoice> {
+	let choice: UpdatePromptChoice = 'skip';
+	clearInteractiveScreen();
+	const app = render(createElement(CleanSlateUpdatePrompt, {
+		currentVersion,
+		latestVersion,
+		onSelect: value => { choice = value; }
+	}), { exitOnCtrlC: false });
+	await app.waitUntilExit();
+	app.clear();
+	clearInteractiveScreen();
+	return choice;
 }
 
 function applySetupResult(args: ICliArguments, setup: ICliSetupResult): void {
@@ -303,6 +324,20 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 		}
 		process.stdout.write(`Deleted session ${args.deleteSessionId}.\n`);
 		return 0;
+	}
+	if (useTui && !args.setup) {
+		const latestVersion = await latestCliVersion();
+		if (latestVersion && isNewerVersion(latestVersion, VERSION)) {
+			const choice = await runUpdatePrompt(VERSION, latestVersion);
+			if (choice === 'update') {
+				const result = installLatestCli();
+				if (!result.ok) {
+					throw new Error(`Update failed: ${result.error}`);
+				}
+				process.stdout.write('CleanSlate updated successfully. Run cleanslate again to use the new version.\n');
+				return 0;
+			}
+		}
 	}
 
 	let initialSession = args.sessionId
