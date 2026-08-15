@@ -467,7 +467,7 @@ suite('CleanSlate model capabilities', () => {
 		assert.strictEqual(custom.openAICompatibleThirdParty, true);
 	});
 
-	test('caps Sarvam custom API output for starter subscriptions', () => {
+	test('sets Sarvam custom API output limit to 16K', () => {
 		const capabilities = resolveCleanSlateModelCapabilities({
 			provider: 'custom',
 			flavor: 'custom',
@@ -476,8 +476,8 @@ suite('CleanSlate model capabilities', () => {
 
 		assert.strictEqual(capabilities.family, 'openai-compatible-chat');
 		assert.strictEqual(capabilities.nativeToolCalls, true);
-		assert.strictEqual(capabilities.maxOutputTokens, 4096);
-		assert.strictEqual(capabilities.modelMaxOutputTokens, 4096);
+		assert.strictEqual(capabilities.maxOutputTokens, 16_384);
+		assert.strictEqual(capabilities.modelMaxOutputTokens, 16_384);
 	});
 
 	test('uses managed model metadata and operational output caps', () => {

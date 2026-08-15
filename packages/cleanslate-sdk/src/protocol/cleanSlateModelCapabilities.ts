@@ -1277,10 +1277,8 @@ function inferModelLimitProfile(family: CleanSlateModelFamily, model: string | u
 		case 'openai-reasoning':
 			return inferOpenAIContextLimits(normalizedModel);
 		case 'openai-compatible-chat':
-			// Sarvam's OpenAI-compatible API rejects the generic 16K default on
-			// starter subscriptions, whose per-request output ceiling is 4K.
 			if (normalizedModel.includes('sarvam')) {
-				return { modelContextWindowTokens: 128_000, modelMaxOutputTokens: 4_096 };
+				return { modelContextWindowTokens: 128_000, modelMaxOutputTokens: 16_384 };
 			}
 			return { modelContextWindowTokens: 128_000, modelMaxOutputTokens: DEFAULT_MODEL_OUTPUT_TOKENS };
 		case 'openai-chat':
