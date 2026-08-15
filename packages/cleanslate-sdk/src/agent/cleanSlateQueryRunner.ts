@@ -14,8 +14,10 @@ import { CleanSlateStreamPart, ParsedToolCall } from './cleanSlateAgentTypes.js'
 import { CleanSlateExecutionQueryEngine, ICleanSlateExecutionQueryCompletionState } from './cleanSlateExecutionQuery.js';
 import { CleanSlateFilesModifiedService, ICleanSlateFileChange } from './cleanSlateFilesModifiedService.js';
 import { CleanSlateExecutionBudget, ICleanSlateExecutionBudget } from './cleanSlateExecutionBudget.js';
+import { ICleanSlateDomainProfile } from './cleanSlateDomainProfile.js';
 
 export interface IExecutionRunnerOptions {
+	domainProfile?: ICleanSlateDomainProfile;
 	cleanSlateService: ICleanSlateService;
 	cleanSlateContextService: ICleanSlateContextService;
 	parsingSupport: CleanSlateAgentParsingSupport;

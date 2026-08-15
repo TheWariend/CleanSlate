@@ -26,7 +26,7 @@ export const SLASH_COMMANDS = COMMAND_REGISTRY;
 /**
  * Build system prompt with optional command-specific instruction and mode
  */
-export function buildSystemPrompt(userMessage?: string, mode: string = 'Plan', agentDef?: AgentDefinition, languageId?: string, command?: string, discoveredContext?: any): IChatMessagePart[] {
+export function buildSystemPrompt(userMessage?: string, mode: string = 'Plan', agentDef?: AgentDefinition, languageId?: string, command?: string, discoveredContext?: any, domainProfileId?: string): IChatMessagePart[] {
   // Map old mode strings to composer valid modes if necessary
   const composerMode = (mode === 'Plan' || mode === 'Planning' || mode === 'Execution' || mode === 'Verification')
     ? mode as any
@@ -38,18 +38,19 @@ export function buildSystemPrompt(userMessage?: string, mode: string = 'Plan', a
     agentDefinition: agentDef, // Pass persona to composer
     languageId,
     userMessage,
-    discoveredContext
+    discoveredContext,
+	domainProfileId
   });
 }
 
 /**
  * Parse user message for slash commands
  */
-export function parseSlashCommand(text: string, mode: string = 'Plan', agentDef?: AgentDefinition, languageId?: string, discoveredContext?: any): { command: string | null; systemInstruction: IChatMessagePart[]; userMessage: string } {
+export function parseSlashCommand(text: string, mode: string = 'Plan', agentDef?: AgentDefinition, languageId?: string, discoveredContext?: any, domainProfileId?: string): { command: string | null; systemInstruction: IChatMessagePart[]; userMessage: string } {
   if (!text.startsWith('/')) {
     return {
       command: null,
-      systemInstruction: buildSystemPrompt(text, mode, agentDef, languageId, undefined, discoveredContext),
+      systemInstruction: buildSystemPrompt(text, mode, agentDef, languageId, undefined, discoveredContext, domainProfileId),
       userMessage: text
     };
   }
@@ -62,14 +63,14 @@ export function parseSlashCommand(text: string, mode: string = 'Plan', agentDef?
     const finalUserMessage = rest || defaultUserMessage;
     return {
       command: commandText,
-      systemInstruction: buildSystemPrompt(finalUserMessage, mode, agentDef, languageId, commandText, discoveredContext),
+      systemInstruction: buildSystemPrompt(finalUserMessage, mode, agentDef, languageId, commandText, discoveredContext, domainProfileId),
       userMessage: finalUserMessage
     };
   }
 
   return {
     command: null,
-    systemInstruction: buildSystemPrompt(text, mode, agentDef, languageId, undefined, discoveredContext),
+    systemInstruction: buildSystemPrompt(text, mode, agentDef, languageId, undefined, discoveredContext, domainProfileId),
     userMessage: text
   };
 }

@@ -135,7 +135,7 @@ export class CleanSlateExecutionQueryEngine {
      * reason about mutation, verification and concurrency without knowing any
      * individual tool by name.
      */
-    private readonly profile: ICleanSlateDomainProfile = CLEANSLATE_CODING_PROFILE;
+    private readonly profile: ICleanSlateDomainProfile;
 
     /** The check the loop runs itself after mutations. */
     private get verificationToolName(): string {
@@ -160,6 +160,7 @@ export class CleanSlateExecutionQueryEngine {
 	private lastSuccessfulCompactionChars: number | undefined;
 
     constructor(private readonly options: IExecutionRunnerOptions) {
+        this.profile = options.domainProfile ?? CLEANSLATE_CODING_PROFILE;
         this.executionPhase = new CleanSlateAgentExecutionPhase(options);
     }
 

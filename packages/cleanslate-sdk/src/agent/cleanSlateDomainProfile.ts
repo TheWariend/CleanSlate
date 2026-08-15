@@ -195,6 +195,25 @@ export const CLEANSLATE_CODING_PROFILE: ICleanSlateDomainProfile = {
 	questionTool: 'ask_question'
 };
 
+/**
+ * General workspace profile. File creation remains observable as a mutation,
+ * but general agents are not forced through source-code diagnostics.
+ */
+export const CLEANSLATE_GENERAL_PROFILE: ICleanSlateDomainProfile = {
+	id: 'general',
+	mutationTools: codingMutationTools,
+	commandTools: codingCommandTools,
+	primaryCommandTool: 'execute_command',
+	structuredEditTools: new Set(['apply_edit', 'multi_file_replace']),
+	recoveryMutationTool: 'apply_edit',
+	verificationTools: new Set(),
+	discoveryTools: codingDiscoveryTools,
+	parallelSafeTools: codingParallelSafeTools,
+	planModeTools: codingPlanModeTools,
+	completionTool: 'submit_artifact',
+	questionTool: 'ask_question'
+};
+
 export function isMutationTool(profile: ICleanSlateDomainProfile, toolName: string): boolean {
 	return profile.mutationTools.has(toolName);
 }

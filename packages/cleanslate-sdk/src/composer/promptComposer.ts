@@ -12,8 +12,15 @@ import { PLANNING_MODE_INSTRUCTION } from './modes/planning.mode.js';
 import { EXECUTION_MODE_INSTRUCTION } from './modes/execution.mode.js';
 import { AgentDefinition } from './registry/agentSchema.js';
 import { SLASH_COMMANDS } from './commands/slashCommands.js';
+import {
+	GENERAL_BASE_INSTRUCTIONS,
+	GENERAL_CORE_IDENTITY,
+	GENERAL_EXECUTION_MODE_INSTRUCTION,
+	GENERAL_PLANNING_MODE_INSTRUCTION
+} from './instructions/generalInstructions.js';
 
 export interface ComposePromptOptions {
+	domainProfileId?: string;
 	agentDefinition?: AgentDefinition;
 	mode?: 'Planning' | 'Execution' | 'Verification' | 'Plan';
 	command?: string;
@@ -27,10 +34,11 @@ export interface ComposePromptOptions {
 }
 
 /** Dynamic mode/command context appended after the stable cached prefix. */
-export function composeTurnReminder(options: Pick<ComposePromptOptions, 'mode' | 'command'>): string {
+export function composeTurnReminder(options: Pick<ComposePromptOptions, 'mode' | 'command' | 'domainProfileId'>): string {
+	const generalPurpose = options.domainProfileId !== undefined && options.domainProfileId !== 'coding';
 	const modeInstruction = options.mode === 'Execution' || options.mode === 'Verification'
-		? EXECUTION_MODE_INSTRUCTION
-		: PLANNING_MODE_INSTRUCTION;
+		? (generalPurpose ? GENERAL_EXECUTION_MODE_INSTRUCTION : EXECUTION_MODE_INSTRUCTION)
+		: (generalPurpose ? GENERAL_PLANNING_MODE_INSTRUCTION : PLANNING_MODE_INSTRUCTION);
 	const commandInstruction = options.command
 		? SLASH_COMMANDS[options.command]?.instruction?.trim() ?? ''
 		: '';
@@ -48,13 +56,10 @@ export function composeTurnReminder(options: Pick<ComposePromptOptions, 'mode' |
  * User/task context belongs in conversation messages, never in the prefix.
  */
 export function composePrompt(options: ComposePromptOptions): IChatMessagePart[] {
-	const staticParts = [
-		CORE_IDENTITY,
-		baseInstructions,
-		TOOL_PROTOCOLS,
-		CODING_STANDARDS,
-		EXACT_EDIT_PRECISION_GUIDELINES
-	];
+	const generalPurpose = options.domainProfileId !== undefined && options.domainProfileId !== 'coding';
+	const staticParts = generalPurpose
+		? [GENERAL_CORE_IDENTITY, GENERAL_BASE_INSTRUCTIONS, TOOL_PROTOCOLS]
+		: [CORE_IDENTITY, baseInstructions, TOOL_PROTOCOLS, CODING_STANDARDS, EXACT_EDIT_PRECISION_GUIDELINES];
 	const agentDefinition = options.agentDefinition;
 	if (agentDefinition?.identity) {
 		staticParts.push(`Agent identity (${agentDefinition.name}):\n${agentDefinition.identity}`);

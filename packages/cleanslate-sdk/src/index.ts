@@ -97,6 +97,11 @@ export type { CleanSlateTool, CleanSlateToolContext } from './tools/types.js';
 export type { ICleanSlatePullRequestMetadata } from './tools/PreparePullRequestTool.js';
 
 export { CleanSlateExecutionQueryEngine } from './agent/cleanSlateExecutionQuery.js';
+export {
+	CLEANSLATE_CODING_PROFILE,
+	CLEANSLATE_GENERAL_PROFILE
+} from './agent/cleanSlateDomainProfile.js';
+export type { ICleanSlateDomainProfile } from './agent/cleanSlateDomainProfile.js';
 export { CleanSlateEditService } from './services/cleanSlateEditService.js';
 export { CleanSlateDiffService } from './services/cleanSlateDiffService.js';
 

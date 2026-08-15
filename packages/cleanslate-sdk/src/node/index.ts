@@ -35,6 +35,11 @@ export { NodeCleanSlateMainService } from './cleanSlateNodeMainService.js';
 export { CleanSlateNodeAgentRuntime, createNodeProviderConfiguration } from './cleanSlateNodeAgentRuntime.js';
 export type { ICleanSlateNodeAgentRuntimeOptions } from './cleanSlateNodeAgentRuntime.js';
 export type { ICleanSlateNodeAgentSessionSnapshot } from './cleanSlateNodeAgentRuntime.js';
+export {
+	CLEANSLATE_CODING_PROFILE,
+	CLEANSLATE_GENERAL_PROFILE
+} from '../agent/cleanSlateDomainProfile.js';
+export type { ICleanSlateDomainProfile } from '../agent/cleanSlateDomainProfile.js';
 export type { ICleanSlatePullRequestMetadata } from '../tools/PreparePullRequestTool.js';
 
 /**

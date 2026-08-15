@@ -32,6 +32,8 @@ import { ICleanSlateThreadMessage } from '../services/cleanSlateThreadService.js
 import { CleanSlateTaskKind, CleanSlateWorkspaceShape } from '../services/cleanSlateTaskState.js';
 import { CleanSlateThreadService } from '../services/cleanSlateThreadService.js';
 import { ALL_TOOLS } from '../tools/registry.js';
+import type { CleanSlateTool } from '../tools/types.js';
+import type { ICleanSlateDomainProfile } from '../agent/cleanSlateDomainProfile.js';
 import { CleanSlateHeadlessRuntime } from './cleanSlateHeadlessRunner.js';
 import { NodeCleanSlateMainService } from './cleanSlateNodeMainService.js';
 
@@ -40,6 +42,12 @@ export interface ICleanSlateNodeAgentRuntimeOptions {
 	/** Private host directory for per-workspace state such as edit recovery history. */
 	workspaceStorageHome?: string;
 	configuration: ICleanSlateConfiguration;
+	/** Domain semantics used by the shared execution loop. Defaults to coding. */
+	domainProfile?: ICleanSlateDomainProfile;
+	/** Native tools exposed to this agent. Defaults to the complete SDK registry. */
+	tools?: readonly CleanSlateTool[];
+	/** Agent-specific operating instructions supplied by the host. */
+	instructions?: string | ((task: string) => string | Promise<string>);
 	/** Whether browser automation should run without a visible browser window. */
 	browserHeadless?: boolean;
 	approveCommand?: (request: { command: string; cwd?: string; reason?: string }) => Promise<boolean>;
@@ -202,7 +210,7 @@ export class CleanSlateNodeAgentRuntime {
 			configuration: options.configuration,
 			browserHeadless: options.browserHeadless,
 			fetcher: options.fetcher,
-			tools: ALL_TOOLS,
+			tools: options.tools ?? ALL_TOOLS,
 			cleanSlateService,
 			contextService: this.contextService,
 			approveCommand: options.approveCommand,
@@ -219,6 +227,7 @@ export class CleanSlateNodeAgentRuntime {
 			this.contextService
 		);
 		this.queryRunner = new CleanSlateQueryRunner({
+			domainProfile: options.domainProfile,
 			cleanSlateService,
 			cleanSlateContextService: this.contextService,
 			parsingSupport,
@@ -252,7 +261,7 @@ export class CleanSlateNodeAgentRuntime {
 			throw new Error('Task must not be empty.');
 		}
 		const mode = phase === AgentPhase.PLANNING ? 'Planning' : 'Execution';
-		const parsed = parseSlashCommand(objective, mode);
+		const parsed = parseSlashCommand(objective, mode, undefined, undefined, undefined, this.options.domainProfile?.id);
 		const promptText = `[CONTEXT]\n${await this.buildPromptContext(objective)}\n\nUser Request: ${parsed.userMessage}`;
 		const attachments = await this.options.resolveAttachments?.(objective) ?? [];
 		const userContent = attachments.length > 0
@@ -386,11 +395,15 @@ export class CleanSlateNodeAgentRuntime {
 	}
 
 	private async buildPromptContext(task = ''): Promise<string> {
+		const instructions = typeof this.options.instructions === 'function'
+			? await this.options.instructions(task)
+			: this.options.instructions;
 		const additional = typeof this.options.additionalContext === 'function'
 			? await this.options.additionalContext(task)
 			: this.options.additionalContext;
 		return [
 			`Workspace root: ${this.rootPath}`,
+			instructions?.trim() ? `Agent instructions:\n${instructions.trim()}` : '',
 			additional?.trim()
 		].filter(Boolean).join('\n\n');
 	}
@@ -404,7 +417,7 @@ export class CleanSlateNodeAgentRuntime {
 	}
 
 	private getToolDescriptions(): string {
-		return `\n\nAvailable native tools:\n${ALL_TOOLS.map(tool => {
+		return `\n\nAvailable native tools:\n${this.headlessRuntime.getTools().map(tool => {
 			const schema = tool.parametersSchema ? `\n  Parameters: ${JSON.stringify(tool.parametersSchema)}` : '';
 			return `- ${tool.name}: ${tool.description}${schema}`;
 		}).join('\n')}\n`;
