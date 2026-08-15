@@ -29,6 +29,14 @@ const providerLogos = {
     xai: {
         label: 'xAI',
         cssUrl: asCSSUrl(FileAccess.asBrowserUri('vs/workbench/contrib/cleanSlate/browser/media/provider-xai.svg'))
+    },
+    glm: {
+        label: 'GLM',
+        cssUrl: asCSSUrl(FileAccess.asBrowserUri('vs/workbench/contrib/cleanSlate/browser/media/provider-glm.svg'))
+    },
+    sarvam: {
+        label: 'Sarvam',
+        cssUrl: asCSSUrl(FileAccess.asBrowserUri('vs/workbench/contrib/cleanSlate/browser/media/provider-sarvam.svg'))
     }
 } satisfies Record<string, ICleanSlateProviderLogo>;
 
@@ -38,6 +46,10 @@ export function getCleanSlateProviderLogo(provider: AIProvider, model: string | 
     // unbranded selector and composer UI.
     if ((provider as string) !== 'cleanslate') {
         return undefined;
+    }
+
+    if (model?.toLowerCase().includes('sarvam')) {
+        return providerLogos.sarvam;
     }
 
     switch (resolveCleanSlateModelFamily(provider, model)) {
@@ -50,6 +62,8 @@ export function getCleanSlateProviderLogo(provider: AIProvider, model: string | 
             return providerLogos.kimi;
         case 'grok':
             return providerLogos.xai;
+        case 'glm':
+            return providerLogos.glm;
     }
 
     return undefined;

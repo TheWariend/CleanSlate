@@ -40,6 +40,7 @@ export class CleanSlateChatModelProvider extends Disposable {
     private readonly _onDidChangeState = new Emitter<ICleanSlateModelDropdownState>();
     readonly onDidChangeState: Event<ICleanSlateModelDropdownState> = this._onDidChangeState.event;
     private readonly modelListCache = new Map<AIProvider, string[]>();
+    private readonly selectorStateCache = new Map<AIProvider, ICleanSlateModelSelectorState>();
     private refreshTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
 
     constructor(
@@ -62,13 +63,18 @@ export class CleanSlateChatModelProvider extends Disposable {
             warning: false
         };
         this._register(this.configService.onDidChangeConfiguration(() => {
-            this.modelListCache.delete(this.configService.getConfiguration().provider);
+            this.clearModelCache(this.configService.getConfiguration().provider);
             this.scheduleRefresh();
         }));
     }
 
     getState(): ICleanSlateModelDropdownState {
         return this.state;
+    }
+
+    getCachedSelectorState(provider: AIProvider): ICleanSlateModelSelectorState | undefined {
+        const cached = this.selectorStateCache.get(provider);
+        return cached ? this.cloneSelectorState(cached) : undefined;
     }
 
     getProviderOptions(): readonly AIProvider[] {
@@ -95,8 +101,20 @@ export class CleanSlateChatModelProvider extends Disposable {
             return name;
         }
 
+        const glmVersion = /^glm[- ]?(\d+(?:\.\d+)*)$/i.exec(name);
+        if (glmVersion) {
+            return `GLM ${glmVersion[1]}`;
+        }
+
+        const sarvamSize = /^sarvam[- ]?(\d+)b$/i.exec(name);
+        if (sarvamSize) {
+            return `Sarvam ${sarvamSize[1]}B`;
+        }
+
         let trimmed = name.replace(/-(latest|preview|exp|02-05|2024\d+|2025\d+)$/i, '')
             .replace(/-/g, ' ');
+
+        trimmed = trimmed.replace(/^deepseek\b/i, 'DeepSeek');
 
         if (/^(gpt|claude|llama|o1|o3)\s?/i.test(trimmed)) {
             const parts = trimmed.split(' ');
@@ -161,13 +179,13 @@ export class CleanSlateChatModelProvider extends Disposable {
         const config = await this.configService.getResolvedConfiguration();
 
         if (!this.isConfigured(provider, config)) {
-            return {
+            return this.cacheSelectorState({
                 provider,
                 currentModel: this.getConfiguredModel(provider, config) ?? config.model,
                 models: [],
                 configured: false,
                 configMessage: this.getConfigMessage(provider, config)
-            };
+            });
         }
 
         try {
@@ -177,14 +195,14 @@ export class CleanSlateChatModelProvider extends Disposable {
                 const configMessage = !entitlements.managed_ai && !entitlements.plan
                     ? 'Upgrade to CleanSlate Pro to start chatting.'
                     : 'CleanSlate access is unavailable right now.';
-                return {
+                return this.cacheSelectorState({
                     provider,
                     currentModel: undefined,
                     models: [],
                     configured: false,
                     configMessage,
                     configAction: !entitlements.managed_ai && !entitlements.plan ? 'upgrade' : 'settings'
-                };
+                });
             }
             const displayModels = this.getDisplayModels(provider, models);
             const configuredModel = this.getConfiguredModel(provider, config);
@@ -200,14 +218,14 @@ export class CleanSlateChatModelProvider extends Disposable {
                     hasCredits = Number(entitlements.credits?.balance_cents || 0) > 0;
                 }
             }
-            return {
+            return this.cacheSelectorState({
                 provider,
                 currentModel,
                 models: displayModels,
                 configured: true,
                 creditsOnlyModels,
                 hasCredits
-            };
+            });
         } catch (error: any) {
             const configuredModel = this.getConfiguredModel(provider, config);
             return {
@@ -322,9 +340,25 @@ export class CleanSlateChatModelProvider extends Disposable {
     private clearModelCache(provider?: AIProvider): void {
         if (provider) {
             this.modelListCache.delete(provider);
+            this.selectorStateCache.delete(provider);
             return;
         }
         this.modelListCache.clear();
+        this.selectorStateCache.clear();
+    }
+
+    private cacheSelectorState(state: ICleanSlateModelSelectorState): ICleanSlateModelSelectorState {
+        const cached = this.cloneSelectorState(state);
+        this.selectorStateCache.set(state.provider, cached);
+        return this.cloneSelectorState(cached);
+    }
+
+    private cloneSelectorState(state: ICleanSlateModelSelectorState): ICleanSlateModelSelectorState {
+        return {
+            ...state,
+            models: [...state.models],
+            creditsOnlyModels: state.creditsOnlyModels ? [...state.creditsOnlyModels] : undefined
+        };
     }
 
     private isConfigured(provider: AIProvider, config: ICleanSlateConfiguration): boolean {

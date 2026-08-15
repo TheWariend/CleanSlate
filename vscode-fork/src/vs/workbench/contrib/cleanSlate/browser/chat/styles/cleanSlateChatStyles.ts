@@ -3156,7 +3156,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 			.cleanSlate-model-selector-overlay .model-list-container.status {
 				overflow: hidden;
 				scrollbar-gutter: auto;
-				margin: 0 -6px -6px;
+				margin: 0;
 			}
 
             .cleanSlate-model-selector-overlay .model-item {
@@ -3284,6 +3284,11 @@ export const CLEANSLATE_CHAT_STYLES = `
                 text-align: center;
                 gap: 12px;
                 margin-top: 8px;
+            }
+
+            .cleanSlate-model-selector-overlay .model-status-item.is-loading {
+                min-height: 76px;
+                margin-top: 0;
             }
 
             .cleanSlate-model-selector-overlay .model-status-icon {

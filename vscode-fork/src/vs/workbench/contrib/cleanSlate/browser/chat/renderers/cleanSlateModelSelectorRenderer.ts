@@ -39,9 +39,6 @@ export class CleanSlateModelSelectorRenderer {
     private async show(container: HTMLElement, anchor: HTMLElement): Promise<void> {
         const state = this.modelProvider.getState();
         const overlay = dom.append(container, dom.$('.cleanSlate-model-selector-overlay'));
-        // Keep the overlay invisible until the async model fetch completes and it
-        // has been positioned, otherwise it flashes unpositioned at the top-left.
-        overlay.style.visibility = 'hidden';
         this.overlay = overlay;
 
         const providerRow = dom.append(overlay, dom.$('.selector-row'));
@@ -55,16 +52,42 @@ export class CleanSlateModelSelectorRenderer {
 
         let currentProvider = state.provider as AIProvider;
         let showingProviders = false;
+        let renderRequest = 0;
 
         const modelListContainer = dom.append(overlay, dom.$('.model-list-container'));
 
         const renderList = async (provider: AIProvider) => {
+            const request = ++renderRequest;
             dom.clearNode(modelListContainer);
-            modelListContainer.classList.remove('status');
-            const selectorState = await this.modelProvider.getSelectorState(provider);
-            if (this.overlay !== overlay) {
+            const cachedSelectorState = this.modelProvider.getCachedSelectorState(provider);
+            if (!cachedSelectorState) {
+                modelListContainer.classList.add('status');
+                const loadingItem = dom.append(modelListContainer, dom.$('.model-status-item.is-loading'));
+                dom.append(loadingItem, dom.$('.model-status-icon.codicon.codicon-loading.codicon-modifier-spin'));
+                dom.append(loadingItem, dom.$('.model-status-title')).textContent = 'Loading Models';
+                this.positionOverlay(overlay, anchor, container);
+            }
+
+            let selectorState;
+            try {
+                selectorState = cachedSelectorState ?? await this.modelProvider.getSelectorState(provider);
+            } catch (error) {
+                if (this.overlay !== overlay || request !== renderRequest) {
+                    return;
+                }
+                dom.clearNode(modelListContainer);
+                const statusItem = dom.append(modelListContainer, dom.$('.model-status-item'));
+                dom.append(statusItem, dom.$('.model-status-icon.codicon.codicon-warning'));
+                dom.append(statusItem, dom.$('.model-status-title')).textContent = 'Model List Unavailable';
+                dom.append(statusItem, dom.$('.model-status-description')).textContent = error instanceof Error ? error.message : 'Unable to load models. Try again.';
+                this.positionOverlay(overlay, anchor, container);
                 return;
             }
+            if (this.overlay !== overlay || request !== renderRequest) {
+                return;
+            }
+            dom.clearNode(modelListContainer);
+            modelListContainer.classList.remove('status');
 
             if (!selectorState.configured) {
                 const requiresUpgrade = selectorState.configAction === 'upgrade';
@@ -95,14 +118,12 @@ export class CleanSlateModelSelectorRenderer {
             }
 
             if (selectorState.errorMessage) {
+                modelListContainer.classList.add('status');
                 const statusItem = dom.append(modelListContainer, dom.$('.model-status-item'));
                 dom.append(statusItem, dom.$('.model-status-icon.codicon.codicon-warning'));
                 dom.append(statusItem, dom.$('.model-status-title')).textContent = 'Model List Unavailable';
                 dom.append(statusItem, dom.$('.model-status-description')).textContent = selectorState.errorMessage;
-
-                if (!selectorState.models.length) {
-                    return;
-                }
+                return;
             }
 
             if (!selectorState.models.length) {
@@ -157,6 +178,9 @@ export class CleanSlateModelSelectorRenderer {
         };
 
         const renderProviderList = () => {
+            // Invalidate any model request that is still in flight. Otherwise it
+            // can append stale rows after the provider list has been rendered.
+            renderRequest++;
             dom.clearNode(modelListContainer);
             for (const provider of this.modelProvider.getProviderOptions()) {
                 const item = dom.append(modelListContainer, dom.$('.model-item'));
