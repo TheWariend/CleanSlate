@@ -71,7 +71,7 @@ See [packages/cleanslate-sdk](packages/cleanslate-sdk).
 | Package | Version |
 | ------- | ------- |
 | [`@cleanslate/cli`](https://www.npmjs.com/package/@cleanslate/cli) | `1.0.5` · ![npm](https://img.shields.io/npm/v/@cleanslate/cli?style=flat-square&label=npm) |
-| [`@cleanslate/sdk`](https://www.npmjs.com/package/@cleanslate/sdk) | `1.0.5` · ![npm](https://img.shields.io/npm/v/@cleanslate/sdk?style=flat-square&label=npm) |
+| [`@cleanslate/sdk`](https://www.npmjs.com/package/@cleanslate/sdk) | `1.0.6` · ![npm](https://img.shields.io/npm/v/@cleanslate/sdk?style=flat-square&label=npm) |
 
 > [!NOTE]
 > The CLI and SDK follow semantic versioning. Breaking changes require a major
