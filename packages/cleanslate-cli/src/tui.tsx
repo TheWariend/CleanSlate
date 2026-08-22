@@ -1411,6 +1411,9 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const liveTurnRef = useRef(new LiveTurnBuffer());
 	const [input, setInput] = useState('');
 	const [commandSelection, setCommandSelection] = useState(0);
+	// Snapshot of the line before a palette pick inserted `<id> `, so Escape can undo the
+	// insertion and reopen the dropup exactly where it was.
+	const [paletteUndo, setPaletteUndo] = useState<{ value: string; selection: number } | undefined>();
 	const [running, setRunning] = useState(false);
 	const [status, setStatus] = useState('ready');
 	const [approval, setApproval] = useState<IPendingApproval | undefined>();
@@ -1916,6 +1919,8 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const submit = async (raw: string) => {
 		const value = raw.trim();
 		setInput('');
+		// The line is gone, so a stale undo snapshot must not resurrect it on Escape.
+		setPaletteUndo(undefined);
 		// A cleared palette query must not keep the old highlight: the next '/' would otherwise
 		// land on a stale index instead of reopening the list from the top.
 		setCommandSelection(0);
@@ -2224,9 +2229,17 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			setCommandSelection(value => (value - 1 + paletteSize) % paletteSize);
 		} else if (paletteSize > 0 && key.downArrow) {
 			setCommandSelection(value => (value + 1) % paletteSize);
-		} else if (paletteSize > 0 && key.escape) {
-			setInput('');
-			setCommandSelection(0);
+		} else if (!running && key.escape) {
+			if (paletteUndo) {
+				// Undo the last palette pick: restore the original query and reopen the
+				// dropup with the same row highlighted.
+				setInput(paletteUndo.value);
+				setCommandSelection(paletteUndo.selection);
+				setPaletteUndo(undefined);
+			} else {
+				setInput('');
+				setCommandSelection(0);
+			}
 		} else if (key.escape && running) {
 			abortRef.current?.abort();
 			setStatus('cancelling');
@@ -2408,6 +2421,10 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 								focus={!diffReviews && !running}
 								onChange={value => {
 									setInput(value);
+									if (!value) {
+										// Backspacing the pick away reopens the dropup where it was.
+										setPaletteUndo(undefined);
+									}
 									setCommandSelection(0);
 								}}
 								onSubmit={value => {
@@ -2418,6 +2435,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 										if (selection.execute) {
 											void submit(selection.value);
 										} else {
+											setPaletteUndo({ value, selection: visibleCommandSelection });
 											setInput(selection.value);
 										}
 										return;
