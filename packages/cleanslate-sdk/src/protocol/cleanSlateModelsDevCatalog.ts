@@ -32,6 +32,9 @@ export function modelsDevProviderKeys(provider: AIProvider): string[] {
 		case 'openrouter': return ['openrouter'];
 		case 'anthropic': return ['anthropic'];
 		case 'openai': return ['openai'];
+		case 'custom':
+			// models.dev indexes Sarvam's OpenAI-compatible API under its own key.
+			return ['sarvam', provider];
 		default: return [provider];
 	}
 }

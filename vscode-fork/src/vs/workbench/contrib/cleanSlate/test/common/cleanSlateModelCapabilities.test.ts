@@ -480,6 +480,52 @@ suite('CleanSlate model capabilities', () => {
 		assert.strictEqual(capabilities.modelMaxOutputTokens, 16_384);
 	});
 
+	test('maps Sarvam reasoning levels to its documented low/medium/high efforts', () => {
+		const low = resolveCleanSlateModelCapabilities({ provider: 'custom', flavor: 'custom', model: 'sarvam-105b', reasoningLevel: 'low' });
+		const medium = resolveCleanSlateModelCapabilities({ provider: 'custom', flavor: 'custom', model: 'sarvam-105b', reasoningLevel: 'medium' });
+		const high = resolveCleanSlateModelCapabilities({ provider: 'custom', flavor: 'custom', model: 'sarvam-105b', reasoningLevel: 'high' });
+		const none = resolveCleanSlateModelCapabilities({ provider: 'custom', flavor: 'custom', model: 'sarvam-105b', reasoningLevel: 'none' });
+		const minimal = resolveCleanSlateModelCapabilities({ provider: 'custom', flavor: 'custom', model: 'sarvam-105b', reasoningLevel: 'minimal' });
+		const options = resolveCleanSlateReasoningLevelOptions({ provider: 'custom', flavor: 'custom', model: 'sarvam-105b' });
+
+		assert.deepStrictEqual(low.supportedReasoningEfforts, ['low', 'medium', 'high']);
+		assert.strictEqual(low.reasoningEffort, 'low');
+		assert.strictEqual(medium.reasoningEffort, 'medium');
+		assert.strictEqual(high.reasoningEffort, 'high');
+		assert.strictEqual(none.reasoningEffort, undefined);
+		assert.strictEqual(minimal.reasoningEffort, undefined);
+		assert.deepStrictEqual(options.filter(option => option.enabled).map(option => option.level), ['none', 'low', 'medium', 'high']);
+	});
+
+	test('maps GLM-5.2 reasoning levels to the Z.ai effort interface and gates older releases', () => {
+		const low = resolveCleanSlateModelCapabilities({ provider: 'openrouter', flavor: 'openrouter', model: 'zai/glm-5.2', reasoningLevel: 'low' });
+		const medium = resolveCleanSlateModelCapabilities({ provider: 'openrouter', flavor: 'openrouter', model: 'zai/glm-5.2', reasoningLevel: 'medium' });
+		const high = resolveCleanSlateModelCapabilities({ provider: 'openrouter', flavor: 'openrouter', model: 'zai/glm-5.2', reasoningLevel: 'high' });
+		const xhigh = resolveCleanSlateModelCapabilities({ provider: 'openrouter', flavor: 'openrouter', model: 'zai/glm-5.2', reasoningLevel: 'xhigh' });
+		const max = resolveCleanSlateModelCapabilities({ provider: 'openrouter', flavor: 'openrouter', model: 'zai/glm-5.2', reasoningLevel: 'max' });
+		const none = resolveCleanSlateModelCapabilities({ provider: 'openrouter', flavor: 'openrouter', model: 'zai/glm-5.2', reasoningLevel: 'none' });
+		const legacy = resolveCleanSlateModelCapabilities({ provider: 'openrouter', flavor: 'openrouter', model: 'zai/glm-4.6' });
+		const bareGated = resolveCleanSlateModelCapabilities({
+			provider: 'openrouter',
+			flavor: 'openrouter',
+			model: 'glm',
+			modelReleaseDate: '2026-02-01'
+		});
+		const options = resolveCleanSlateReasoningLevelOptions({ provider: 'openrouter', flavor: 'openrouter', model: 'zai/glm-5.2' });
+
+		assert.deepStrictEqual(high.supportedReasoningEfforts, ['low', 'medium', 'high', 'xhigh', 'max']);
+		assert.strictEqual(low.reasoningEffort, 'low');
+		assert.strictEqual(medium.reasoningEffort, 'medium');
+		assert.strictEqual(high.reasoningEffort, 'high');
+		assert.strictEqual(xhigh.reasoningEffort, 'xhigh');
+		assert.strictEqual(max.reasoningEffort, 'max');
+		assert.strictEqual(none.reasoningEffort, undefined);
+		assert.deepStrictEqual(legacy.supportedReasoningEfforts, []);
+		assert.strictEqual(legacy.reasoningEffort, undefined);
+		assert.deepStrictEqual(bareGated.supportedReasoningEfforts, ['low', 'medium', 'high', 'xhigh', 'max']);
+		assert.deepStrictEqual(options.filter(option => option.enabled).map(option => option.level), ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
+	});
+
 	test('uses managed model metadata and operational output caps', () => {
 		const kimi = resolveCleanSlateModelCapabilities({
 			provider: 'cleanslate',

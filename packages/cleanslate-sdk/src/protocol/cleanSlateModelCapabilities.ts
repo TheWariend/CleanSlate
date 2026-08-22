@@ -190,6 +190,8 @@ const OPENAI_GPT5_1_EFFORTS: readonly CleanSlateProviderReasoningEffort[] = ['no
 const OPENAI_GPT5_2_PLUS_EFFORTS: readonly CleanSlateProviderReasoningEffort[] = [...OPENAI_GPT5_1_EFFORTS, 'xhigh'];
 const OPENAI_GPT5_6_PLUS_EFFORTS: readonly CleanSlateProviderReasoningEffort[] = [...OPENAI_GPT5_2_PLUS_EFFORTS, 'max'];
 const ANTHROPIC_FABLE_5_EFFORTS: readonly CleanSlateProviderReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+const SARVAM_EFFORTS: readonly CleanSlateProviderReasoningEffort[] = WIDELY_SUPPORTED_EFFORTS;
+const GLM_EFFORTS: readonly CleanSlateProviderReasoningEffort[] = [...WIDELY_SUPPORTED_EFFORTS, 'xhigh', 'max'];
 const OPENAI_GPT5_PRO_EFFORTS: readonly CleanSlateProviderReasoningEffort[] = ['high'];
 const OPENAI_GPT5_PRO_2_PLUS_EFFORTS: readonly CleanSlateProviderReasoningEffort[] = ['medium', 'high', 'xhigh'];
 const OPENAI_GPT5_CHAT_EFFORTS: readonly CleanSlateProviderReasoningEffort[] = ['medium'];
@@ -197,6 +199,9 @@ const OPENAI_GPT5_CODEX_XHIGH_EFFORTS: readonly CleanSlateProviderReasoningEffor
 const OPENAI_GPT5_CODEX_3_PLUS_EFFORTS: readonly CleanSlateProviderReasoningEffort[] = ['none', ...OPENAI_GPT5_CODEX_XHIGH_EFFORTS];
 const OPENAI_NONE_EFFORT_RELEASE_DATE = '2025-11-13';
 const OPENAI_XHIGH_EFFORT_RELEASE_DATE = '2025-12-04';
+// Z.ai added reasoning_effort with GLM-5.2 (2026-02); earlier GLM releases only expose
+// the thinking on/off switch, not effort gradations.
+const GLM_REASONING_EFFORT_RELEASE_DATE = '2026-01-15';
 const GPT5_FAMILY_RE = /(?:^|\/)gpt-5(?:[.-]|$)/;
 const GPT5_VERSION_RE = /(?:^|\/)gpt-5[.-](\d+)(?:[.-]|$)/;
 const GPT5_PRO_RE = /(?:^|\/)gpt-5[.-]?pro(?:[.-]|$)/;
@@ -585,6 +590,20 @@ function resolveCleanSlateProviderTuning(request: ICleanSlateModelCapabilityRequ
 		result.supportedReasoningEfforts = [...ANTHROPIC_FABLE_5_EFFORTS];
 	}
 
+	if (family === 'glm') {
+		result.supportedReasoningEfforts = resolveCleanSlateGlmReasoningEfforts(modelId, request.modelReleaseDate);
+		const glmEffort = resolveCleanSlateGlmReasoningEffort(reasoningLevel, result.supportedReasoningEfforts);
+		if (glmEffort) {
+			result.reasoningEffort = glmEffort;
+		}
+	}
+
+	if (isCleanSlateSarvamModel(modelId)) {
+		const supportedEfforts = [...SARVAM_EFFORTS];
+		result.supportedReasoningEfforts = supportedEfforts;
+		result.reasoningEffort = resolveCleanSlateSarvamReasoningEffort(reasoningLevel, supportedEfforts);
+	}
+
 	if (providerID.includes('zai') || providerID.includes('zhipuai')) {
 		result.bodyOptions = {
 			...(result.bodyOptions ?? {}),
@@ -626,6 +645,20 @@ function resolveCleanSlateProviderTuning(request: ICleanSlateModelCapabilityRequ
 			result.include = ['reasoning.encrypted_content'];
 		}
 
+	}
+
+	// OpenRouter normalizes reasoning_effort across backends, so trust the
+	// catalog's advertised effort vocabulary for models without a dedicated
+	// resolver above (e.g. stealth/ox-alpha exposes low/high/max). Budget- or
+	// thinking-config style families keep their own handling.
+	if (
+		providerID === 'openrouter'
+		&& !result.supportedReasoningEfforts
+		&& family !== 'claude'
+		&& family !== 'gemini'
+		&& request.modelsDevMetadata?.reasoningEfforts?.length
+	) {
+		result.reasoningEffort = resolveCleanSlateCatalogReasoningEffort(reasoningLevel, request.modelsDevMetadata.reasoningEfforts);
 	}
 
 	if (providerID === 'grok' && reasoningLevel !== 'none' && hasCleanSlateNativeReasoningCapability(family, modelId)) {
@@ -793,6 +826,62 @@ function resolveCleanSlateGpt5ReasoningEffort(
 	return undefined;
 }
 
+/**
+ * Z.ai accepts the full effort vocabulary on GLM-5.2 but collapses most of it:
+ * low/medium run at high, xhigh runs at max, and none/minimal stop thinking.
+ * Sending the user's literal choice is safe, so only 'none' is suppressed here —
+ * GLM turns thinking off through thinking.type instead.
+ */
+function resolveCleanSlateGlmReasoningEffort(
+	reasoningLevel: CleanSlateReasoningLevel,
+	supportedEfforts: readonly CleanSlateProviderReasoningEffort[]
+): CleanSlateProviderReasoningEffort | undefined {
+	if (!supportedEfforts.length || reasoningLevel === 'none') {
+		return undefined;
+	}
+	if (supportedEfforts.includes(reasoningLevel)) {
+		return reasoningLevel;
+	}
+	return supportedEfforts[supportedEfforts.length - 1];
+}
+
+/** Sarvam documents exactly low/medium/high (default medium) for reasoning_effort. */
+function resolveCleanSlateSarvamReasoningEffort(
+	reasoningLevel: CleanSlateReasoningLevel,
+	supportedEfforts: readonly CleanSlateProviderReasoningEffort[]
+): CleanSlateProviderReasoningEffort | undefined {
+	if (!supportedEfforts.length || reasoningLevel === 'none' || reasoningLevel === 'minimal') {
+		return undefined;
+	}
+	return supportedEfforts.includes(reasoningLevel) ? reasoningLevel : supportedEfforts[0];
+}
+
+/**
+ * Models.dev catalogs the exact effort vocabulary a model accepts (e.g. ox-alpha
+ * exposes low/high/max through OpenRouter). Send the user's literal choice when
+ * the catalog lists it, otherwise fall back to the closest advertised effort so
+ * catalog-driven models still receive a valid reasoning_effort.
+ */
+function resolveCleanSlateCatalogReasoningEffort(
+	reasoningLevel: CleanSlateReasoningLevel,
+	supportedEfforts: readonly CleanSlateProviderReasoningEffort[]
+): CleanSlateProviderReasoningEffort | undefined {
+	if (!supportedEfforts.length) {
+		return undefined;
+	}
+	if (reasoningLevel === 'none' || reasoningLevel === 'minimal') {
+		const noneEffort = supportedEfforts.find(effort => effort === 'none' || effort === 'minimal');
+		return noneEffort;
+	}
+	if (supportedEfforts.includes(reasoningLevel)) {
+		return reasoningLevel;
+	}
+	if (reasoningLevel === 'low') {
+		return supportedEfforts[0];
+	}
+	return supportedEfforts[supportedEfforts.length - 1];
+}
+
 function resolveCleanSlateNativeReasoningLevels(
 	request: Omit<ICleanSlateModelCapabilityRequest, 'reasoningLevel'>,
 	family: CleanSlateModelFamily,
@@ -849,10 +938,33 @@ function resolveCleanSlateNativeReasoningLevels(
 		return levels;
 	}
 
+	if (family === 'glm') {
+		const supportedEfforts = resolveCleanSlateGlmReasoningEfforts(modelId, request.modelReleaseDate);
+		for (const level of CLEANSLATE_REASONING_LEVELS) {
+			if (supportedEfforts.includes(level)) {
+				levels.add(level);
+			}
+		}
+		return levels;
+	}
+
+	if (isCleanSlateSarvamModel(modelId)) {
+		// Sarvam documents exactly low/medium/high for reasoning_effort.
+		return new Set<CleanSlateReasoningLevel>(['low', 'medium', 'high']);
+	}
+
 	if (providerAdapter === 'amazon-bedrock' && hasCleanSlateNativeReasoningCapability(family, modelId)) {
 		levels.add('low');
 		levels.add('high');
 		return levels;
+	}
+
+	// Catalog-listed efforts (models.dev) are native choices for every remaining
+	// family, so the level picker mirrors what the provider actually accepts.
+	for (const effort of request.modelsDevMetadata?.reasoningEfforts ?? []) {
+		if (isCleanSlateReasoningLevel(effort)) {
+			levels.add(effort);
+		}
 	}
 
 	return levels;
@@ -860,6 +972,34 @@ function resolveCleanSlateNativeReasoningLevels(
 
 function isCleanSlateGpt5Family(modelId: string): boolean {
 	return GPT5_FAMILY_RE.test(modelId);
+}
+
+function isCleanSlateSarvamModel(modelId: string): boolean {
+	return modelId.includes('sarvam');
+}
+
+function resolveCleanSlateGlmReasoningEfforts(modelId: string, releaseDate: string | undefined): CleanSlateProviderReasoningEffort[] {
+	const version = resolveCleanSlateGlmVersion(modelId);
+	if (version) {
+		// Z.ai introduced reasoning_effort with GLM-5.2; older majors/minors only expose
+		// the thinking on/off switch.
+		return version.major > 5 || (version.major === 5 && version.minor >= 2) ? [...GLM_EFFORTS] : [];
+	}
+	// Bare 'glm' ids: gate on the catalog release date when it is available.
+	return releaseDate && releaseDate >= GLM_REASONING_EFFORT_RELEASE_DATE ? [...GLM_EFFORTS] : [];
+}
+
+function resolveCleanSlateGlmVersion(modelId: string): { major: number; minor: number } | undefined {
+	const match = /(?:^|\/)glm[-.]?(\d+)(?:\.(\d+))?(?:[.\-/]|$)/.exec(modelId);
+	if (!match?.[1]) {
+		return undefined;
+	}
+	const rawMajor = Number.parseInt(match[1], 10);
+	// Two-digit shorthands such as 'glm52' encode major and minor together.
+	if (!match[2] && rawMajor >= 10) {
+		return { major: Math.floor(rawMajor / 10), minor: rawMajor % 10 };
+	}
+	return { major: rawMajor, minor: match[2] ? Number.parseInt(match[2], 10) : 0 };
 }
 
 function isCleanSlateGpt5Pro(modelId: string): boolean {
