@@ -213,6 +213,35 @@ export function commandPaletteSelection(item: ICommandPaletteItem): { value: str
 		: { value: item.id, execute: true };
 }
 
+export interface ICommandPaletteFilter {
+	items: readonly ICommandPaletteItem[];
+	/** True when the input is a complete command followed by a space, awaiting its arguments. */
+	awaitingArguments: boolean;
+}
+
+/**
+ * Resolves the palette contents for the current input.
+ *
+ * Matches `/`, partial words, and a complete command plus trailing space (`/permissions `).
+ * The trailing-space case stays open on the exact command so choosing an argument-taking
+ * command keeps visible feedback instead of silently closing the dropup.
+ */
+export function filterCommandPaletteItems(input: string, mode: CliInteractiveMode): ICommandPaletteFilter {
+	const match = /^\/(\S*)( ?)$/.exec(input);
+	if (!match) {
+		return { items: [], awaitingArguments: false };
+	}
+	const query = match[1].toLowerCase();
+	const trailingSpace = Boolean(match[2]);
+	const items = COMMAND_PALETTE_ITEMS.filter(item =>
+		(mode !== 'planning' || item.id !== '/plan')
+		&& (item.id.slice(1).includes(query) || item.label.toLowerCase().includes(query)));
+	const narrowed = trailingSpace
+		? items.filter(item => item.id.toLowerCase() === `/${query}`)
+		: items;
+	return { items: narrowed, awaitingArguments: trailingSpace };
+}
+
 // The mode label leads the footer in its own colour and is rendered separately; this is the
 // remainder of the hint list. Scrolling is the terminal's own now, so it is not advertised here.
 const FOOTER_HELP = 'shift+tab mode · ctrl+o details · / commands';
@@ -1420,11 +1449,17 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const projectContext = useMemo(() => new CliProjectContext(args.cwd), [args.cwd]);
 	const workspaceReview = useMemo(() => new CliWorkspaceReview(args.cwd), [args.cwd]);
 	const commandQuery = input.match(/^\/(\S*)$/)?.[1]?.toLowerCase();
+	const commandPaletteFilter = useMemo(
+		() => filterCommandPaletteItems(input, mode),
+		[input, mode]
+	);
 	const commandItems = commandQuery === undefined
 		? []
-		: COMMAND_PALETTE_ITEMS.filter(item =>
-			(mode !== 'planning' || item.id !== '/plan')
-			&& (item.id.slice(1).includes(commandQuery) || item.label.toLowerCase().includes(commandQuery)));
+		: (commandPaletteFilter.awaitingArguments
+			? commandPaletteFilter.items
+			: COMMAND_PALETTE_ITEMS.filter(item =>
+				(mode !== 'planning' || item.id !== '/plan')
+				&& (item.id.slice(1).includes(commandQuery) || item.label.toLowerCase().includes(commandQuery))));
 	const visibleCommandSelection = Math.min(commandSelection, Math.max(0, commandItems.length - 1));
 	const toolGroupIds = useMemo(() => transcriptToolGroupIds(transcript), [transcript]);
 	const toolItemIds = useMemo(() => transcriptToolItemIds(transcript, expandedToolGroups), [transcript, expandedToolGroups]);
@@ -1881,6 +1916,9 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const submit = async (raw: string) => {
 		const value = raw.trim();
 		setInput('');
+		// A cleared palette query must not keep the old highlight: the next '/' would otherwise
+		// land on a stale index instead of reopening the list from the top.
+		setCommandSelection(0);
 		if (running || approval || editApproval) {
 			return;
 		}
@@ -2221,7 +2259,10 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 							? Math.min(10, commandItems.length) + 3
 							: 0;
 	const footerRows = Math.max(1, Math.ceil(FOOTER_HELP.length / viewportColumns));
-	const contentRows = Math.max(1, viewportRows - 9 - footerRows - overlayRows - (modelTermination ? 1 : 0));
+	// The streaming activity row above the composer is fixed chrome, so the live transcript
+	// area gives up a row for it instead of pushing the prompt frame off-screen.
+	const activityVisible = running && !approval && !editApproval && !showSessions && !modelTermination && !diffReviews;
+	const contentRows = Math.max(1, viewportRows - 9 - footerRows - overlayRows - (modelTermination ? 1 : 0) - (activityVisible ? 1 : 0));
 	// Settled turns: safe to flush once into the terminal's real scrollback and never repaint.
 	// While a turn runs, entries at/after turnStartIndexRef are still mutating and stay out.
 	const staticEntries = useMemo<ICliTranscriptEntry[]>(
@@ -2344,21 +2385,27 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				</Box>
 			)}
 
+			{/* The activity indicator gets its own row above the composer instead of replacing the
+			    input inside it, so the prompt keeps its shape while a turn streams. */}
+			{activityVisible && (
+				<Box paddingX={1}>
+					<Text color={COLORS.warning}><Spinner type="line" /> {formatActivityStatus(status)}</Text>
+					<Text color={COLORS.muted}> · Esc to cancel</Text>
+				</Box>
+			)}
+
 			{!approval && !editApproval && !showSessions && !models && !modelTermination && (
 				<Box borderStyle="round" borderColor={running ? COLORS.muted : COLORS.accent} paddingX={1} justifyContent="space-between">
 					<Box flexGrow={1} flexShrink={1}>
 					{diffReviews
 						? <Text color={COLORS.muted}>←/→ view · ↑/↓ file · j/k scroll · PgUp/PgDn page · Esc close</Text>
-						: running
-						? <>
-							<Text color={COLORS.warning}><Spinner type="line" /> {formatActivityStatus(status)}</Text>
-							<Text color={COLORS.muted}> · Esc to cancel</Text>
-						</>
+						: commandItems.length > 0 && commandPaletteFilter.awaitingArguments
+						? <Text color={COLORS.muted}>{commandItems[0].label}: type a value · Enter run · Esc cancel</Text>
 						: <>
-							<Text color={COLORS.accent}>❯ </Text>
+							<Text color={running ? COLORS.muted : COLORS.accent}>❯ </Text>
 							<PromptInput
 								value={input}
-								focus={!diffReviews}
+								focus={!diffReviews && !running}
 								onChange={value => {
 									setInput(value);
 									setCommandSelection(0);
