@@ -57,18 +57,26 @@ export function composeTurnReminder(options: Pick<ComposePromptOptions, 'mode' |
  */
 export function composePrompt(options: ComposePromptOptions): IChatMessagePart[] {
 	const generalPurpose = options.domainProfileId !== undefined && options.domainProfileId !== 'coding';
+	const configuredName = options.agentDefinition?.name.trim();
+	const configuredTitle = options.agentDefinition?.title?.trim();
+	const coreIdentity = configuredName
+		? `You are ${configuredName}${configuredTitle ? `, ${configuredTitle}` : ''}, a user-configured agent working toward the user's goal using the capabilities exposed by the host. Use this configured name whenever you identify yourself; do not replace it with the platform's default agent name. Follow the standing role below in every turn while preserving unrelated user work and preferring evidence over assumptions.`
+		: generalPurpose ? GENERAL_CORE_IDENTITY : CORE_IDENTITY;
 	const staticParts = generalPurpose
-		? [GENERAL_CORE_IDENTITY, GENERAL_BASE_INSTRUCTIONS, TOOL_PROTOCOLS]
-		: [CORE_IDENTITY, baseInstructions, TOOL_PROTOCOLS, CODING_STANDARDS, EXACT_EDIT_PRECISION_GUIDELINES];
+		? [coreIdentity, GENERAL_BASE_INSTRUCTIONS, TOOL_PROTOCOLS]
+		: [coreIdentity, baseInstructions, TOOL_PROTOCOLS, CODING_STANDARDS, EXACT_EDIT_PRECISION_GUIDELINES];
 	const agentDefinition = options.agentDefinition;
 	if (agentDefinition?.identity) {
-		staticParts.push(`Agent identity (${agentDefinition.name}):\n${agentDefinition.identity}`);
+		staticParts.push(`Standing role (${agentDefinition.name}):\n${agentDefinition.identity}`);
 	}
 	if (agentDefinition?.extensions) {
 		staticParts.push(`Agent extensions:\n${agentDefinition.extensions}`);
 	}
 	if (agentDefinition?.constraints) {
 		staticParts.push(`Agent constraints:\n${agentDefinition.constraints}`);
+	}
+	if (agentDefinition?.skills?.length) {
+		staticParts.push(`Agent skills:\n${agentDefinition.skills.map(skill => `- ${skill.name}: ${skill.instructions}`).join('\n')}`);
 	}
 
 	const trailingReminder = composeTurnReminder(options);

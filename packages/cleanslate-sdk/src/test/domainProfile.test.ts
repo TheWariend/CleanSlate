@@ -28,3 +28,22 @@ test('general profile removes coding identity and deterministic lint verificatio
 	assert.match(prompt, /general-purpose agent/);
 	assert.doesNotMatch(prompt, /software-engineering agent/);
 });
+
+test('a configured agent name replaces the platform identity', () => {
+	const prompt = composePrompt({
+		mode: 'Execution',
+		domainProfileId: 'general',
+		agentDefinition: {
+			id: 'agent-1',
+			name: 'Avery',
+			title: 'Code review specialist',
+			identity: 'Review code changes for correctness and regressions.',
+			skills: [{ id: 'threat-model', name: 'Threat model', instructions: 'Trace trust boundaries before reporting security findings.' }]
+		}
+	}).map(part => part.type === 'text' ? part.text : '').join('\n');
+
+	assert.match(prompt, /You are Avery, Code review specialist, a user-configured agent/);
+	assert.match(prompt, /Standing role \(Avery\):/);
+	assert.match(prompt, /Agent skills:\n- Threat model: Trace trust boundaries/);
+	assert.doesNotMatch(prompt, /You are CleanSlate/);
+});

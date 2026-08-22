@@ -34,6 +34,7 @@ import { CleanSlateThreadService } from '../services/cleanSlateThreadService.js'
 import { ALL_TOOLS } from '../tools/registry.js';
 import type { CleanSlateTool } from '../tools/types.js';
 import type { ICleanSlateDomainProfile } from '../agent/cleanSlateDomainProfile.js';
+import type { AgentDefinition } from '../composer/registry/agentSchema.js';
 import { CleanSlateHeadlessRuntime } from './cleanSlateHeadlessRunner.js';
 import { NodeCleanSlateMainService } from './cleanSlateNodeMainService.js';
 
@@ -44,6 +45,8 @@ export interface ICleanSlateNodeAgentRuntimeOptions {
 	configuration: ICleanSlateConfiguration;
 	/** Domain semantics used by the shared execution loop. Defaults to coding. */
 	domainProfile?: ICleanSlateDomainProfile;
+	/** Optional user-created persona merged into the SDK's system prompt. */
+	agentDefinition?: AgentDefinition;
 	/** Native tools exposed to this agent. Defaults to the complete SDK registry. */
 	tools?: readonly CleanSlateTool[];
 	/** Agent-specific operating instructions supplied by the host. */
@@ -261,7 +264,7 @@ export class CleanSlateNodeAgentRuntime {
 			throw new Error('Task must not be empty.');
 		}
 		const mode = phase === AgentPhase.PLANNING ? 'Planning' : 'Execution';
-		const parsed = parseSlashCommand(objective, mode, undefined, undefined, undefined, this.options.domainProfile?.id);
+		const parsed = parseSlashCommand(objective, mode, this.options.agentDefinition, undefined, undefined, this.options.domainProfile?.id);
 		const promptText = `[CONTEXT]\n${await this.buildPromptContext(objective)}\n\nUser Request: ${parsed.userMessage}`;
 		const attachments = await this.options.resolveAttachments?.(objective) ?? [];
 		const userContent = attachments.length > 0
