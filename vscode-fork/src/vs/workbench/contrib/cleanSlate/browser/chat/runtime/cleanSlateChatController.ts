@@ -1085,7 +1085,8 @@ export class CleanSlateChatController extends Disposable {
         mode: string,
         onGeneratingChange?: (isGenerating: boolean) => void,
         existingMessageElement?: HTMLElement,
-        images?: string[]
+        images?: string[],
+        onModelTerminatedContinue?: () => void
     ): Promise<void> {
         const editor = this.codeEditorService.getActiveCodeEditor();
         const selections = editor ? [...(editor.getSelections() || [])] : [];
@@ -1278,7 +1279,7 @@ export class CleanSlateChatController extends Disposable {
                         cancelScheduledChatTextRender();
                         if (!didShowModelTerminatedPause) {
                             didShowModelTerminatedPause = true;
-                            this.showModelTerminatedPauseMessage(event.content, renderer, normalizedMode, onGeneratingChange);
+                            this.showModelTerminatedPauseMessage(event.content, renderer, normalizedMode, onGeneratingChange, onModelTerminatedContinue);
                         }
                         continue;
                     }
@@ -1953,7 +1954,7 @@ export class CleanSlateChatController extends Disposable {
                         formattedError,
                         () => {
                             globalThis.setTimeout(() => {
-                                void this.sendMessage('continue', renderer, this.normalizeMode(mode), onGeneratingChange);
+                                this.continueAfterModelTermination(renderer, mode, onGeneratingChange, onModelTerminatedContinue);
                             }, 0);
                         }
                     );
@@ -1998,7 +1999,8 @@ export class CleanSlateChatController extends Disposable {
         message: string,
         renderer: IResponseRenderer,
         mode: CleanSlateExecutionFlow,
-        onGeneratingChange?: (isGenerating: boolean) => void
+        onGeneratingChange?: (isGenerating: boolean) => void,
+        onModelTerminatedContinue?: () => void
     ): void {
         console.log(`[CleanSlateChatController] ${message}`);
         this.notificationService.warn(message);
@@ -2006,10 +2008,23 @@ export class CleanSlateChatController extends Disposable {
             message,
             () => {
                 globalThis.setTimeout(() => {
-                    void this.sendMessage('continue', renderer, this.normalizeMode(mode), onGeneratingChange);
+                    this.continueAfterModelTermination(renderer, mode, onGeneratingChange, onModelTerminatedContinue);
                 }, 0);
             }
         );
+    }
+
+    private continueAfterModelTermination(
+        renderer: IResponseRenderer,
+        mode: CleanSlateExecutionFlow | string,
+        onGeneratingChange?: (isGenerating: boolean) => void,
+        onModelTerminatedContinue?: () => void
+    ): void {
+        if (onModelTerminatedContinue) {
+            onModelTerminatedContinue();
+            return;
+        }
+        void this.sendMessage('continue', renderer, this.normalizeMode(mode), onGeneratingChange);
     }
 
     applyLastResponse(): void {

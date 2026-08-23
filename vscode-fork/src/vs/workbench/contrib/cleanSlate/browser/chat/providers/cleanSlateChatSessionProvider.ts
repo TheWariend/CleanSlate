@@ -280,7 +280,11 @@ export class CleanSlateChatSessionProvider extends Disposable {
     }
 
     isSessionRunning(sessionId: string | undefined): boolean {
-        return !!sessionId && this.runState.isRunning(sessionId);
+        if (!sessionId) {
+            return false;
+        }
+        const session = this.sessions.get(sessionId);
+        return this.runState.isRunning(sessionId) || session?.controller.getIsGenerating() === true;
     }
 
     canApprovePlan(): boolean {
@@ -446,6 +450,16 @@ export class CleanSlateChatSessionProvider extends Disposable {
         images?: string[]
     ): Promise<void> {
         const session = this.activeSession;
+        return this.sendSessionMessage(session, text, renderer, onGeneratingChange, images);
+    }
+
+    private sendSessionMessage(
+        session: ICleanSlateLiveSession,
+        text: string,
+        renderer: IResponseRenderer,
+        onGeneratingChange?: (isGenerating: boolean) => void,
+        images?: string[]
+    ): Promise<void> {
         let run: ReturnType<typeof this.startRun>;
         try {
             run = this.startRun(session);
@@ -458,6 +472,23 @@ export class CleanSlateChatSessionProvider extends Disposable {
         session.agent.setToolSurface(this.surface);
         const executionState = normalizeCleanSlateExecutionState({ planMode: session.planMode, reasoningLevel: session.reasoningLevel });
         const executionFlow = executionState.planMode ? 'planning' : 'normal';
+        let resolveCurrentRunSettled!: () => void;
+        const currentRunSettled = new Promise<void>(resolve => resolveCurrentRunSettled = resolve);
+        let resumeRequested = false;
+        const resumeAfterModelTermination = (): void => {
+            if (resumeRequested) {
+                return;
+            }
+            resumeRequested = true;
+            void currentRunSettled.then(() => {
+                if (this.sessions.get(session.id) !== session) {
+                    return;
+                }
+                return this.sendSessionMessage(session, 'continue', renderer, onGeneratingChange);
+            }).catch(error => {
+                console.error('[CleanSlateChatSessionProvider] Failed to resume terminated model run:', error);
+            });
+        };
         return session.controller.sendMessage(
             text,
             this.createSessionScopedRenderer(session, renderer),
@@ -469,7 +500,8 @@ export class CleanSlateChatSessionProvider extends Disposable {
                 }
             },
             undefined,
-            images
+            images,
+            resumeAfterModelTermination
         ).then(
             result => {
                 this.finishRun(session, run.runId, 'completed');
@@ -482,6 +514,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
         ).finally(() => {
             session.status = 'detached';
             this.notifySessionChanged(session);
+            resolveCurrentRunSettled();
         });
     }
 
@@ -790,10 +823,14 @@ export class CleanSlateChatSessionProvider extends Disposable {
     }
 
     private isLiveSessionRunning(session: ICleanSlateLiveSession): boolean {
-        return this.runState.isRunning(session.id);
+        // Keep controller state as a defensive fallback while run-state transitions notify views.
+        return this.runState.isRunning(session.id) || session.controller.getIsGenerating();
     }
 
     private startRun(session: ICleanSlateLiveSession) {
+        if (session.controller.getIsGenerating()) {
+            throw new CleanSlateSessionAlreadyRunningError(session.id);
+        }
         try {
             const run = this.runState.start(session.id, session.workspaceId);
             session.controller.setExternalGeneratingState(true);
