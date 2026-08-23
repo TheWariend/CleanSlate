@@ -5,7 +5,6 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
-import Spinner from 'ink-spinner';
 import {
 	CleanSlateNodeAgentRuntime,
 	createNodeProviderConfiguration
@@ -125,7 +124,8 @@ const COLORS = {
 	muted: '#71717a',
 	success: '#22c55e',
 	danger: '#ef4444',
-	warning: '#f59e0b'
+	warning: '#f59e0b',
+	shimmer: '#ffffff'
 };
 
 export function formatModelTerminationMessage(message: string): string {
@@ -175,7 +175,7 @@ export interface ICommandPaletteItem {
 
 const COMMAND_PALETTE_ITEMS: readonly ICommandPaletteItem[] = [
 	{ id: '/plan', label: 'Plan mode', description: 'Turn planning mode on' },
-	{ id: '/accept-edits', label: 'Accept edits', description: 'Apply file edits without asking' },
+	{ id: '/auto', label: 'Auto', description: 'Apply edits and run commands automatically' },
 	{ id: '/manual', label: 'Manual approval', description: 'Review and approve each file edit' },
 	{ id: '/fix', label: 'Fix', description: 'Fix bugs and root causes', requiresArguments: true },
 	{ id: '/explain', label: 'Explain', description: 'Explain relevant code', requiresArguments: true },
@@ -393,7 +393,9 @@ function toolInputDetail(input: any): string {
 function toolTargetDetail(entry: ICliTranscriptEntry): string {
 	const detail = entry.detail;
 	if (!detail || typeof detail !== 'object') {
-		return '';
+		// Resumed sessions may only keep a short content string; show it as the target.
+		const fallback = entry.content?.trim();
+		return fallback && fallback !== 'completed' && fallback !== 'failed' ? fallback : '';
 	}
 	const input = 'input' in detail ? (detail as { input?: any }).input : undefined;
 	const result = 'result' in detail ? (detail as { result?: any }).result : undefined;
@@ -501,7 +503,6 @@ export interface ITranscriptViewportLine {
 	key: string;
 	kind: TranscriptViewportLineKind;
 	text: string;
-	toolGroupId?: string;
 	toolItemId?: string;
 	selected?: boolean;
 }
@@ -522,42 +523,8 @@ export type ICliStaticItem =
 	| { type: 'banner'; key: string }
 	| { type: 'line'; key: string; line: ITranscriptViewportLine };
 
-export function transcriptToolGroupIds(entries: readonly ICliTranscriptEntry[]): string[] {
-	const ids: string[] = [];
-	let previousWasTool = false;
-	for (const entry of entries) {
-		if (entry.kind === 'tool' && !previousWasTool) {
-			ids.push(`group:${entry.id}`);
-		}
-		previousWasTool = entry.kind === 'tool';
-	}
-	return ids;
-}
-
-export function transcriptToolItemIds(
-	entries: readonly ICliTranscriptEntry[],
-	expandedToolGroups: ReadonlySet<string>
-): string[] {
-	const ids: string[] = [];
-	for (let index = 0; index < entries.length; index++) {
-		const entry = entries[index];
-		if (entry.kind !== 'tool') {
-			continue;
-		}
-		const groupId = `group:${entry.id}`;
-		ids.push(groupId);
-		if (expandedToolGroups.has(groupId)) {
-			ids.push(entry.id);
-			while (entries[index + 1]?.kind === 'tool') {
-				ids.push(entries[++index].id);
-			}
-		} else {
-			while (entries[index + 1]?.kind === 'tool') {
-				index++;
-			}
-		}
-	}
-	return ids;
+export function transcriptToolItemIds(entries: readonly ICliTranscriptEntry[]): string[] {
+	return entries.filter(entry => entry.kind === 'tool').map(entry => entry.id);
 }
 
 export function formatElapsedTime(durationMs: number): string {
@@ -568,81 +535,6 @@ export function formatElapsedTime(durationMs: number): string {
 	const minutes = Math.floor(seconds / 60);
 	const remainder = seconds % 60;
 	return `Worked for ${minutes}m${remainder ? ` ${remainder}s` : ''}`;
-}
-
-const TOOL_ACTIVITY_LABELS: Record<string, string> = {
-	list_dir: 'Listed',
-	find_by_name: 'Searched',
-	search_files: 'Searched',
-	search_workspace: 'Searched',
-	grep_search: 'Searched',
-	read_file: 'Read',
-	read_file_range: 'Read',
-	read_symbols: 'Inspected symbols',
-	get_definitions: 'Found definitions',
-	find_references: 'Found references',
-	read_lints: 'Checked lints',
-	apply_edit: 'Edited',
-	write_file: 'Wrote',
-	execute_command: 'Ran commands'
-};
-
-function compactToolActivity(entries: readonly ICliTranscriptEntry[]): string {
-	const counts = new Map<string, number>();
-	const order: string[] = [];
-	const editEntries: ICliTranscriptEntry[] = [];
-	let failures = 0;
-	let running = 0;
-	for (const entry of entries) {
-		if (['apply_edit', 'multi_file_replace', 'write_file'].includes(entry.toolName ?? '')
-			&& entry.status === 'completed') {
-			if (editEntries.length === 0) {
-				order.push('@@edit');
-			}
-			editEntries.push(entry);
-			continue;
-		}
-		const label = TOOL_ACTIVITY_LABELS[entry.toolName ?? '']
-			?? (entry.toolName ?? 'Tool').replace(/_/g, ' ');
-		if (!counts.has(label)) {
-			order.push(label);
-		}
-		counts.set(label, (counts.get(label) ?? 0) + 1);
-		failures += entry.status === 'failed' ? 1 : 0;
-		running += entry.status === 'running' ? 1 : 0;
-	}
-	let editActivity = '';
-	if (editEntries.length > 0) {
-		const results = editEntries.map(entry => {
-			const detail = entry.detail && typeof entry.detail === 'object'
-				? entry.detail as { input?: any; result?: any }
-				: undefined;
-			return detail?.result ?? detail;
-		});
-		const paths = [...new Set(results.map(result => result?.path).filter(Boolean))];
-		const stats = results.map(result => typeof result?.diff === 'string'
-			? parseCliDiffFile(String(result.path ?? 'changed file'), 'turn', result.diff)
-			: { additions: Number(result?.added) || 0, deletions: Number(result?.deleted) || 0 });
-		const added = stats.reduce((total, result) => total + result.additions, 0);
-		const deleted = stats.reduce((total, result) => total + result.deletions, 0);
-		const target = paths.length === 1
-			? String(paths[0]).split(/[\\/]/).at(-1)
-			: `${paths.length || editEntries.length} files`;
-		editActivity = `Edited ${target} +${added} -${deleted}`;
-	}
-	const activities = order.map(label => {
-		if (label === '@@edit') {
-			return editActivity;
-		}
-		const count = counts.get(label) ?? 0;
-		return count > 1 ? `${label} ×${count}` : label;
-	}).filter(Boolean);
-	const activity = activities.join(' · ');
-	const suffix = [
-		failures > 0 ? `${failures} failed` : '',
-		running > 0 ? `${running} running` : ''
-	].filter(Boolean).join(' · ');
-	return `${activity}${suffix ? ` · ${suffix}` : ''}`;
 }
 
 function inlineEditDiffLines(
@@ -735,9 +627,9 @@ export function normalizeTurnProse(content: string): string {
 export function transcriptViewportLines(
 	entries: readonly ICliTranscriptEntry[],
 	width: number,
-	expandedToolGroups: boolean | ReadonlySet<string> = false,
+	expandedTools: boolean | ReadonlySet<string> = false,
 	selectedToolItemId?: string,
-	expandedToolEntries: boolean | ReadonlySet<string> = expandedToolGroups
+	expandedToolEntries: boolean | ReadonlySet<string> = expandedTools
 ): ITranscriptViewportLine[] {
 	const safeWidth = Math.max(8, width);
 	const lines: ITranscriptViewportLine[] = [];
@@ -770,16 +662,16 @@ export function transcriptViewportLines(
 		const marker = entry.status === 'running' ? '●' : entry.status === 'failed' ? '×' : '✓';
 		const target = toolTargetDetail(entry);
 		const label = ({
-			execute_command: 'Bash',
+			execute_command: 'Ran',
 			read_file: 'Read',
 			read_file_range: 'Read',
-			apply_edit: 'Update',
-			write_file: 'Write',
-			multi_file_replace: 'Update files',
-			search_workspace: 'Search',
-			grep_search: 'Search',
-			find_by_name: 'Find',
-			list_dir: 'List',
+			apply_edit: 'Updated',
+			write_file: 'Wrote',
+			multi_file_replace: 'Updated files',
+			search_workspace: 'Searched',
+			grep_search: 'Searched',
+			find_by_name: 'Found',
+			list_dir: 'Listed',
 			read_lints: 'Checked lints'
 		} as Record<string, string>)[entry.toolName ?? ''] ?? (entry.toolName ?? 'Tool').replace(/_/g, ' ');
 		const duration = entry.durationMs === undefined ? '' : ` · ${Math.max(1, Math.round(entry.durationMs / 100) / 10)}s`;
@@ -808,45 +700,14 @@ export function transcriptViewportLines(
 			}
 		}
 	};
-	for (let entryIndex = 0; entryIndex < entries.length; entryIndex++) {
-		const entry = entries[entryIndex];
+	// Every tool call renders in place, in sequence, the way the IDE chat does: one status row
+	// per call, with Ctrl-O (or a click) expanding that row's input and result details. Edit
+	// tools additionally keep their inline diff preview directly under the call.
+	for (const entry of entries) {
 		if (entry.kind === 'tool') {
-			const toolEntries = [entry];
-			while (entries[entryIndex + 1]?.kind === 'tool') {
-				toolEntries.push(entries[++entryIndex]);
-			}
-			const groupId = `group:${entry.id}`;
-			const expanded = expandedToolGroups === true
-				|| (expandedToolGroups instanceof Set && expandedToolGroups.has(groupId));
-			const summaryEntry = { ...entry, id: `${entry.id}-group` };
-			const summaryLinesBefore = lines.length;
-			pushWrapped(
-				summaryEntry,
-				toolEntries.every(item => item.status === 'failed') ? 'toolError' : 'tool',
-				`● ${expanded ? '⌄' : '›'} ${compactToolActivity(toolEntries)}`
-			);
-			for (let lineIndex = summaryLinesBefore; lineIndex < lines.length; lineIndex++) {
-				lines[lineIndex] = {
-					...lines[lineIndex],
-					toolGroupId: groupId,
-					toolItemId: groupId,
-					selected: groupId === selectedToolItemId
-				};
-			}
-			if (expanded) {
-				for (const toolEntry of toolEntries) {
-					const entryExpanded = expandedToolEntries === true
-						|| (expandedToolEntries instanceof Set && expandedToolEntries.has(toolEntry.id));
-					const before = lines.length;
-					pushExpandedTool(toolEntry, entryExpanded);
-					for (let lineIndex = before; lineIndex < lines.length; lineIndex++) {
-						lines[lineIndex] = { ...lines[lineIndex], toolGroupId: groupId, toolItemId: toolEntry.id };
-					}
-				}
-			}
-			for (const toolEntry of toolEntries) {
-				lines.push(...inlineEditDiffLines(toolEntry, safeWidth).map(line => ({ ...line, toolGroupId: groupId })));
-			}
+			pushExpandedTool(entry, expandedToolEntries === true
+				|| (expandedToolEntries instanceof Set && expandedToolEntries.has(entry.id)));
+			lines.push(...inlineEditDiffLines(entry, safeWidth));
 			continue;
 		}
 		if (entry.kind === 'user') {
@@ -876,11 +737,11 @@ export function visibleTranscriptLines(
 	width: number,
 	rows: number,
 	scrollOffset = 0,
-	expandedToolGroups: boolean | ReadonlySet<string> = false,
+	expandedTools: boolean | ReadonlySet<string> = false,
 	selectedToolItemId?: string,
-	expandedToolEntries: boolean | ReadonlySet<string> = expandedToolGroups
+	expandedToolEntries: boolean | ReadonlySet<string> = expandedTools
 ): ITranscriptViewportLine[] {
-	const lines = transcriptViewportLines(entries, width, expandedToolGroups, selectedToolItemId, expandedToolEntries);
+	const lines = transcriptViewportLines(entries, width, expandedTools, selectedToolItemId, expandedToolEntries);
 	const safeRows = Math.max(1, rows);
 	const maxOffset = Math.max(0, lines.length - safeRows);
 	const offset = Math.max(0, Math.min(maxOffset, scrollOffset));
@@ -903,21 +764,12 @@ export function padTranscriptViewportLines(
 }
 
 export function formatActivityStatus(status: string): string {
-	if (/running (?:apply_edit|multi_file_replace|write_file)/.test(status)) {
-		return 'Editing…';
-	}
-	if (/running (?:search_workspace|grep_search|find_by_name|search_files)/.test(status)) {
-		return 'Searching…';
-	}
-	if (/running (?:read_file|read_file_range|list_dir)/.test(status)) {
-		return 'Reading…';
-	}
-	if (/running (?:read_lints|execute_command)/.test(status)) {
-		return 'Checking…';
+	// “Thinking…” while the model reasons between tool calls, “Working…” while a tool runs.
+	const runningMatch = /^running (.+)$/.exec(status);
+	if (runningMatch) {
+		return 'Working…';
 	}
 	switch (status) {
-		case 'thinking':
-			return 'Thinking…';
 		case 'cancelling':
 			return 'Cancelling…';
 		case 'compacting context':
@@ -925,24 +777,68 @@ export function formatActivityStatus(status: string): string {
 		case 'waiting for answer':
 			return 'Waiting for answer…';
 		default:
-			return 'Working…';
+			return 'Thinking…';
 	}
 }
 
-export type CliInteractiveMode = 'planning' | 'accept-edits' | 'manual';
+export function formatToolNameForDisplay(toolName: string): string {
+	return toolName
+		.replace(/^mcp_/, 'MCP ')
+		.split(/[_\s.-]+/)
+		.filter(Boolean)
+		.map(part => part.length <= 2 ? part.toUpperCase() : `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+		.join(' ');
+}
+
+// IDE parity with cleanSlate-working-sheen: a narrow highlight band sweeps across the working
+// label while a turn streams, instead of leaving static text under the spinner.
+export const SHIMMER_FRAME_COUNT = 16;
+export const SHIMMER_TICK_MS = 90;
+const SHIMMER_BAND = 7;
+
+export interface IShimmerSegment {
+	text: string;
+	lit: boolean;
+}
+
+export function shimmerSegments(label: string, frame: number): IShimmerSegment[] {
+	if (!label) {
+		return [];
+	}
+	const cycle = ((frame % SHIMMER_FRAME_COUNT) + SHIMMER_FRAME_COUNT) % SHIMMER_FRAME_COUNT;
+	// The band center sweeps across the label itself, so part of the highlight is always
+	// visible instead of starting each sweep with a fully unlit placeholder.
+	const center = Math.round((cycle / (SHIMMER_FRAME_COUNT - 1)) * (label.length - 1));
+	return [...label].map((char, index) => ({
+		text: char,
+		lit: Math.abs(index - center) * 2 < SHIMMER_BAND
+	}));
+}
+
+function ShimmerLabel({ label, frame }: { label: string; frame: number }): React.JSX.Element {
+	return (
+		<Text>
+			{shimmerSegments(label, frame).map((segment, index) => (
+				<Text key={index} color={segment.lit ? COLORS.shimmer : COLORS.muted}>{segment.text}</Text>
+			))}
+		</Text>
+	);
+}
+
+export type CliInteractiveMode = 'planning' | 'auto' | 'manual';
 
 export function formatHeaderModeLabel(mode: CliInteractiveMode): string {
 	switch (mode) {
 		case 'planning': return 'PLAN';
-		case 'accept-edits': return 'ACCEPT EDITS';
+		case 'auto': return 'AUTO';
 		case 'manual': return 'MANUAL';
 	}
 }
 
 export function nextInteractiveMode(mode: CliInteractiveMode): CliInteractiveMode {
 	switch (mode) {
-		case 'planning': return 'accept-edits';
-		case 'accept-edits': return 'manual';
+		case 'planning': return 'auto';
+		case 'auto': return 'manual';
 		case 'manual': return 'planning';
 	}
 }
@@ -952,7 +848,7 @@ export function runtimeModeForInteractiveMode(mode: CliInteractiveMode): 'execut
 }
 
 export function executionInteractiveMode(permissionMode: CliPermissionMode): Exclude<CliInteractiveMode, 'planning'> {
-	return permissionMode === 'full' ? 'accept-edits' : 'manual';
+	return permissionMode === 'full' ? 'auto' : 'manual';
 }
 
 type DiffSyntaxKind = 'plain' | 'keyword' | 'string' | 'number' | 'comment';
@@ -1416,6 +1312,17 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const [paletteUndo, setPaletteUndo] = useState<{ value: string; selection: number } | undefined>();
 	const [running, setRunning] = useState(false);
 	const [status, setStatus] = useState('ready');
+	// Animation phase for the IDE-style shimmer sweeping across the working label.
+	const [shimmerFrame, setShimmerFrame] = useState(0);
+	// Advances only while a turn is running, mirroring the IDE where the CSS shimmer exists
+	// only on the working placeholder; idle frames would be wasted renders.
+	useEffect(() => {
+		if (!running) {
+			return;
+		}
+		const timer = setInterval(() => setShimmerFrame(frame => frame + 1), SHIMMER_TICK_MS);
+		return () => clearInterval(timer);
+	}, [running]);
 	const [approval, setApproval] = useState<IPendingApproval | undefined>();
 	const [editApproval, setEditApproval] = useState<IPendingEditApproval | undefined>();
 	const [modelTermination, setModelTermination] = useState<IModelTerminationNotice | undefined>();
@@ -1429,14 +1336,12 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const [mode, setMode] = useState<CliInteractiveMode>(initialInteractiveMode);
 	const modeRef = useRef<CliInteractiveMode>(initialInteractiveMode);
 	const [permissionMode, setPermissionMode] = useState<CliPermissionMode>(args.permissionMode);
-	const [expandedToolGroups, setExpandedToolGroups] = useState<Set<string>>(() => new Set());
-	const [expandedToolEntries, setExpandedToolEntries] = useState<Set<string>>(() => new Set());
+	const [expandedTools, setExpandedTools] = useState<Set<string>>(() => new Set());
 	const [selectedToolItemId, setSelectedToolItemId] = useState<string | undefined>();
 	const [diffReviews, setDiffReviews] = useState<ICliDiffReview[] | undefined>();
 	const [diffReviewIndex, setDiffReviewIndex] = useState(0);
 	const [diffFileIndex, setDiffFileIndex] = useState(0);
 	const [diffScrollOffset, setDiffScrollOffset] = useState(0);
-	const [scrollOffset, setScrollOffset] = useState(0);
 	const abortRef = useRef<AbortController | undefined>(undefined);
 	const runtimeRef = useRef<CleanSlateNodeAgentRuntime | undefined>(undefined);
 	const turnStartedAtRef = useRef<number | undefined>(undefined);
@@ -1464,11 +1369,10 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				(mode !== 'planning' || item.id !== '/plan')
 				&& (item.id.slice(1).includes(commandQuery) || item.label.toLowerCase().includes(commandQuery))));
 	const visibleCommandSelection = Math.min(commandSelection, Math.max(0, commandItems.length - 1));
-	const toolGroupIds = useMemo(() => transcriptToolGroupIds(transcript), [transcript]);
-	const toolItemIds = useMemo(() => transcriptToolItemIds(transcript, expandedToolGroups), [transcript, expandedToolGroups]);
+	const toolItemIds = useMemo(() => transcriptToolItemIds(transcript), [transcript]);
 	const activeToolItemId = selectedToolItemId && toolItemIds.includes(selectedToolItemId)
 		? selectedToolItemId
-		: toolItemIds.at(-1) ?? toolGroupIds.at(-1);
+		: toolItemIds.at(-1);
 	const selectInteractiveMode = (nextMode: CliInteractiveMode) => {
 		modeRef.current = nextMode;
 		setMode(nextMode);
@@ -1483,8 +1387,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			next.has(itemId) ? next.delete(itemId) : next.add(itemId);
 			return next;
 		};
-		itemId.startsWith('group:') ? setExpandedToolGroups(update) : setExpandedToolEntries(update);
-		setScrollOffset(0);
+		setExpandedTools(update);
 	};
 	const persist = (nextTranscript?: ICliTranscriptEntry[]) => {
 		const current = sessionRef.current;
@@ -1605,7 +1508,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				if (runtimeRef.current?.getSessionSnapshot().task?.awaitingApproval) {
 					return false;
 				}
-				if (modeRef.current === 'accept-edits') {
+				if (modeRef.current === 'auto') {
 					return true;
 				}
 				if (modeRef.current === 'planning') {
@@ -1670,7 +1573,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 
 	const decideEditApproval = (approved: boolean, forSession = false) => {
 		if (forSession && approved) {
-			selectInteractiveMode('accept-edits');
+			selectInteractiveMode('auto');
 		}
 		const pending = editApproval;
 		setEditApproval(undefined);
@@ -1856,8 +1759,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		setSession(next);
 		setTranscript(next.transcript);
 		setTranscriptEpoch(value => value + 1);
-		setExpandedToolGroups(new Set());
-		setExpandedToolEntries(new Set());
+		setExpandedTools(new Set());
 		setSelectedToolItemId(undefined);
 		setShowSessions(false);
 		setAllowCommandsForSession(false);
@@ -1952,7 +1854,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		if (value === '/help') {
-			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /plan · /accept-edits · /manual · shift+tab mode · /permissions read-only|default|full · /context · /changes · /diff · /details · /doctor · /logout · /clear · /exit'));
+			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /plan · /auto · /manual · shift+tab mode · /permissions read-only|default|full · /context · /changes · /diff · /details · /doctor · /logout · /clear · /exit'));
 			return;
 		}
 		if (value === '/details') {
@@ -2071,9 +1973,9 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			await executeTask(value.slice('/plan '.length).trim(), 'planning');
 			return;
 		}
-		if (value === '/accept-edits') {
-			selectInteractiveMode('accept-edits');
-			append(transcriptEntry('system', 'Accept edits enabled. File edits will be applied without asking.'));
+		if (value === '/auto' || value === '/accept-edits') {
+			selectInteractiveMode('auto');
+			append(transcriptEntry('system', 'Auto mode enabled. File edits and commands may run without asking when permissions allow it.'));
 			return;
 		}
 		if (value === '/manual') {
@@ -2157,10 +2059,6 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			} else if (key.escape) {
 				setModelTermination(undefined);
 				setStatus('ready');
-			} else if (wheelDirection < 0) {
-				setScrollOffset(value => value + 3);
-			} else if (wheelDirection > 0) {
-				setScrollOffset(value => Math.max(0, value - 3));
 			} else if (inputValue === 'c' && key.ctrl) {
 				persist();
 				exit();
@@ -2212,7 +2110,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		if (isTerminalMouseEvent(inputValue)) {
 			if (mouse?.action === 'press' && mouse.button === 0) {
 				const line = liveLines[mouse.y - TRANSCRIPT_FIRST_ROW];
-				const itemId = line?.toolItemId ?? line?.toolGroupId;
+				const itemId = line?.toolItemId;
 				if (itemId) {
 					toggleToolItem(itemId);
 				}
@@ -2291,12 +2189,12 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		return liveText ? [...tail, { id: 'live-answer', kind: 'assistant', content: liveText, timestamp: 0 }] : tail;
 	}, [transcript, running, liveText]);
 	const staticLines = useMemo(
-		() => transcriptViewportLines(staticEntries, contentWidth, expandedToolGroups, undefined, expandedToolEntries),
-		[staticEntries, contentWidth, expandedToolGroups, expandedToolEntries]
+		() => transcriptViewportLines(staticEntries, contentWidth, expandedTools, undefined, expandedTools),
+		[staticEntries, contentWidth, expandedTools]
 	);
 	const liveLines = useMemo(
-		() => transcriptViewportLines(liveEntries, contentWidth, expandedToolGroups, activeToolItemId, expandedToolEntries),
-		[liveEntries, contentWidth, expandedToolGroups, expandedToolEntries, activeToolItemId]
+		() => transcriptViewportLines(liveEntries, contentWidth, expandedTools, activeToolItemId, expandedTools),
+		[liveEntries, contentWidth, expandedTools, activeToolItemId]
 	);
 	const staticItems = useMemo<ICliStaticItem[]>(
 		() => [
@@ -2402,7 +2300,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			    input inside it, so the prompt keeps its shape while a turn streams. */}
 			{activityVisible && (
 				<Box paddingX={1}>
-					<Text color={COLORS.warning}><Spinner type="line" /> {formatActivityStatus(status)}</Text>
+					<Text color={COLORS.warning}><ShimmerLabel label={formatActivityStatus(status)} frame={shimmerFrame} /></Text>
 					<Text color={COLORS.muted}> · Esc to cancel</Text>
 				</Box>
 			)}

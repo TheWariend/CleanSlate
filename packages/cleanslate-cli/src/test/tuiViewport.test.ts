@@ -14,7 +14,6 @@ import {
 	normalizeTurnProse,
 	stripMarkdownHeading,
 	padTranscriptViewportLines,
-	transcriptToolGroupIds,
 	transcriptToolItemIds,
 	transcriptViewportLines,
 	visibleTranscriptLines
@@ -48,7 +47,7 @@ test('TUI uses compact turn markers without speaker labels', () => {
 	assert.notEqual(lines[0]?.kind, 'blank');
 });
 
-test('TUI keeps compact tool activity inline and expands every call on demand', () => {
+test('TUI renders each tool call in sequence like the IDE transcript', () => {
 	const tools: ICliTranscriptEntry[] = [
 		{ ...entry('search-1', 'tool', 'completed'), toolName: 'search_workspace', status: 'completed' },
 		{ ...entry('search-2', 'tool', 'completed'), toolName: 'grep_search', status: 'completed' },
@@ -81,59 +80,70 @@ test('TUI keeps compact tool activity inline and expands every call on demand', 
 
 	const compact = transcriptViewportLines(tools, 100);
 	assert.deepEqual(compact.map(line => line.text), [
-		'● › Searched ×2 · Read ×2 · Edited main.dart +2 -1 · Checked lints · 1 failed',
+		'  ✓ › Searched',
+		'  ✓ › Searched',
+		'  ✓ › Read(lib/main.dart)',
+		'  × › Read(lib/large.dart)',
+		'  ✓ › Updated(/workspace/lib/main.dart)',
 		'  main.dart  +2 -1',
 		'  @@ -1,2 +1,3 @@',
 		'     1 - const oldValue = true;',
 		'     1 + const newValue = true;',
-		'     2 + const enabled = true;'
+		'     2 + const enabled = true;',
+		'  ✓ › Checked lints(clean)'
 	]);
-	assert.deepEqual(compact.slice(1).map(line => line.kind), [
-		'diffHeader',
-		'diffHunk',
-		'diffDeletion',
-		'diffAddition',
-		'diffAddition'
+	assert.deepEqual(compact.map(line => line.toolItemId), [
+		'search-1',
+		'search-2',
+		'read-1',
+		'read-2',
+		'edit-1',
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		'lints-1'
 	]);
 
-	const expanded = transcriptViewportLines(tools, 100, true);
-	assert.equal(expanded.length, 30);
-	assert.equal(new Set(expanded.map(line => line.key)).size, expanded.length);
-	assert.equal(expanded.some(line => /Read\(lib\/main\.dart\)/.test(line.text)), true);
-	assert.equal(expanded.some(line => /× ⌄ Read\(lib\/large\.dart\)/.test(line.text)), true);
-	assert.equal(expanded.some(line => /Update\(\/workspace\/lib\/main\.dart\)/.test(line.text)), true);
-	assert.equal(expanded.filter(line => line.kind === 'diffDeletion').length >= 1, true);
+	const expandedAll = transcriptViewportLines(tools, 100, true);
+	assert.equal(new Set(expandedAll.map(line => line.key)).size, expandedAll.length);
+	assert.equal(expandedAll.some(line => /Read\(lib\/main\.dart\)/.test(line.text)), true);
+	assert.equal(expandedAll.filter(line => /× ⌄ Read\(lib\/large\.dart\)/.test(line.text)).length, 1);
+	assert.equal(expandedAll.some(line => /Updated\(\/workspace\/lib\/main\.dart\)/.test(line.text)), true);
+	assert.equal(expandedAll.some(line => line.text.includes('└ Input: lib/main.dart')), true);
+	assert.equal(expandedAll.filter(line => line.kind === 'diffDeletion').length >= 1, true);
+
+	const expandedOne = transcriptViewportLines(tools, 100, new Set(['read-1']));
+	assert.equal(expandedOne.filter(line => line.text.includes('└')).length, 1);
 });
 
-test('TUI details mode expands tool groups without reordering the transcript', () => {
+test('TUI keeps interleaved tool and answer order intact without grouping', () => {
 	const transcript: ICliTranscriptEntry[] = [
 		{ ...entry('old-read', 'tool', 'old.dart'), toolName: 'read_file', status: 'completed' },
 		entry('answer', 'assistant', 'Done with the first task.'),
 		{ ...entry('new-read', 'tool', 'new.dart'), toolName: 'read_file', status: 'completed' }
 	];
 
-	const expanded = transcriptViewportLines(transcript, 100, true).map(line => line.text);
-	assert.equal(expanded.filter(line => /✓ [⌄›] Read/.test(line)).length, 2);
-	assert.equal(expanded[0], '● ⌄ Read');
-	assert.equal(expanded[3], '');
-	assert.equal(expanded[4], '↳ Done with the first task.');
-	assert.equal(expanded[5], '● ⌄ Read');
+	const lines = transcriptViewportLines(transcript, 100).map(line => line.text);
+	assert.equal(lines.filter(line => /✓ [⌄›] Read/.test(line)).length, 2);
+	assert.deepEqual(lines, [
+		'  ✓ › Read(old.dart)',
+		'',
+		'↳ Done with the first task.',
+		'  ✓ › Read(new.dart)'
+	]);
 });
 
-test('TUI expands tool groups and individual tool results independently', () => {
+test('TUI expands individual tool rows independently', () => {
 	const tools: ICliTranscriptEntry[] = [
 		{ ...entry('search', 'tool', '2 matches'), toolName: 'grep_search', status: 'completed' },
 		{ ...entry('read', 'tool', 'lib/main.dart'), toolName: 'read_file', status: 'completed', detail: { input: { path: 'lib/main.dart' }, result: { success: true } } }
 	];
-	const groups = new Set(['group:search']);
-	const groupOnly = transcriptViewportLines(tools, 100, groups, 'read');
-	const withRead = transcriptViewportLines(tools, 100, groups, undefined, new Set(['read']));
+	const expandedOne = transcriptViewportLines(tools, 100, new Set(['read']), undefined, new Set(['read']));
 
-	assert.deepEqual(transcriptToolGroupIds(tools), ['group:search']);
-	assert.deepEqual(transcriptToolItemIds(tools, groups), ['group:search', 'search', 'read']);
-	assert.equal(groupOnly.some(line => line.text.includes('└ lib/main.dart')), false);
-	assert.equal(withRead.some(line => line.text.includes('└ lib/main.dart')), false);
-	assert.equal(withRead.some(line => line.toolItemId === 'read'), true);
+	assert.deepEqual(transcriptToolItemIds(tools), ['search', 'read']);
+	assert.equal(expandedOne.some(line => line.text.includes('└ Input: lib/main.dart')), true);
 });
 
 test('TUI formats elapsed labels and tokenizes code in diffs', () => {
@@ -189,10 +199,10 @@ test('TUI collapses blank-line runs inside a turn to one paragraph break', () =>
 	assert.equal(rendered.filter(line => line.text.trim() === '').length, 1);
 });
 
-test('TUI exposes active edit tools as editing activity', () => {
-	assert.equal(formatActivityStatus('running apply_edit'), 'Editing…');
-	assert.equal(formatActivityStatus('running write_file'), 'Editing…');
-	assert.equal(formatActivityStatus('running read_file'), 'Reading…');
+test('TUI shows Working while tools run and Thinking otherwise', () => {
+	assert.equal(formatActivityStatus('running apply_edit'), 'Working…');
+	assert.equal(formatActivityStatus('running write_file'), 'Working…');
+	assert.equal(formatActivityStatus('running read_file'), 'Working…');
 });
 
 test('TUI viewport never renders more rows than its content budget', () => {
