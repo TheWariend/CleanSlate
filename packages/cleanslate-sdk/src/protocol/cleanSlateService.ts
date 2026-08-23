@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ICleanSlateService, IChatMessage, IChatOptions, ICleanSlateConfigurationService, AIProvider, ICleanSlateMainService, ICleanSlateLogger, CleanSlateResponsePart, ICleanSlateProviderCapabilities, ICleanSlateConfiguration, CleanSlateReasoningLevel } from './cleanSlateAI.js';
+import { ICleanSlateService, IChatMessage, IChatOptions, ICleanSlateConfigurationService, AIProvider, ICleanSlateMainService, ICleanSlateLogger, CleanSlateResponsePart, ICleanSlateProviderCapabilities, ICleanSlateConfiguration, CleanSlateReasoningLevel, isCleanSlateReasoningLevel } from './cleanSlateAI.js';
 import { VSBuffer } from '../core/buffer.js';
 import { CancellationToken } from '../core/cancellation.js';
 import { Subscribable } from '../host/events.js';
@@ -100,20 +100,21 @@ export class CleanSlateService implements ICleanSlateService {
 		// the model picker — that reads as "misconfigured" instead of "limit
 		// reached". Only a genuine lack of plan/models yields an empty list.
 		const managedModels = (entitlements.models || []).filter(model => !!model.id?.trim());
-		// The backend is authoritative for managed model limits (e.g. DeepSeek
-		// V4 Flash's 1M-token window). Seed the metadata cache so capability
-		// resolution prefers these over client-side family defaults.
 		for (const model of managedModels) {
 			const id = model.id.trim();
-			const contextWindowTokens = this.toPositiveInteger(model.context_window_tokens);
-			if (contextWindowTokens !== undefined) {
-				this.modelsDevMetadata.set(this.modelsDevMetadataKey('cleanslate', id), {
-					id,
-					provider: 'cleanslate',
-					contextWindowTokens,
-					maxOutputTokens: this.toPositiveInteger(model.max_output_tokens)
-				});
+			// The backend is authoritative for managed model limits (e.g. DeepSeek
+			// V4 Flash's 1M-token window). Seed the metadata cache so capability
+			// resolution prefers these over client-side family defaults.
+			const seeded: NonNullable<Awaited<ReturnType<ICleanSlateMainService['getModelsDevModelMetadata']>>> = {
+				id,
+				provider: 'cleanslate',
+				contextWindowTokens: this.toPositiveInteger(model.context_window_tokens),
+				maxOutputTokens: this.toPositiveInteger(model.max_output_tokens)
+			};
+			if (isCleanSlateReasoningLevel(model.reasoning_effort)) {
+				seeded.reasoningEfforts = [model.reasoning_effort];
 			}
+			this.modelsDevMetadata.set(this.modelsDevMetadataKey('cleanslate', id), seeded);
 		}
 		const models = managedModels.map(model => model.id.trim());
 		return this.withConfiguredModel(config.providers.cleanslate.model, models);

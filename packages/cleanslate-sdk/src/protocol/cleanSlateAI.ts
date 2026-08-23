@@ -486,6 +486,11 @@ export interface ICleanSlateManagedModel {
     /** Server-declared context window; authoritative over client-side family defaults. */
     readonly context_window_tokens?: number | null;
     readonly max_output_tokens?: number | null;
+    /**
+     * Server-declared reasoning effort vocabulary for the model (e.g. ox-alpha
+     * exposes low/high/max). Mirrors models.dev's reasoning_effort values.
+     */
+    readonly reasoning_effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null;
     /** Premium model usable only with usage credits. The server enforces this; the UI only reflects it. */
     readonly requires_credits?: boolean;
 }

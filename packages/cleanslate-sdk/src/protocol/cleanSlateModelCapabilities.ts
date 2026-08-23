@@ -649,10 +649,12 @@ function resolveCleanSlateProviderTuning(request: ICleanSlateModelCapabilityRequ
 
 	// OpenRouter normalizes reasoning_effort across backends, so trust the
 	// catalog's advertised effort vocabulary for models without a dedicated
-	// resolver above (e.g. stealth/ox-alpha exposes low/high/max). Budget- or
+	// resolver above (e.g. stealth/ox-alpha exposes low/high/max). The managed
+	// CleanSlate proxy speaks the same normalized parameter and serves many of
+	// the same models, so its catalog entries map identically. Budget- or
 	// thinking-config style families keep their own handling.
 	if (
-		providerID === 'openrouter'
+		(providerID === 'openrouter' || providerID === 'cleanslate')
 		&& !result.supportedReasoningEfforts
 		&& family !== 'claude'
 		&& family !== 'gemini'

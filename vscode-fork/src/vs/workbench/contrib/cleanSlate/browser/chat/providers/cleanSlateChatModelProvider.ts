@@ -4,8 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Emitter, Event } from '../../../../../../base/common/event.js';
+import { CancellationToken } from '../../../../../../base/common/cancellation.js';
 import { Disposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { AIProvider, ICleanSlateConfiguration, ICleanSlateConfigurationService, ICleanSlateService } from '../../../../../services/cleanSlate/common/core/cleanSlateAI.js';
+import type { ICleanSlateMainService } from '../../../../../services/cleanSlate/common/core/cleanSlateAI.js';
+import type { ICleanSlateModelsDevModelMetadata } from '@cleanslate/sdk/protocol/cleanSlateAI.js';
 import { CleanSlateOpenAICompatibleProviderFlavor, ICleanSlateReasoningLevelOption, resolveCleanSlateReasoningLevelOptions } from '@cleanslate/sdk/protocol/cleanSlateModelCapabilities.js';
 
 export interface ICleanSlateModelDropdownState {
@@ -41,11 +44,14 @@ export class CleanSlateChatModelProvider extends Disposable {
     readonly onDidChangeState: Event<ICleanSlateModelDropdownState> = this._onDidChangeState.event;
     private readonly modelListCache = new Map<AIProvider, string[]>();
     private readonly selectorStateCache = new Map<AIProvider, ICleanSlateModelSelectorState>();
+    /** Cached models.dev metadata keyed by `${provider}:${model}` for the reasoning picker. */
+    private readonly modelsDevMetadataCache = new Map<string, ICleanSlateModelsDevModelMetadata | undefined>();
     private refreshTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
 
     constructor(
         private readonly cleanSlateService: ICleanSlateService,
-        private readonly configService: ICleanSlateConfigurationService
+        private readonly configService: ICleanSlateConfigurationService,
+        private readonly cleanSlateMainService?: ICleanSlateMainService
     ) {
         super();
         this._register(this._onDidChangeState);
@@ -91,9 +97,38 @@ export class CleanSlateChatModelProvider extends Disposable {
             options: resolveCleanSlateReasoningLevelOptions({
                 provider,
                 model,
-                flavor: this.getOpenAICompatibleFlavor(provider, config)
+                flavor: this.getOpenAICompatibleFlavor(provider, config),
+                modelsDevMetadata: this.getCachedModelsDevMetadata(provider, model)
             })
         };
+    }
+
+    /**
+     * Returns cached models.dev metadata for the current provider/model, or undefined when not
+     * cached yet. Kicks off a one-shot fetch through the main process so the next call after the
+     * metadata arrives sees the real capability data.
+     */
+    private getCachedModelsDevMetadata(provider: AIProvider, model?: string): ICleanSlateModelsDevModelMetadata | undefined {
+        if (!model || !this.cleanSlateMainService?.getModelsDevModelMetadata) {
+            return undefined;
+        }
+        const cacheKey = `${provider}:${model}`;
+        if (this.modelsDevMetadataCache.has(cacheKey)) {
+            return this.modelsDevMetadataCache.get(cacheKey);
+        }
+        this.modelsDevMetadataCache.set(cacheKey, undefined);
+        const mainService = this.cleanSlateMainService;
+        void mainService.getModelsDevModelMetadata(provider, model, CancellationToken.None).then(metadata => {
+            const hadMetadata = this.modelsDevMetadataCache.get(cacheKey) !== undefined;
+            this.modelsDevMetadataCache.set(cacheKey, metadata);
+            // Re-render the reasoning picker now that real capability data is available.
+            if (!hadMetadata) {
+                this._onDidChangeState.fire(this.state);
+            }
+        }, () => {
+            // Keep the undefined placeholder so we do not retry in a loop on failure.
+        });
+        return undefined;
     }
 
     formatModelLabel(name: string): string {
