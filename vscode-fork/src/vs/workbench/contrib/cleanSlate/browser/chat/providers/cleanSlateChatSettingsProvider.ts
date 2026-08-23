@@ -5,6 +5,8 @@
 
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { Disposable } from '../../../../../../base/common/lifecycle.js';
+import type { CleanSlateEditMode } from '@cleanslate/sdk/protocol/cleanSlateAI.js';
+import { isCleanSlateEditMode } from '@cleanslate/sdk/protocol/cleanSlateAI.js';
 import { CLEANSLATE_FALLBACK_CONTEXT_WINDOW_TOKENS, CleanSlateReasoningLevel, ICleanSlateConfigurationService, normalizeCleanSlateExecutionState } from '../../../../../services/cleanSlate/common/core/cleanSlateAI.js';
 
 export interface ICleanSlateChatSettingsState {
@@ -12,6 +14,7 @@ export interface ICleanSlateChatSettingsState {
     fileTruncation: number;
     planMode: boolean;
     reasoningLevel: CleanSlateReasoningLevel;
+    editMode: CleanSlateEditMode;
 }
 
 export class CleanSlateChatSettingsProvider extends Disposable {
@@ -59,6 +62,13 @@ export class CleanSlateChatSettingsProvider extends Disposable {
         this.refresh();
     }
 
+    async updateEditMode(editMode: CleanSlateEditMode): Promise<void> {
+        this.state = { ...this.state, editMode };
+        this._onDidChangeState.fire(this.state);
+        await this.configService.updateConfiguration({ editMode });
+        this.refresh();
+    }
+
     private readState(): ICleanSlateChatSettingsState {
         const config = this.configService.getConfiguration();
         const executionState = normalizeCleanSlateExecutionState({
@@ -69,7 +79,8 @@ export class CleanSlateChatSettingsProvider extends Disposable {
             contextWindow: config.contextWindow || CLEANSLATE_FALLBACK_CONTEXT_WINDOW_TOKENS,
             fileTruncation: config.fileTruncation || 4000,
             planMode: executionState.planMode,
-            reasoningLevel: executionState.reasoningLevel
+            reasoningLevel: executionState.reasoningLevel,
+            editMode: isCleanSlateEditMode(config.editMode) ? config.editMode : 'manual'
         };
     }
 }

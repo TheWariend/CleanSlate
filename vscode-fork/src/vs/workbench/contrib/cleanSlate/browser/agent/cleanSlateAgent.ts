@@ -174,10 +174,15 @@ export class CleanSlateAgent {
             commandService: this.commandService,
             recentFocusLines: this.recentFocusLines,
             readFileState: this.readFileState,
-            requestCommandApproval: async (req: { command: string; cwd?: string; reason?: string; toolName?: string; toolCallId?: string }) => this.commandApprovalService.requestApproval({
-                ...req,
-                sessionId: this.sessionId
-            })
+            requestCommandApproval: async (req: { command: string; cwd?: string; reason?: string; toolName?: string; toolCallId?: string }) => {
+                if (this.shouldAutoApproveCommand()) {
+                    return true;
+                }
+                return this.commandApprovalService.requestApproval({
+                    ...req,
+                    sessionId: this.sessionId
+                });
+            }
         };
 
         this.contextHelper = new CleanSlateAgentContextHelper(
@@ -263,6 +268,14 @@ export class CleanSlateAgent {
     public setSessionId(sessionId: string): void {
         this.sessionId = sessionId;
         this.toolContext.sessionId = sessionId;
+    }
+
+    /**
+     * The approval-mode chip ('auto') promises that file edits AND commands run
+     * without prompts, so command/MCP approval requests resolve immediately.
+     */
+    private shouldAutoApproveCommand(): boolean {
+        return this.configService.getConfiguration().editMode === 'auto';
     }
 
 	public getRuntimeSnapshot(): ICleanSlateAgentRuntimeSnapshot | undefined {
@@ -1188,12 +1201,17 @@ export class CleanSlateAgent {
         const toolPromise = tool.run(safeInput, {
             ...this.toolContext,
             signal,
-            requestCommandApproval: async (req) => this.commandApprovalService.requestApproval({
-                ...req,
-                sessionId: this.sessionId,
-                toolName: req.toolName || toolName,
-                toolCallId: req.toolCallId || toolCallId
-            }),
+            requestCommandApproval: async (req) => {
+                if (this.shouldAutoApproveCommand()) {
+                    return true;
+                }
+                return this.commandApprovalService.requestApproval({
+                    ...req,
+                    sessionId: this.sessionId,
+                    toolName: req.toolName || toolName,
+                    toolCallId: req.toolCallId || toolCallId
+                });
+            },
             onProgress: (p) => queue.push({ type: 'tool_progress', toolName, progress: p, toolCallId })
         }).then(result => {
             if (result?.success === false) {

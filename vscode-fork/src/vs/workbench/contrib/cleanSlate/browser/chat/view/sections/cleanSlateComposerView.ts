@@ -7,6 +7,8 @@ import * as dom from '../../../../../../../base/browser/dom.js';
 import type { ICleanSlateBrowserAnnotation } from '../../../core/cleanSlateBrowserAutomationService.js';
 import { policy } from '../../runtime/cleanSlateChatController.js';
 import { SLASH_COMMANDS } from '@cleanslate/sdk/composer/commands/slashCommands.js';
+import type { CleanSlateEditMode } from '@cleanslate/sdk/protocol/cleanSlateAI.js';
+import { formatCleanSlateEditMode } from '@cleanslate/sdk/protocol/cleanSlateAI.js';
 import type { ICleanSlateEditorSelectionReference } from '../../providers/cleanSlateChatComposerProvider.js';
 import { setCleanSlateProviderLogo } from '../../providers/cleanSlateProviderLogos.js';
 import type { AIProvider } from '../../../../../../services/cleanSlate/common/core/cleanSlateAI.js';
@@ -31,6 +33,8 @@ export interface ICleanSlateComposerViewOptions {
 	readonly onReasoningSelector: (anchor: HTMLElement) => void;
 	readonly onPlanModeCommand: () => void;
 	readonly onPlanModeDisabled: () => void;
+	/** Opens the edit-approval mode picker anchored to the given element. */
+	readonly onEditModeSelector?: (anchor: HTMLElement) => void;
 	readonly onModelSelector: (anchor: HTMLElement) => void;
 	readonly onDeleteAnnotations: (annotations: readonly ICleanSlateBrowserAnnotation[]) => void;
 	readonly onRemoveSelectionReference: (index: number) => void;
@@ -63,6 +67,8 @@ export class CleanSlateComposerView {
 	private sendButton!: HTMLElement;
 	private reasoningDropdown!: HTMLElement;
 	private planModeChip!: HTMLElement;
+	private editModeChip!: HTMLElement;
+	private editModeChipLabel!: HTMLElement;
 	private modelDropdown!: HTMLElement;
 	private modelProviderLogo!: HTMLElement;
 	private contextWindowButton!: HTMLElement;
@@ -177,6 +183,19 @@ export class CleanSlateComposerView {
 		this.planModeChip.style.display = isActive ? 'inline-flex' : 'none';
 		this.planModeChip.setAttribute('aria-pressed', isActive ? 'true' : 'false');
 		this.planModeChip.title = isActive ? 'Turn Plan mode off' : 'Plan mode is off';
+	}
+
+	updateEditMode(mode: CleanSlateEditMode): void {
+		const acceptEdits = mode === 'accept-edits';
+		const auto = mode === 'auto';
+		this.editModeChipLabel.textContent = formatCleanSlateEditMode(mode);
+		this.editModeChip.classList.toggle('active', mode !== 'manual');
+		this.editModeChip.setAttribute('aria-pressed', mode !== 'manual' ? 'true' : 'false');
+		this.editModeChip.title = auto
+			? 'File edits and commands are applied automatically. Click to change.'
+			: acceptEdits
+				? 'File edits are applied automatically, commands still wait for approval. Click to change.'
+				: 'Every file edit and command waits for your approval. Click to change.';
 	}
 
 	updateContextWindowUsage(usage: ICleanSlateContextWindowUsage): void {
@@ -385,6 +404,13 @@ export class CleanSlateComposerView {
 		modelLabel.textContent = 'Loading...';
 		dom.append(this.modelDropdown, dom.$('i.codicon.codicon-chevron-down'));
 		this.modelDropdown.onclick = () => this.options.onModelSelector(this.modelDropdown);
+
+		this.editModeChip = dom.append(leftFooter, dom.$('button.cleanSlate-edit-mode-chip')) as HTMLButtonElement;
+		(this.editModeChip as HTMLButtonElement).type = 'button';
+		this.editModeChipLabel = dom.append(this.editModeChip, dom.$('span.dropdown-label'));
+		dom.append(this.editModeChip, dom.$('i.codicon.codicon-chevron-down'));
+		this.editModeChip.onclick = () => this.options.onEditModeSelector?.(this.editModeChip);
+		this.updateEditMode('manual');
 
 		this.buildContextWindowIndicator(leftFooter);
 	}

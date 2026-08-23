@@ -47,6 +47,7 @@ import { CleanSlateReviewRenderer } from '../renderers/cleanSlateReviewRenderer.
 import { collectSCMReviewChanges, mergeCleanSlateReviewChanges, type ICleanSlateReviewChange } from '../renderers/cleanSlateReviewModel.js';
 import { CleanSlateModelSelectorRenderer } from '../renderers/cleanSlateModelSelectorRenderer.js';
 import { CleanSlateReasoningSelectorRenderer } from '../renderers/cleanSlateModeSelectorRenderer.js';
+import { CleanSlateEditModeSelectorRenderer } from '../renderers/cleanSlateEditModeSelectorRenderer.js';
 import { CleanSlateHistoryOverlayRenderer } from '../renderers/cleanSlateHistoryOverlayRenderer.js';
 import type { ICleanSlateEditorSelectionReference } from '../providers/cleanSlateChatComposerProvider.js';
 import { CleanSlateChatSidebarViewModel } from '../viewModel/cleanSlateChatSidebarViewModel.js';
@@ -82,6 +83,7 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
     private readonly reviewRenderer = new CleanSlateReviewRenderer();
     private readonly modelSelectorRenderer: CleanSlateModelSelectorRenderer;
     private readonly reasoningSelectorRenderer: CleanSlateReasoningSelectorRenderer;
+    private readonly editModeSelectorRenderer: CleanSlateEditModeSelectorRenderer;
     private readonly historyOverlayRenderer: CleanSlateHistoryOverlayRenderer;
     private readonly planApprovalController: CleanSlatePlanApprovalController;
     private readonly historyFlowController: CleanSlateHistoryFlowController;
@@ -150,7 +152,7 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
         );
         this.composerProvider = new CleanSlateChatComposerProvider();
         this.settingsProvider = new CleanSlateChatSettingsProvider(this.cleanSlateConfigService);
-        this.modelProvider = new CleanSlateChatModelProvider(this.cleanSlateService, this.cleanSlateConfigService);
+        this.modelProvider = new CleanSlateChatModelProvider(this.cleanSlateService, this.cleanSlateConfigService, this.cleanSlateMainService);
         this.sidebarViewModel = new CleanSlateChatSidebarViewModel(
             this.sessionProvider,
             this.historyProvider,
@@ -171,6 +173,7 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
             void openCleanSlateProCheckout(this.openerService, this.notificationService, this.cleanSlateMainService);
         });
         this.reasoningSelectorRenderer = new CleanSlateReasoningSelectorRenderer(this.settingsProvider, this.modelProvider);
+        this.editModeSelectorRenderer = new CleanSlateEditModeSelectorRenderer(this.settingsProvider);
         this.historyOverlayRenderer = new CleanSlateHistoryOverlayRenderer(this.contextViewService);
         this.planApprovalController = new CleanSlatePlanApprovalController(this.sidebarViewModel, this.artifactService);
         this.annotationController = new CleanSlateAnnotationController(
@@ -293,6 +296,7 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
             this.sidebarViewModel.syncExecutionStateFromSettings();
             this.updateReasoningDropdownState();
             this.updatePlanModeState();
+            this.updateEditModeState();
             this.updateContextWindowUsage();
         }));
         this._register(this.browserAutomationService.onDidChangeAnnotations(event => {
@@ -459,6 +463,9 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
             },
             onPlanModeDisabled: () => {
                 void this.sidebarViewModel.updatePlanMode(false);
+            },
+            onEditModeSelector: (anchor) => {
+                this.editModeSelectorRenderer.toggle(this.container, anchor);
             },
             onModelSelector: (anchor) => {
                 void this.modelSelectorRenderer.toggle(this.container, anchor);
@@ -685,11 +692,16 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
         this.composerView?.updatePlanMode(this.sidebarViewModel.getState().settings.planMode);
     }
 
+    private updateEditModeState(): void {
+        this.composerView?.updateEditMode(this.sidebarViewModel.getState().settings.editMode);
+    }
+
     private syncComposerWithCurrentSession(): void {
         this.switchComposerDraftToActiveSession();
         this.composerView?.setGenerating(this.sidebarViewModel.getIsGenerating());
         this.updateReasoningDropdownState();
         this.updatePlanModeState();
+        this.updateEditModeState();
         this.updateModelDropdownState();
         this.updateContextWindowUsage();
     }

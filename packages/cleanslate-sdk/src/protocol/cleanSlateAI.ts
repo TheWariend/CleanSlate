@@ -43,6 +43,30 @@ export function isCleanSlateReasoningLevel(value: unknown): value is CleanSlateR
     return typeof value === 'string' && (CLEANSLATE_REASONING_LEVELS as readonly string[]).includes(value);
 }
 
+export const CLEANSLATE_EDIT_MODES = ['manual', 'accept-edits', 'auto'] as const;
+
+export type CleanSlateEditMode = typeof CLEANSLATE_EDIT_MODES[number];
+
+export function formatCleanSlateEditMode(mode: CleanSlateEditMode): string {
+    switch (mode) {
+        case 'manual': return 'Manual';
+        case 'accept-edits': return 'Accept edits';
+        case 'auto': return 'Auto';
+    }
+}
+
+export function getCleanSlateEditModeDescription(mode: CleanSlateEditMode): string {
+    switch (mode) {
+        case 'manual': return 'Approve every file edit and command';
+        case 'accept-edits': return 'Apply file edits automatically, approve commands';
+        case 'auto': return 'Apply file edits and commands automatically';
+    }
+}
+
+export function isCleanSlateEditMode(value: unknown): value is CleanSlateEditMode {
+    return typeof value === 'string' && (CLEANSLATE_EDIT_MODES as readonly string[]).includes(value);
+}
+
 export interface ICleanSlateExecutionState {
     readonly planMode: boolean;
     readonly reasoningLevel: CleanSlateReasoningLevel;
@@ -389,6 +413,11 @@ export interface ICleanSlateConfiguration {
      * Enables the explicit planning flow for the active chat session.
      */
     planMode?: boolean;
+    /**
+     * How AI file edits are applied in the IDE: 'manual' keeps every edit pending
+     * until it is accepted; 'accept-edits' applies them automatically.
+     */
+    editMode?: CleanSlateEditMode;
     /**
      * Provider reasoning level applied independently from normal vs planning mode.
      */

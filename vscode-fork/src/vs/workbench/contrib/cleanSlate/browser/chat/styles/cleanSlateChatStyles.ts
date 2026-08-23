@@ -1451,6 +1451,30 @@ export const CLEANSLATE_CHAT_STYLES = `
                 font-size: 12px;
             }
 
+            .cleanSlate-edit-mode-chip {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                padding: 4px 8px;
+                border: 0;
+                border-left: 1px solid var(--vscode-input-border, rgba(255,255,255,.18));
+                background: transparent;
+                color: var(--vscode-descriptionForeground);
+                cursor: pointer;
+                font-size: 11px;
+                white-space: nowrap;
+                height: 24px;
+                box-sizing: border-box;
+            }
+
+            .cleanSlate-edit-mode-chip.active {
+                color: var(--vscode-foreground);
+            }
+
+            .cleanSlate-edit-mode-chip .codicon {
+                font-size: 12px;
+            }
+
             .cleanSlate-dropdown.mode-dropdown {
                 flex: 0 1 auto;
                 max-width: 96px;
@@ -4423,6 +4447,83 @@ export const CLEANSLATE_CHAT_STYLES = `
                 font-size: 11px;
                 color: var(--vscode-descriptionForeground);
                 line-height: 1.4;
+            }
+
+            .cleanSlate-mode-selector-overlay.cleanSlate-edit-mode-overlay {
+                width: min(260px, calc(100vw - 24px));
+            }
+
+            .cleanSlate-edit-mode-overlay .edit-mode-header {
+                padding: 6px 8px 4px;
+            }
+
+            .cleanSlate-edit-mode-overlay .edit-mode-heading {
+                font-size: 11px;
+                font-weight: 600;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+                color: var(--vscode-descriptionForeground);
+            }
+
+            .cleanSlate-edit-mode-overlay .edit-mode-option {
+                appearance: none;
+                display: flex;
+                align-items: flex-start;
+                gap: 8px;
+                width: 100%;
+                padding: 8px 10px;
+                border: 0;
+                border-radius: 6px;
+                background: transparent;
+                color: inherit;
+                font-family: inherit;
+                text-align: left;
+                cursor: pointer;
+                transition: background 0.15s;
+            }
+
+            .cleanSlate-edit-mode-overlay .edit-mode-option:hover {
+                background: var(--vscode-list-hoverBackground);
+            }
+
+            .cleanSlate-edit-mode-overlay .edit-mode-option:focus-visible {
+                outline: 1px solid var(--vscode-focusBorder);
+                outline-offset: -1px;
+            }
+
+            .cleanSlate-edit-mode-overlay .edit-mode-option.selected {
+                background: var(--vscode-list-activeSelectionBackground);
+            }
+
+            .cleanSlate-edit-mode-overlay .edit-mode-option.selected .edit-mode-option-label,
+            .cleanSlate-edit-mode-overlay .edit-mode-option.selected .edit-mode-option-description {
+                color: var(--vscode-list-activeSelectionForeground);
+            }
+
+            .cleanSlate-edit-mode-overlay .edit-mode-option-text {
+                flex: 1 1 auto;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+
+            .cleanSlate-edit-mode-overlay .edit-mode-option-label {
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--vscode-foreground);
+            }
+
+            .cleanSlate-edit-mode-overlay .edit-mode-option-description {
+                font-size: 11px;
+                color: var(--vscode-descriptionForeground);
+                line-height: 1.4;
+            }
+
+            .cleanSlate-edit-mode-overlay .edit-mode-option-check {
+                flex: 0 0 auto;
+                align-self: center;
+                font-size: 14px;
             }
 
             @keyframes cleanSlate-fade-in-up {

@@ -76,6 +76,7 @@ import { CleanSlatePendingEditsRenderer } from '../chat/renderers/cleanSlatePend
 import { collectGitReviewChanges, collectSCMReviewChanges, mergeCleanSlateReviewChanges, type CleanSlateReviewDisplayScopeMode, type ICleanSlateReviewChange } from '../chat/renderers/cleanSlateReviewModel.js';
 import { CleanSlateModelSelectorRenderer } from '../chat/renderers/cleanSlateModelSelectorRenderer.js';
 import { CleanSlateReasoningSelectorRenderer } from '../chat/renderers/cleanSlateModeSelectorRenderer.js';
+import { CleanSlateEditModeSelectorRenderer } from '../chat/renderers/cleanSlateEditModeSelectorRenderer.js';
 import { normalizeChatResponse } from '../chat/runtime/cleanSlateChatResponseNormalizer.js';
 import { toPersistableCleanSlateTranscriptPayload } from '../chat/runtime/cleanSlateTranscriptPersistence.js';
 import { ensureCleanSlateChatStyles } from '../chat/styles/cleanSlateChatStyles.js';
@@ -241,6 +242,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	private readonly pendingEditsRenderer: CleanSlatePendingEditsRenderer;
 	private readonly modelSelectorRenderer: CleanSlateModelSelectorRenderer;
 	private readonly reasoningSelectorRenderer: CleanSlateReasoningSelectorRenderer;
+	private readonly editModeSelectorRenderer: CleanSlateEditModeSelectorRenderer;
 	private readonly planApprovalController: CleanSlatePlanApprovalController;
 	private readonly annotationController: CleanSlateAnnotationController;
 	private readonly messageSubmitController: CleanSlateMessageSubmitController;
@@ -316,7 +318,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		this._register(this.sessionProvider);
 		this.composerProvider = new CleanSlateChatComposerProvider();
 		this.settingsProvider = new CleanSlateChatSettingsProvider(cleanSlateConfigService);
-		this.modelProvider = new CleanSlateChatModelProvider(cleanSlateService, cleanSlateConfigService);
+		this.modelProvider = new CleanSlateChatModelProvider(cleanSlateService, cleanSlateConfigService, cleanSlateMainService);
 		this._register(this.settingsProvider);
 		this._register(this.modelProvider);
 		this.sidebarViewModel = new CleanSlateChatSidebarViewModel(
@@ -343,6 +345,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			void openCleanSlateProCheckout(this.openerService, this.notificationService, this.cleanSlateMainService);
 		});
 		this.reasoningSelectorRenderer = new CleanSlateReasoningSelectorRenderer(this.settingsProvider, this.modelProvider);
+		this.editModeSelectorRenderer = new CleanSlateEditModeSelectorRenderer(this.settingsProvider);
 		this.planApprovalController = new CleanSlatePlanApprovalController(this.sidebarViewModel, this.artifactService);
 		this.annotationController = new CleanSlateAnnotationController(
 			this.browserAutomationService,
@@ -431,6 +434,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			this.sidebarViewModel.syncExecutionStateFromSettings();
 			this.updateReasoningDropdownState();
 			this.updatePlanModeState();
+			this.updateEditModeState();
 			this.composerDraftController.updateContextWindowUsage();
 		}));
 		this._register(this.browserAutomationService.onDidChangeAnnotations(event => {
@@ -1504,6 +1508,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			onReasoningSelector: anchor => void this.reasoningSelectorRenderer.toggle(this.root ?? this.chatSurface, anchor),
 			onPlanModeCommand: () => void this.sidebarViewModel.updatePlanMode(true),
 			onPlanModeDisabled: () => void this.sidebarViewModel.updatePlanMode(false),
+			onEditModeSelector: anchor => this.editModeSelectorRenderer.toggle(this.root ?? this.chatSurface, anchor),
 			onModelSelector: anchor => void this.modelSelectorRenderer.toggle(this.root ?? this.chatSurface, anchor),
 			onDeleteAnnotations: annotations => void this.annotationController.deleteVisible(annotations),
 			onRemoveSelectionReference: index => this.sidebarViewModel.removePendingSelectionReference(index),
@@ -1535,6 +1540,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		this.updateModelDropdownState();
 		this.updateReasoningDropdownState();
 		this.updatePlanModeState();
+		this.updateEditModeState();
 		this.composerDraftController.updateContextWindowUsage();
 		this.updateApproveButtonVisibility();
 		this.updateCommandApprovalVisibility();
@@ -3480,11 +3486,16 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		this.composerView?.updatePlanMode(this.sidebarViewModel.getState().settings.planMode);
 	}
 
+	private updateEditModeState(): void {
+		this.composerView?.updateEditMode(this.sidebarViewModel.getState().settings.editMode);
+	}
+
 	private syncComposerWithCurrentSession(): void {
 		this.composerDraftController.switchToActiveSession();
 		this.composerView?.setGenerating(this.sidebarViewModel.getIsGenerating());
 		this.updateReasoningDropdownState();
 		this.updatePlanModeState();
+		this.updateEditModeState();
 		this.updateModelDropdownState();
 		this.composerDraftController.updateContextWindowUsage();
 	}
