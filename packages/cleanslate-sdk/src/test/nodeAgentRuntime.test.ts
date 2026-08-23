@@ -254,7 +254,9 @@ describe('CleanSlateNodeAgentRuntime', () => {
 		for await (const part of (runtime as any).headlessRuntime.executeTool('list_dir', { path: '.' }, 'call-1')) {
 			denied.push(part);
 		}
-		assert.equal(denied[0].result.code, 'permission_denied');
+		// Denied tools still announce themselves before the refusal so UIs can show activity.
+		assert.equal(denied[0].type, 'tool_start');
+		assert.equal(denied[1].result.code, 'permission_denied');
 		runtime.dispose();
 	});
 });

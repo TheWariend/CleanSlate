@@ -86,6 +86,7 @@ export class CleanSlateHeadlessRuntime {
 		const tool = this.toolsByName.get(toolName);
 		if (!tool) {
 			this.calls.push({ toolName, input, ok: false });
+			yield { type: 'tool_start', toolName, toolCallId, input };
 			yield {
 				type: 'tool_result',
 				toolName,
@@ -96,6 +97,7 @@ export class CleanSlateHeadlessRuntime {
 		}
 		if (this.options.approveTool && !await this.options.approveTool({ toolName, category: tool.category, input })) {
 			this.calls.push({ toolName, input, ok: false });
+			yield { type: 'tool_start', toolName, toolCallId, input };
 			yield {
 				type: 'tool_result',
 				toolName,
@@ -104,6 +106,8 @@ export class CleanSlateHeadlessRuntime {
 			};
 			return;
 		}
+
+		yield { type: 'tool_start', toolName, toolCallId, input };
 
 		let result: any;
 		try {
