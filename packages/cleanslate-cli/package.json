@@ -1,6 +1,6 @@
 {
   "name": "@cleanslate/cli",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "CleanSlate coding agent for the terminal.",
   "license": "MIT",
   "type": "module",
@@ -26,7 +26,7 @@
     "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {
-    "@cleanslate/sdk": "^1.0.6",
+    "@cleanslate/sdk": "^1.0.7",
     "ink": "^7.1.1",
     "ink-text-input": "^6.0.0",
     "react": "^19.2.8"
