@@ -20,7 +20,7 @@ import { IWorkspaceContextService, WorkbenchState, type IWorkspace, type IWorksp
 import { AgentDefinition } from '@cleanslate/sdk/composer/registry/agentSchema.js';
 import { CleanSlateAgent } from '../../agent/cleanSlateAgent.js';
 import { CleanSlateChatController } from '../runtime/cleanSlateChatController.js';
-import { IResponseRenderer } from '../types/cleanSlateChatTypes.js';
+import { type ChatResponse, IResponseRenderer } from '../types/cleanSlateChatTypes.js';
 import { stringifyCleanSlateTranscriptRenderPayload } from '../runtime/cleanSlateTranscriptPersistence.js';
 import { getCleanSlateVisibleUserRequestText, normalizeCleanSlateVisibleWhitespace } from '../runtime/cleanSlateVisibleText.js';
 import { stringifyCleanSlateUserSelectionDisplay } from '../viewModel/cleanSlateChatViewHelpers.js';
@@ -50,6 +50,7 @@ import { CleanSlateChatSessionSnapshotCodec } from './cleanSlateChatSessionSnaps
 
 const CLEANSLATE_ACTIVE_SESSION_STORAGE_KEY = 'cleanSlate.chat.activeSession';
 const CLEANSLATE_ACTIVE_SESSION_SAVE_DEBOUNCE_MS = 250;
+const CLEANSLATE_STREAMING_TRANSCRIPT_SAVE_INTERVAL_MS = 250;
 
 export interface ICleanSlateSessionWorkspaceMetadata {
     readonly workspaceId?: string;
@@ -209,7 +210,8 @@ export class CleanSlateChatSessionProvider extends Disposable {
     private updateTranscriptMessageForSession(
         session: ICleanSlateLiveSession,
         id: string | undefined,
-        update: Partial<Omit<ICleanSlateTranscriptMessage, 'id' | 'role'>>
+        update: Partial<Omit<ICleanSlateTranscriptMessage, 'id' | 'role'>>,
+        emitStateChange = true
     ): void {
         if (!id) {
             return;
@@ -239,7 +241,11 @@ export class CleanSlateChatSessionProvider extends Disposable {
         }
 
         session.transcriptHistory[index] = next;
-        this.notifySessionChanged(session);
+        if (emitStateChange) {
+            this.notifySessionChanged(session);
+        } else {
+            this.persistTranscriptContent(session);
+        }
     }
 
     getPhase(): string {
@@ -653,11 +659,20 @@ export class CleanSlateChatSessionProvider extends Disposable {
         this._onDidChangeState.fire();
     }
 
+    /**
+     * Streaming transcript content is already painted directly by its renderer.
+     * Persist it without invalidating the composer, sidebar and workspace chrome;
+     * those consumers only need semantic session/status changes.
+     */
+    private persistTranscriptContent(session: ICleanSlateLiveSession): void {
+        if (this.surface !== 'agentManager') {
+            this.persistSession(session);
+        }
+        this.queueLiveSessionPublish(session);
+    }
+
     private queueLiveSessionPublish(session: ICleanSlateLiveSession): void {
         if (this.applyingPublishedSession || this.deletedSessionIds.has(session.id)) {
-            return;
-        }
-        if (this.isDeletedSessionSnapshot(this.buildSessionSnapshot(session, session.workspaceName ?? this.getWorkspaceName()))) {
             return;
         }
 
@@ -1006,6 +1021,31 @@ export class CleanSlateChatSessionProvider extends Disposable {
         const findTranscriptMessageElement = (renderer as IResponseRenderer & {
             findTranscriptMessageElement?: (transcriptId: string) => HTMLElement | undefined;
         }).findTranscriptMessageElement?.bind(renderer);
+        const pendingStreamingPayloads = new Map<string, ChatResponse>();
+        let streamingPayloadTimer: ReturnType<typeof setTimeout> | undefined;
+        const persistExistingTranscriptPayload = (transcriptId: string, data: ChatResponse, isStreaming: boolean, emitStateChange: boolean): void => {
+            const renderPayload = stringifyCleanSlateTranscriptRenderPayload(data, isStreaming, { preserveStreamingState: isStreaming });
+            if (renderPayload) {
+                this.updateTranscriptMessageForSession(session, transcriptId, { renderPayload }, emitStateChange);
+            }
+        };
+        const flushStreamingPayloads = (): void => {
+            streamingPayloadTimer = undefined;
+            const pending = [...pendingStreamingPayloads];
+            pendingStreamingPayloads.clear();
+            for (const [transcriptId, data] of pending) persistExistingTranscriptPayload(transcriptId, data, true, false);
+        };
+        const queueStreamingPayload = (transcriptId: string, data: ChatResponse): void => {
+            pendingStreamingPayloads.set(transcriptId, data);
+            if (streamingPayloadTimer === undefined) streamingPayloadTimer = setTimeout(flushStreamingPayloads, CLEANSLATE_STREAMING_TRANSCRIPT_SAVE_INTERVAL_MS);
+        };
+        const removePendingStreamingPayload = (transcriptId: string): void => {
+            pendingStreamingPayloads.delete(transcriptId);
+            if (pendingStreamingPayloads.size === 0 && streamingPayloadTimer !== undefined) {
+                clearTimeout(streamingPayloadTimer);
+                streamingPayloadTimer = undefined;
+            }
+        };
 
         return {
             addMessage: (text: string, role: 'user' | 'cleanSlate', images?: string[]): HTMLElement => {
@@ -1083,14 +1123,19 @@ export class CleanSlateChatSessionProvider extends Disposable {
                     renderer.renderJSONResponse(data, isStreaming, renderTarget);
                 }
 
-                const renderPayload = stringifyCleanSlateTranscriptRenderPayload(data, isStreaming, { preserveStreamingState: isStreaming });
-                if (!renderPayload) {
+                const existingTranscriptId = targetMessage?.dataset.cleanSlateTranscriptId ?? renderTarget?.dataset.cleanSlateTranscriptId;
+                if (existingTranscriptId) {
+                    if (isStreaming) {
+                        queueStreamingPayload(existingTranscriptId, data);
+                    } else {
+                        removePendingStreamingPayload(existingTranscriptId);
+                        persistExistingTranscriptPayload(existingTranscriptId, data, false, true);
+                    }
                     return;
                 }
 
-                const existingTranscriptId = targetMessage?.dataset.cleanSlateTranscriptId ?? renderTarget?.dataset.cleanSlateTranscriptId;
-                if (existingTranscriptId) {
-                    this.updateTranscriptMessageForSession(session, existingTranscriptId, { renderPayload });
+                const renderPayload = stringifyCleanSlateTranscriptRenderPayload(data, isStreaming, { preserveStreamingState: isStreaming });
+                if (!renderPayload) {
                     return;
                 }
 
