@@ -18,14 +18,31 @@ suite('CleanSlateToolResultPromptSerializer', () => {
 			totalLines: 160,
 			truncated: false
 		});
+		const parsed = JSON.parse(serialized);
 
-		assert.ok(serialized.includes(content));
-		assert.ok(serialized.includes('"totalLines":160'));
+		assert.strictEqual(parsed.content, content);
+		assert.strictEqual(parsed.totalLines, 160);
 		assert.strictEqual(serialized.includes('...[truncated'), false);
 	});
 
-	test('keeps the generic string clamp for non-file tool results', () => {
+	test('preserves complete terminal command output', () => {
+		const output = Array.from({ length: 240 }, (_, index) => `line ${index + 1}: ${'x'.repeat(20)}`).join('\n');
 		const serialized = serializeToolResultForPrompt('execute_command', {
+			command: 'git diff -- src',
+			stdout: output,
+			stderr: '',
+			output
+		});
+		const parsed = JSON.parse(serialized);
+
+		assert.strictEqual(parsed.command, 'git diff -- src');
+		assert.strictEqual(parsed.stdout, output);
+		assert.strictEqual(parsed.output, output);
+		assert.strictEqual(serialized.includes('...[truncated'), false);
+	});
+
+	test('keeps the generic string clamp for other tool results', () => {
+		const serialized = serializeToolResultForPrompt('generic_tool', {
 			content: 'x'.repeat(5000)
 		});
 

@@ -676,7 +676,7 @@ export function transcriptViewportLines(
 		} as Record<string, string>)[entry.toolName ?? ''] ?? (entry.toolName ?? 'Tool').replace(/_/g, ' ');
 		const duration = entry.durationMs === undefined ? '' : ` · ${Math.max(1, Math.round(entry.durationMs / 100) / 10)}s`;
 		const heading = target
-			? `  ${marker} ${expanded ? '⌄' : '›'} ${label}(${compact(target, 140)})${duration}`
+			? `  ${marker} ${expanded ? '⌄' : '›'} ${label}(${target})${duration}`
 			: `  ${marker} ${expanded ? '⌄' : '›'} ${label}${duration}`;
 		const headingStart = lines.length;
 		pushWrapped(entry, entry.status === 'failed' ? 'toolError' : 'tool', heading, 'heading');

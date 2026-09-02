@@ -14,7 +14,7 @@ const MAX_DEPTH = 5;
 export function serializeToolResultForPrompt(toolName: string, result: unknown, maxChars?: number): string {
 	const sanitized = sanitizeToolResultForRuntime(toolName, result);
 	const serialized = safeJsonStringify(sanitized);
-	return clampForPrompt(serialized, maxChars ?? (isFileReadTool(toolName) ? Number.POSITIVE_INFINITY : DEFAULT_MAX_CHARS));
+	return clampForPrompt(serialized, maxChars ?? (preservesCompleteText(toolName) ? Number.POSITIVE_INFINITY : DEFAULT_MAX_CHARS));
 }
 
 export function sanitizeToolResultForRuntime(toolName: string, result: unknown): unknown {
@@ -110,10 +110,10 @@ function sanitizePlainObject(
 			continue;
 		}
 
-		if (key === 'content' && isFileReadTool(toolName) && typeof rawValue === 'string') {
-			// File reads already enforce their own complete-read/range budget. Do
-			// not run successful file content through the generic 3k string clamp:
-			// that created a false partial read and made the model read it again.
+		if (isCompleteTextField(toolName, key, rawValue)) {
+			// File reads already enforce their own complete-read/range budget, and
+			// command output must remain complete so the model does not rerun a
+			// command just to recover text hidden by the generic string clamp.
 			target[key] = rawValue;
 		} else if (key === 'base64' && typeof rawValue === 'string') {
 			target[key] = summarizeBase64(rawValue);
@@ -143,6 +143,33 @@ function sanitizePlainObject(
 
 function isFileReadTool(toolName: string): boolean {
 	return toolName === 'read_file' || toolName === 'read_file_range';
+}
+
+function isCommandExecutionTool(toolName: string): boolean {
+	return toolName === 'execute_command' || toolName === 'start_background_command';
+}
+
+function preservesCompleteText(toolName: string): boolean {
+	return isFileReadTool(toolName) || isCommandExecutionTool(toolName);
+}
+
+function isCompleteTextField(toolName: string, key: string, value: unknown): value is string {
+	if (typeof value !== 'string') {
+		return false;
+	}
+
+	if (isFileReadTool(toolName)) {
+		return key === 'content';
+	}
+
+	return isCommandExecutionTool(toolName)
+		&& (key === 'command'
+			|| key === 'cwd'
+			|| key === 'stdout'
+			|| key === 'stderr'
+			|| key === 'output'
+			|| key === 'error'
+			|| key === 'message');
 }
 
 function sanitizeBrowserElement(value: unknown, seen: WeakSet<object>): unknown {

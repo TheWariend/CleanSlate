@@ -12,7 +12,6 @@ export class CleanSlateRenderPayloadCodec {
     public static readonly MAX_TIMELINE_BLOCKS = 80;
     public static readonly MAX_TEXT_BLOCK_CHARS = 8_000;
     public static readonly MAX_CODE_SNIPPET_CHARS = 20_000;
-    public static readonly MAX_TERMINAL_OUTPUT_CHARS = 4_000;
     public static readonly MAX_LIST_ITEMS = 100;
     public static readonly MAX_LIST_ITEM_CHARS = 512;
     public static readonly MAX_FILE_EDIT_ENTRIES = 80;
@@ -144,7 +143,6 @@ export class CleanSlateRenderPayloadCodec {
                 if (block.type === 'terminal') {
                     return {
                         ...block,
-                        output: this.clampText(block.output, 2_000, false),
                         isStreaming: false
                     };
                 }
@@ -271,8 +269,8 @@ export class CleanSlateRenderPayloadCodec {
         }
 
         if (block.type === 'terminal') {
-            base.command = this.clampText(block.command, CleanSlateRenderPayloadCodec.MAX_LIST_ITEM_CHARS, true);
-            base.output = this.clampText(block.output, CleanSlateRenderPayloadCodec.MAX_TERMINAL_OUTPUT_CHARS, false);
+            base.command = typeof block.command === 'string' ? block.command.trim() : undefined;
+            base.output = block.output;
             if (typeof block.exitCode === 'number') {
                 base.exitCode = block.exitCode;
             }
@@ -485,13 +483,13 @@ export class CleanSlateRenderPayloadCodec {
                 continue;
             }
 
-            const safeCommand = this.clampText(command, CleanSlateRenderPayloadCodec.MAX_LIST_ITEM_CHARS, true);
+            const safeCommand = typeof command === 'string' ? command.trim() : '';
             if (!safeCommand) {
                 continue;
             }
 
             result[safeCommand] = {
-                output: this.clampText(entry.output, CleanSlateRenderPayloadCodec.MAX_TERMINAL_OUTPUT_CHARS, false) || '',
+                output: typeof entry.output === 'string' ? entry.output : '',
                 exitCode: Number.isFinite(entry.exitCode) ? entry.exitCode : -1
             };
         }
@@ -500,12 +498,7 @@ export class CleanSlateRenderPayloadCodec {
     }
 
     public clampLiveTerminalOutput(output: string): string {
-        if (output.length <= CleanSlateRenderPayloadCodec.MAX_TERMINAL_OUTPUT_CHARS) {
-            return output;
-        }
-        const omitted = output.length - CleanSlateRenderPayloadCodec.MAX_TERMINAL_OUTPUT_CHARS;
-        const marker = `\n...[terminal output truncated in renderer: ${omitted} chars omitted]`;
-        return `${output.slice(0, Math.max(0, CleanSlateRenderPayloadCodec.MAX_TERMINAL_OUTPUT_CHARS - marker.length))}${marker}`;
+        return output;
     }
 
     private normalizeSummaryField(field: string | string[] | undefined): string | string[] | undefined {
