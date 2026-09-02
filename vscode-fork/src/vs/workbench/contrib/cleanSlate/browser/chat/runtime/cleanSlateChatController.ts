@@ -29,6 +29,7 @@ import { ICleanSlateCommandApprovalService, type ICleanSlateCommandApprovalReque
 import { CleanSlateRenderPayloadCodec } from './cleanSlateRenderPayloadCodec.js';
 import { CleanSlateToolPresentation } from './cleanSlateToolPresentation.js';
 import { CleanSlateCompletionTimelineBuilder } from './cleanSlateCompletionTimelineBuilder.js';
+import { toPersistableCleanSlateTranscriptPayload } from './cleanSlateTranscriptPersistence.js';
 
 export const policy = createTrustedTypesPolicy('cleanSlate-chat', {
     createHTML: (value: string) => value
@@ -55,6 +56,7 @@ export class CleanSlateChatController extends Disposable {
         messageElement: HTMLElement;
         timeline: InteractionBlock[];
         render: (isStreaming: boolean) => void;
+        finalizeInterrupted: () => void;
     };
 
     constructor(
@@ -109,6 +111,15 @@ export class CleanSlateChatController extends Disposable {
             this.controllers.delete(this.threadService);
         }
 
+        // A session switch can happen before the stream's finally block runs. Finalize the
+        // detached transcript here as well so its discovery activity cannot remain animated
+        // when the session is revisited.
+        try {
+            this.activeRenderState?.finalizeInterrupted();
+        } catch (error) {
+            console.warn('[CleanSlateChatController] Failed to finalize switched transcript:', error);
+        }
+
         this.sessionGenerating.delete(this.threadService);
 
         this.commandApprovalService.rejectAll(this.sessionId);
@@ -138,6 +149,11 @@ export class CleanSlateChatController extends Disposable {
             if (this.getIsGenerating()) {
                 this.sessionGenerating.delete(this.threadService);
                 this.commandApprovalService.rejectAll(this.sessionId);
+                try {
+                    this.activeRenderState?.finalizeInterrupted();
+                } catch (error) {
+                    console.warn('[CleanSlateChatController] Failed to checkpoint interrupted transcript:', error);
+                }
                 this.activeRenderState = undefined;
                 renderer.removeStreamingPlaceholders();
                 this._onDidChangeState.fire();
@@ -154,7 +170,7 @@ export class CleanSlateChatController extends Disposable {
         const state = this.activeRenderState;
         if (state) {
             try {
-                state.render(true);
+                state.finalizeInterrupted();
             } catch (error) {
                 console.warn('[CleanSlateChatController] Failed to checkpoint interrupted transcript:', error);
             }
@@ -1129,6 +1145,7 @@ export class CleanSlateChatController extends Disposable {
 			let didShowModelTerminatedPause = false;
 			let didReceiveTaskFinished = false;
 			let runHasConfirmedMutation = false;
+			let transcriptInterrupted = false;
 
 			let activeToolName: string | undefined;
 
@@ -1142,7 +1159,8 @@ export class CleanSlateChatController extends Disposable {
                             ? this.completionTimelineBuilder.withoutFinishBlocks(timeline)
                             : [...timeline],
                         lastToolName: activeToolName,
-                        executionFlow: normalizedMode
+                        executionFlow: normalizedMode,
+                        transcriptStatus: transcriptInterrupted ? 'interrupted' : parsedSource.transcriptStatus
                     };
 
                     // Fallbacks for to do items
@@ -1196,10 +1214,17 @@ export class CleanSlateChatController extends Disposable {
 
             const pendingToolInputs = new Map<string, any>();
             const pendingToolInputsByCallId = new Map<string, any>();
-            this.activeRenderState = { messageElement, timeline, render };
+            const finalizeInterrupted = () => {
+                transcriptInterrupted = true;
+                const finalizedTimeline = toPersistableCleanSlateTranscriptPayload({ timeline }, true).timeline ?? [];
+                timeline.splice(0, timeline.length, ...finalizedTimeline);
+                activeToolName = undefined;
+                render(false);
+            };
+            this.activeRenderState = { messageElement, timeline, render, finalizeInterrupted };
 
-            renderer.renderJSONResponse({}, true, messageElement);
             this.setGenerating(true, onGeneratingChange);
+            renderer.renderJSONResponse({}, true, messageElement);
             this._onDidChangeState.fire();
 
             const stream = await this.agent.sendMessage(text, selections, mode, controller.signal, images, status => {
@@ -1277,6 +1302,7 @@ export class CleanSlateChatController extends Disposable {
                 } else if (event.type === 'chat_text') {
                     if (event.kind === 'model_terminated_pause') {
                         cancelScheduledChatTextRender();
+                        finalizeInterrupted();
                         if (!didShowModelTerminatedPause) {
                             didShowModelTerminatedPause = true;
                             this.showModelTerminatedPauseMessage(event.content, renderer, normalizedMode, onGeneratingChange, onModelTerminatedContinue);
@@ -1888,6 +1914,13 @@ export class CleanSlateChatController extends Disposable {
                 }
                 renderer.scrollToBottom();
             }
+
+			// If cancellation happened while the stream was between events, no event
+			// handler may have reached the interruption checkpoint. Finalize from the
+			// local run state before the final render so the stopped payload is settled.
+			if (controller.signal.aborted && !transcriptInterrupted) {
+				finalizeInterrupted();
+			}
 
             const finalParsed = Object.keys(currentTurnParsed).length > 0 ? currentTurnParsed : lastKnownParsed;
             if (didReceiveTaskFinished || runHasConfirmedMutation) {

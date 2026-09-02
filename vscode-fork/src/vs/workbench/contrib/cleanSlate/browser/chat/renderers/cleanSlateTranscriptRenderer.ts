@@ -632,11 +632,20 @@ export class CleanSlateTranscriptRenderer {
         const existing = transcript.querySelector('.cleanSlate-working-placeholder.placeholder') as HTMLElement | null;
         const target = existing || dom.append(transcript, dom.$('.cleanSlate-working-placeholder.placeholder'));
         target.classList.remove('is-exiting');
-        this.setTrustedHtmlIfChanged(target, `
-            <div class="cleanSlate-working-row">
-                <span class="cleanSlate-working-label">${this.escapeHtml(label)}</span>
+        target.classList.add('cleanSlate-working-placeholder--reasoning');
+        const displayLabel = label.replace(/\.{3}\s*$/, '').trim() || 'Thinking';
+        const didChange = this.setTrustedHtmlIfChanged(target, `
+            <div class="cleanSlate-reasoning-block cleanSlate-reasoning-placeholder is-streaming">
+                <div class="cleanSlate-reasoning-header" aria-label="${this.escapeHtml(displayLabel)}">
+                    <span class="cleanSlate-reasoning-label">${this.escapeHtml(displayLabel)}</span>
+                </div>
             </div>
-        `, `working:${label}`);
+        `, `working-reasoning:${label}`);
+
+        if (didChange) {
+            const reasoningBlock = target.querySelector('.cleanSlate-reasoning-placeholder') as HTMLElement | null;
+            reasoningBlock?.classList.remove('is-collapsed');
+        }
         return target;
     }
 

@@ -3410,6 +3410,19 @@ export const CLEANSLATE_CHAT_STYLES = `
                 min-height: 34px;
             }
 
+            /* Keep the no-reasoning-yet state on the same visual lane as a real
+             * reasoning disclosure. The wrapper only owns the old placeholder
+             * spacing; the nested reasoning block owns its own dimensions. */
+            .cleanSlate-working-placeholder.cleanSlate-working-placeholder--reasoning {
+                margin-bottom: 0;
+                padding: 0;
+                min-height: 0;
+            }
+
+            .cleanSlate-reasoning-placeholder .cleanSlate-reasoning-header {
+                cursor: default;
+            }
+
             .cleanSlate-working-row {
                 display: flex;
                 align-items: center;

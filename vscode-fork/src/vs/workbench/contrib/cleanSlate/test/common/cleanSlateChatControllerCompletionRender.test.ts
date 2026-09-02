@@ -441,6 +441,45 @@ suite('CleanSlateChatController completion rendering', () => {
 		assert.strictEqual(controller.getIsGenerating(), false);
 	});
 
+	test('finalizes the active transcript immediately when generation is aborted', () => {
+		const controller = createController(new CleanSlateTaskSessionService());
+		const activeController = new AbortController();
+		(controller as any).controllers.set((controller as any).threadService, activeController);
+		(controller as any).sessionGenerating.set((controller as any).threadService, true);
+
+		const timeline: InteractionBlock[] = [{
+			id: 'group-activity-block-1',
+			type: 'file',
+			status: 'Exploring...',
+			searchCount: 1,
+			isStreaming: true
+		}];
+		let finalized = 0;
+		let streamingRenders = 0;
+		(controller as any).activeRenderState = {
+			messageElement: {} as HTMLElement,
+			timeline,
+			render: (isStreaming: boolean) => streamingRenders += isStreaming ? 1 : 0,
+			finalizeInterrupted: () => {
+				finalized++;
+				const block = timeline[0];
+				block.status = 'Interrupted';
+				block.isStreaming = false;
+			}
+		};
+
+		const didAbort = controller.abortGeneration({
+			clearTransportRetry: () => { },
+			removeStreamingPlaceholders: () => { }
+		} as any);
+
+		assert.strictEqual(didAbort, true);
+		assert.strictEqual(finalized, 1);
+		assert.strictEqual(streamingRenders, 0);
+		assert.strictEqual(timeline[0].status, 'Interrupted');
+		assert.strictEqual(timeline[0].isStreaming, false);
+	});
+
 });
 
 function createController(

@@ -5,9 +5,10 @@
 
 import * as dom from '../../../../../../../base/browser/dom.js';
 import type { ICleanSlateTransportStatus } from '../../../../../../services/cleanSlate/common/core/cleanSlateAI.js';
-import { ChatResponse, CleanSlateUserSelectionDisplay } from '../../types/cleanSlateChatTypes.js';
+import { ChatResponse, CleanSlateUserSelectionDisplay, InteractionBlock } from '../../types/cleanSlateChatTypes.js';
 import { isCleanSlateControlTranscriptMessage, normalizeCleanSlateTranscriptOrder, parseCleanSlatePlanningAnswerQuestion } from '../../types/cleanSlateChatSessionTypes.js';
 import { normalizeChatResponse, normalizePlanningQuestion } from '../../runtime/cleanSlateChatResponseNormalizer.js';
+import { toPersistableCleanSlateTranscriptPayload } from '../../runtime/cleanSlateTranscriptPersistence.js';
 import { CleanSlateTranscriptRenderer } from '../../renderers/cleanSlateTranscriptRenderer.js';
 import { parseCleanSlateUserSelectionDisplay } from '../../viewModel/cleanSlateChatViewHelpers.js';
 
@@ -194,6 +195,7 @@ export class CleanSlateTranscriptView {
 	private createMessageElement(role: 'user' | 'cleanSlate', images: string[] | undefined, hasText: boolean): HTMLElement {
 		this.clearEmptyState();
 		const row = dom.append(this.element, dom.$(`.cleanSlate-chat-message-row.${role}`));
+		this.contentResizeObserver?.observe(row);
 		const msg = dom.append(row, dom.$(`.cleanSlate-chat-message.${role}`));
 
 		if (images && images.length > 0) {
@@ -583,6 +585,7 @@ export class CleanSlateTranscriptView {
 			return;
 		}
 		this.userScrolled = true;
+		this.restoreScrollPending = false;
 		this.scrollButtonDismissed = false;
 		this.stopFollowLoop();
 		this.updateOverflowAnchor();
@@ -868,14 +871,64 @@ export class CleanSlateTranscriptView {
 	}
 
 	private toRestorableTranscriptPayload(parsed: ChatResponse): ChatResponse {
-		if (parsed.transcriptStatus || !Array.isArray(parsed.timeline) || parsed.timeline.length === 0) {
+		if (!Array.isArray(parsed.timeline) || parsed.timeline.length === 0) {
 			return parsed;
 		}
 
+		// History is never an active stream. Older payloads could be saved while a
+		// discovery block was still marked streaming, which made its shimmer return
+		// every time the chat was reopened. Normalize every restored timeline to a
+		// settled snapshot; interrupted payloads retain their explicit interruption
+		// status for the renderer.
+		const interrupted = parsed.transcriptStatus === 'interrupted';
+		const settledTimeline = toPersistableCleanSlateTranscriptPayload(parsed, interrupted).timeline ?? [];
 		return {
 			...parsed,
-			transcriptStatus: 'completed'
+			transcriptStatus: parsed.transcriptStatus ?? 'completed',
+			timeline: settledTimeline.map(block => this.settleRestoredTimelineBlock(block, interrupted))
 		};
+	}
+
+	private settleRestoredTimelineBlock(block: InteractionBlock, interrupted: boolean): InteractionBlock {
+		const settled: InteractionBlock = {
+			...block,
+			blocks: Array.isArray(block.blocks)
+				? block.blocks.map(child => this.settleRestoredTimelineBlock(child, interrupted))
+				: block.blocks,
+			isStreaming: false
+		};
+		if (interrupted) {
+			return settled;
+		}
+
+		const status = (settled.status || '').trim().toLowerCase();
+		if (settled.type === 'file') {
+			if (status === 'exploring' || status === 'exploring...') {
+				settled.status = 'Explored';
+			} else if (status === 'analyzing' || status === 'analyzing...') {
+				settled.status = 'Analyzed';
+			} else if (status === 'reading' || status === 'reading...') {
+				settled.status = 'Read';
+			}
+		} else if (settled.type === 'tool' && settled.toolStatus === 'running') {
+			settled.toolStatus = 'completed';
+			settled.status = 'Completed';
+		} else if (settled.type === 'browser' && settled.browserStatus === 'running') {
+			settled.browserStatus = 'completed';
+			settled.status = 'Completed';
+		} else if (settled.type === 'web' && settled.webStatus === 'running') {
+			settled.webStatus = 'completed';
+			settled.status = 'Completed';
+		} else if (settled.type === 'terminal' && (
+			status === 'running'
+			|| status === 'starting'
+			|| status === 'pending'
+			|| status === 'working'
+			|| status.endsWith('...')
+		)) {
+			settled.status = 'Completed';
+		}
+		return settled;
 	}
 
 	private renderEmptyState(): void {
