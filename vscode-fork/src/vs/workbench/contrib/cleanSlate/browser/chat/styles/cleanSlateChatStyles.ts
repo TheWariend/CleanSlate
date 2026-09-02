@@ -112,23 +112,12 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             @keyframes cleanSlateBlockIn {
-                from { opacity: 0; transform: translateY(8px) scale(0.985); }
+                from { opacity: 0; transform: translateY(4px); }
                 to { opacity: 1; transform: none; }
             }
 
-            .cleanSlate-timeline-block {
-                animation: cleanSlateBlockIn 0.32s cubic-bezier(0.16, 1, 0.3, 1);
-            }
-
-            @keyframes cleanSlateDetailRowIn {
-                from { opacity: 0; transform: translateX(-6px); }
-                to { opacity: 1; transform: none; }
-            }
-
-            /* Rows are rebuilt wholesale on each update, so only the newest row
-               animates — earlier rows re-render in place without replaying. */
-            .cleanSlate-activity-content .activity-detail-item:last-child {
-                animation: cleanSlateDetailRowIn 0.22s ease-out;
+            .cleanSlate-timeline-block.is-entering {
+                animation: cleanSlateBlockIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
             }
 
             .cleanSlate-code-widget {

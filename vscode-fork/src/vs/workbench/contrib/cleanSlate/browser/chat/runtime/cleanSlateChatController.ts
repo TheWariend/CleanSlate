@@ -1111,6 +1111,7 @@ export class CleanSlateChatController extends Disposable {
         const controller = new AbortController();
         this.controllers.set(this.threadService, controller);
         const sessionAtStart = this.threadService;
+        let cancelScheduledStreamingRender = () => { };
 
         try {
             const normalizedMode = this.normalizeMode(mode);
@@ -1149,7 +1150,7 @@ export class CleanSlateChatController extends Disposable {
 
 			let activeToolName: string | undefined;
 
-            const render = (isStreaming: boolean) => {
+            const renderNow = (isStreaming: boolean) => {
                 try {
                     const isTurnStreaming = typeof currentTurnId === 'string' && currentTurnId.length > 0;
                     const parsedSource = Object.keys(currentTurnParsed).length > 0 ? currentTurnParsed : lastKnownParsed;
@@ -1186,31 +1187,41 @@ export class CleanSlateChatController extends Disposable {
                 }
             };
 
-            let pendingChatTextRenderFrame: number | undefined;
-            const cancelScheduledChatTextRender = () => {
-                if (pendingChatTextRenderFrame === undefined) {
+            // Tool providers often emit output, status and result events inside a
+            // single browser frame. Reconcile once per frame, like a keyed reactive
+            // timeline, instead of rebuilding the transcript for every event.
+            // Settled renders stay synchronous so persistence never trails the run.
+            let pendingStreamingRenderFrame: number | undefined;
+            cancelScheduledStreamingRender = () => {
+                if (pendingStreamingRenderFrame === undefined) {
                     return;
                 }
 
-                messageElement.ownerDocument.defaultView?.cancelAnimationFrame(pendingChatTextRenderFrame);
-                pendingChatTextRenderFrame = undefined;
+                messageElement.ownerDocument.defaultView?.cancelAnimationFrame(pendingStreamingRenderFrame);
+                pendingStreamingRenderFrame = undefined;
             };
-            const scheduleChatTextRender = () => {
-                if (pendingChatTextRenderFrame !== undefined) {
+            const render = (isStreaming: boolean) => {
+                if (!isStreaming) {
+                    cancelScheduledStreamingRender();
+                    renderNow(false);
+                    return;
+                }
+                if (pendingStreamingRenderFrame !== undefined) {
                     return;
                 }
 
                 const win = messageElement.ownerDocument.defaultView;
                 if (!win) {
-                    render(true);
+                    renderNow(true);
                     return;
                 }
 
-                pendingChatTextRenderFrame = win.requestAnimationFrame(() => {
-                    pendingChatTextRenderFrame = undefined;
-                    render(true);
+                pendingStreamingRenderFrame = win.requestAnimationFrame(() => {
+                    pendingStreamingRenderFrame = undefined;
+                    renderNow(true);
                 });
             };
+            const scheduleChatTextRender = () => render(true);
 
             const pendingToolInputs = new Map<string, any>();
             const pendingToolInputsByCallId = new Map<string, any>();
@@ -1301,7 +1312,7 @@ export class CleanSlateChatController extends Disposable {
                     render(true);
                 } else if (event.type === 'chat_text') {
                     if (event.kind === 'model_terminated_pause') {
-                        cancelScheduledChatTextRender();
+                        cancelScheduledStreamingRender();
                         finalizeInterrupted();
                         if (!didShowModelTerminatedPause) {
                             didShowModelTerminatedPause = true;
@@ -1327,7 +1338,7 @@ export class CleanSlateChatController extends Disposable {
                     this.removeReasoningBlock(timeline, currentTurnId);
                     scheduleChatTextRender();
                 } else if (event.type === 'assistant_turn_complete') {
-                    cancelScheduledChatTextRender();
+                    cancelScheduledStreamingRender();
                     assistantTurnCompleted = true;
                     currentTurnId = event.turnId;
                     currentTurnIndex = event.turnIndex;
@@ -1536,7 +1547,6 @@ export class CleanSlateChatController extends Disposable {
                                 deleted: typeof event.progress.deleted === 'number' ? event.progress.deleted : undefined
                             }
                         );
-                        render(true);
                     } else if (this.isCommandExecutionTool(event.toolName) && event.progress.command) {
                         const cmd = this.toolPresentation.formatTerminalCommandForDisplay(event.progress.command);
 
@@ -1563,7 +1573,6 @@ export class CleanSlateChatController extends Disposable {
                                 }
                             }
                         }
-                        render(true);
                     } else if ((event.toolName === 'read_file' || event.toolName === 'read_file_range') && event.progress?.type === 'read') {
                         // Silencing intermediate "Read" progress per user request.
                     }
@@ -1997,6 +2006,7 @@ export class CleanSlateChatController extends Disposable {
                 }
             }
         } finally {
+            cancelScheduledStreamingRender();
             if (controller.signal.aborted) {
                 this.taskSessionService.markInterrupted();
             }

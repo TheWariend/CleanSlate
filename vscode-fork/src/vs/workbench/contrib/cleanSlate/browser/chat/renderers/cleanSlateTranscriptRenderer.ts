@@ -5,7 +5,6 @@
 
 import * as dom from '../../../../../../base/browser/dom.js';
 import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
-import { REVEAL_TICK_MS, revealCutPoint } from '@cleanslate/sdk/agent/cleanSlateStreamReveal.js';
 import { IDisposable } from '../../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { IMarkdownRendererService } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
@@ -25,14 +24,7 @@ import { CleanSlateWebActivityRenderer } from './cleanSlateWebActivityRenderer.j
 import { CleanSlateTranscriptFileRenderer } from './cleanSlateTranscriptFileRenderer.js';
 
 interface ICleanSlateAssistantMarkdownStreamState {
-    targetContent: string;
     renderedContent: string;
-    renderedWordCount: number;
-    lastRenderTime: number;
-    timer?: number;
-    cancelTimer?: (timer: number) => void;
-    isStreaming: boolean;
-    onDidRender?: () => void;
 }
 
 interface ICleanSlateStreamingMarkdownState {
@@ -59,6 +51,7 @@ export class CleanSlateTranscriptRenderer {
     private readonly reasoningStreamStates = new Map<string, ICleanSlateReasoningStreamState>();
     private readonly markdownRenderDisposables = new Map<HTMLElement, IDisposable>();
     private readonly expandedTerminalBlockIds = new Set<string>();
+    private readonly directTimelineBlockIndexes = new WeakMap<HTMLElement, Map<string, HTMLElement>>();
     private readonly fileRenderer: CleanSlateTranscriptFileRenderer;
     private readonly webActivityRenderer = new CleanSlateWebActivityRenderer();
     // Per-message streaming markdown: committed blocks render once (so their async
@@ -86,7 +79,7 @@ export class CleanSlateTranscriptRenderer {
      * the click was handled.
      */
     public openFileOverride?: (resource: URI, options: { selection?: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number } }) => boolean;
-    
+
     /**
      * When set, the to-do step list is forwarded here instead of being rendered
      * inline inside the chat message bubble. The caller (plan dropup) is
@@ -107,8 +100,13 @@ export class CleanSlateTranscriptRenderer {
             preserveTimeline: normalizedData.transcriptStatus === 'completed'
                 || normalizedData.transcriptStatus === 'interrupted'
         });
-        const messages = messagesContainer.querySelectorAll('.cleanSlate-chat-message.cleanSlate');
-        const lastMessage = targetMessage || (messages[messages.length - 1] as HTMLElement);
+        // Live controllers always provide their keyed assistant message. Only scan
+        // the complete conversation for legacy callers that do not have a target.
+        let lastMessage = targetMessage;
+        if (!lastMessage) {
+            const messages = messagesContainer.querySelectorAll<HTMLElement>('.cleanSlate-chat-message.cleanSlate');
+            lastMessage = messages[messages.length - 1];
+        }
 
         if (!lastMessage) {
             return;
@@ -568,23 +566,54 @@ export class CleanSlateTranscriptRenderer {
     }
 
     private findDirectTimelineBlockElement(container: HTMLElement, blockId: string): HTMLElement | null {
-        const blockElement = Array.from(container.children).find(child => {
-            const element = child as HTMLElement;
-            return element.classList.contains('cleanSlate-timeline-block')
-                && element.getAttribute('data-block-id') === blockId;
-        }) as HTMLElement | undefined;
+        let index = this.directTimelineBlockIndexes.get(container);
+        if (!index) {
+            index = new Map<string, HTMLElement>();
+            for (const child of container.children) {
+                const element = child as HTMLElement;
+                const id = element.classList.contains('cleanSlate-timeline-block')
+                    ? element.getAttribute('data-block-id')
+                    : undefined;
+                if (id) {
+                    index.set(id, element);
+                }
+            }
+            this.directTimelineBlockIndexes.set(container, index);
+        }
 
-        return blockElement ?? null;
+        const blockElement = index.get(blockId);
+        if (blockElement?.parentElement === container) {
+            return blockElement;
+        }
+        index.delete(blockId);
+        return null;
+    }
+
+    private rememberDirectTimelineBlockElement(container: HTMLElement, blockId: string, element: HTMLElement): void {
+        let index = this.directTimelineBlockIndexes.get(container);
+        if (!index) {
+            index = new Map<string, HTMLElement>();
+            this.directTimelineBlockIndexes.set(container, index);
+        }
+        index.set(blockId, element);
     }
 
     private renderTimelineBlock(block: InteractionBlock, container: HTMLElement, isStreaming: boolean, activeBlockId?: string, onDidRender?: () => void): void {
-        let blockEl = container.querySelector(`[data-block-id="${block.id}"]`) as HTMLElement | null;
+        // Timeline IDs are scoped to their direct container. Avoid a descendant
+        // selector for every block: on long transcripts that repeatedly walks
+        // nested turns and turns an otherwise keyed update into quadratic work.
+        let blockEl = this.findDirectTimelineBlockElement(container, block.id);
         const isNew = !blockEl;
 
         if (isNew) {
             blockEl = dom.append(container, dom.$('.cleanSlate-timeline-block'));
             blockEl.setAttribute('data-block-id', block.id);
+            this.rememberDirectTimelineBlockElement(container, block.id, blockEl);
             blockEl.classList.add(`type-${block.type}`);
+            if (!container.closest('.is-restoring-history')) {
+                blockEl.classList.add('is-entering');
+                blockEl.addEventListener('animationend', () => blockEl?.classList.remove('is-entering'), { once: true });
+            }
         }
         blockEl!.classList.toggle('is-active', activeBlockId === block.id);
         blockEl!.classList.toggle('kind-web-search', block.type === 'web' && block.webToolName === 'web_search');
@@ -737,11 +766,6 @@ export class CleanSlateTranscriptRenderer {
         const state = this.assistantMarkdownStreamStates.get(blockId);
         if (!state) {
             return;
-        }
-
-        if (state.timer !== undefined) {
-            state.cancelTimer?.(state.timer);
-            state.timer = undefined;
         }
 
         this.assistantMarkdownStreamStates.delete(blockId);
@@ -975,13 +999,13 @@ export class CleanSlateTranscriptRenderer {
         el.style.marginBottom = '8px';
 
         if (block.isStreaming) {
-            this.renderAssistantMarkdownProgressively(block.id, el, content, true, onDidRender);
+            this.renderAssistantMarkdownStream(block.id, el, content, true, onDidRender);
             return;
         }
 
         const streamState = this.assistantMarkdownStreamStates.get(block.id);
         if (streamState && streamState.renderedContent !== content) {
-            this.renderAssistantMarkdownProgressively(block.id, el, content, false, onDidRender);
+            this.renderAssistantMarkdownStream(block.id, el, content, false, onDidRender);
             return;
         }
 
@@ -991,9 +1015,9 @@ export class CleanSlateTranscriptRenderer {
 
     private static readonly REASONING_COMPLETION_HOLD_MS = 1800;
 
-    private renderAssistantMarkdownProgressively(blockId: string, el: HTMLElement, content: string, isStreaming: boolean, onDidRender?: () => void): void {
+    private renderAssistantMarkdownStream(blockId: string, el: HTMLElement, content: string, isStreaming: boolean, onDidRender?: () => void): void {
         let state = this.assistantMarkdownStreamStates.get(blockId);
-        // A non-append change (edit/reset) invalidates the paced reveal: start over.
+        // A non-append change (edit/reset) invalidates the incremental DOM state.
         if (state && !content.startsWith(state.renderedContent)) {
             this.clearAssistantMarkdownStreamStateForBlock(blockId);
             state = undefined;
@@ -1001,19 +1025,10 @@ export class CleanSlateTranscriptRenderer {
 
         if (!state) {
             state = {
-                targetContent: content,
-                renderedContent: '',
-                renderedWordCount: 0,
-                lastRenderTime: 0,
-                isStreaming,
-                onDidRender
+                renderedContent: ''
             };
             this.assistantMarkdownStreamStates.set(blockId, state);
         }
-
-        state.targetContent = content;
-        state.isStreaming = isStreaming;
-        state.onDidRender = onDidRender;
 
         // Once streaming ends, render the final content in full and drop the state.
         if (!isStreaming) {
@@ -1026,30 +1041,14 @@ export class CleanSlateTranscriptRenderer {
             return;
         }
 
-        const shownLength = state.renderedContent.length;
-        // First frame of a block has no previous render to measure from; treat it
-        // as one tick so the reveal starts at the floor rate instead of jumping.
-        const elapsedMs = state.lastRenderTime === 0
-            ? REVEAL_TICK_MS
-            : Math.min(Date.now() - state.lastRenderTime, 250);
-        const end = content.length <= shownLength
-            ? content.length
-            : revealCutPoint(content, shownLength, elapsedMs);
-        const revealed = content.slice(0, end);
-
-        // Render the streaming reveal as markdown, but MORPH the existing DOM to match
-        // the new render instead of clearing + rebuilding the whole subtree every tick
-        // (which is what flickers). Only changed nodes update, so it stays smooth.
-        const didRender = this.setStreamingMarkdown(blockId, el, revealed);
-        state.renderedContent = revealed;
-        state.lastRenderTime = Date.now();
+        // Provider deltas are already coalesced to one browser frame. Render the
+        // newest keyed turn state directly; a second client-side typing backlog
+        // keeps parsing and painting after the provider has gone idle and makes
+        // every other animation miss frames.
+        const didRender = this.setStreamingMarkdown(blockId, el, content);
+        state.renderedContent = content;
         if (didRender) {
             onDidRender?.();
-        }
-
-        // More text is available than we have revealed — schedule the next frame.
-        if (end < content.length) {
-            this.scheduleAssistantMarkdownProgressiveRender(blockId, el);
         }
     }
 
@@ -1057,7 +1056,7 @@ export class CleanSlateTranscriptRenderer {
     // split into top-level markdown blocks; every block except the last is rendered ONCE
     // with the real (async-widget) renderer and kept stable, so completed code blocks
     // finish rendering their widget and never re-render. Only the last, still-growing
-    // block re-renders each tick, and it is morphed (in place) so its text stays smooth.
+    // block re-renders on each provider frame and is morphed in place.
     private setStreamingMarkdown(blockId: string, el: HTMLElement, markdownText: string): boolean {
         if (el.dataset.streamMarkdownText === markdownText) {
             return false;
@@ -1089,7 +1088,7 @@ export class CleanSlateTranscriptRenderer {
             tailEl = dom.append(el, dom.$('.cleanSlate-stream-tail.rendered-markdown'));
         }
 
-        // Only the not-yet-committed tail is lexed each tick, so per-tick cost stays
+        // Only the not-yet-committed tail is lexed each frame, so update cost stays
         // bounded by the trailing block instead of growing with the whole message.
         const tail = markdownText.slice(state!.committedRaw.length);
         let tokens: { type: string; raw: string }[];
@@ -1268,24 +1267,6 @@ export class CleanSlateTranscriptRenderer {
                 target.setAttribute(attr.name, attr.value);
             }
         }
-    }
-
-    private scheduleAssistantMarkdownProgressiveRender(blockId: string, el: HTMLElement): void {
-        const state = this.assistantMarkdownStreamStates.get(blockId);
-        if (!state || state.timer !== undefined) {
-            return;
-        }
-
-        const win = dom.getWindow(el);
-        state.cancelTimer = timer => win.clearTimeout(timer);
-        state.timer = win.setTimeout(() => {
-            state.timer = undefined;
-            if (!el.isConnected) {
-                this.assistantMarkdownStreamStates.delete(blockId);
-                return;
-            }
-            this.renderAssistantMarkdownProgressively(blockId, el, state.targetContent, state.isStreaming, state.onDidRender);
-        }, REVEAL_TICK_MS);
     }
 
     private updateTerminalBlock(block: InteractionBlock, el: HTMLElement): void {
@@ -1476,6 +1457,7 @@ export class CleanSlateTranscriptRenderer {
         if (!groupEl) {
             groupEl = dom.append(container, dom.$('.cleanSlate-timeline-block.type-terminal-group'));
             groupEl.setAttribute('data-block-id', groupId);
+            this.rememberDirectTimelineBlockElement(container, groupId, groupEl);
         }
 
         const running = blocks.some(block => {
@@ -1525,11 +1507,12 @@ export class CleanSlateTranscriptRenderer {
     }
 
     private renderBrowserGroup(blocks: InteractionBlock[], container: HTMLElement, isStreaming: boolean, groupId: string, activeBlockId?: string): void {
-        let groupEl = container.querySelector(`[data-block-id="${groupId}"]`) as HTMLElement | null;
+        let groupEl = this.findDirectTimelineBlockElement(container, groupId);
         const isNew = !groupEl;
         if (!groupEl) {
             groupEl = dom.append(container, dom.$('.cleanSlate-timeline-block.type-browser-group'));
             groupEl.setAttribute('data-block-id', groupId);
+            this.rememberDirectTimelineBlockElement(container, groupId, groupEl);
         }
 
         const running = blocks.some(block => block.browserStatus === 'running' || block.isStreaming);
@@ -1596,7 +1579,7 @@ export class CleanSlateTranscriptRenderer {
     }
 
     private renderWebGroup(blocks: InteractionBlock[], container: HTMLElement, isStreaming: boolean, groupId: string, activeBlockId?: string): void {
-        let groupEl = container.querySelector(`[data-block-id="${groupId}"]`) as HTMLElement | null;
+        let groupEl = this.findDirectTimelineBlockElement(container, groupId);
         const visibleBlocks = blocks.filter(block => this.shouldRenderWebActivityBlock(block));
         if (visibleBlocks.length === 0) {
             groupEl?.remove();
@@ -1606,6 +1589,7 @@ export class CleanSlateTranscriptRenderer {
         if (!groupEl) {
             groupEl = dom.append(container, dom.$('.cleanSlate-timeline-block.type-web-group'));
             groupEl.setAttribute('data-block-id', groupId);
+            this.rememberDirectTimelineBlockElement(container, groupId, groupEl);
         }
 
         const running = visibleBlocks.some(block => block.webStatus === 'running' || block.isStreaming);

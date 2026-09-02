@@ -16,22 +16,18 @@ export class CleanSlateTranscriptView {
 	readonly element: HTMLElement;
 	private readonly bottomEdgeFade: HTMLElement;
 	private readonly scrollToBottomButton: HTMLButtonElement;
+	private readonly contentResizeObserver: ResizeObserver | undefined;
 	// Auto-scroll follows the bottom while streaming until the user scrolls away.
 	// Our own programmatic scrolls must be distinguished from genuine user
 	// scrolls, or fast streaming falsely "un-sticks" the view. See markAutoScroll.
 	private userScrolled = false;
 	private pendingAutoScrollWrites = 0;
 	private pendingScrollFrame: number | undefined;
+	private pendingPinnedScrollFrame: number | undefined;
 	private smoothScrollInProgress = false;
 	private scrollButtonDismissed = false;
 	private transportStatusElement: HTMLElement | undefined;
-	// Eased stick-to-bottom follow. Instead of snapping scrollTop to
-	// the end on every stream delta — which steps by each chunk's height and reads
-	// as jerky — a rAF loop glides scrollTop toward the bottom a fraction per frame.
-	private followFrame: number | undefined;
 	private lastWrittenTop = 0;
-	private lastKnownScrollTop = 0;
-	private followIdleSince = 0;
 	// How far the settled position may differ from the last value we wrote before
 	// an arriving scroll event counts as the user's rather than ours.
 	private static readonly AUTO_SCROLL_TOLERANCE_PX = 2;
@@ -39,15 +35,6 @@ export class CleanSlateTranscriptView {
 	// Fraction of the remaining distance to close each frame, plus a floor so the
 	// glide never crawls to a stop on the last pixels. Tuned to keep up with fast
 	// streaming while still visibly easing.
-	private static readonly FOLLOW_EASE = 0.24;
-	private static readonly FOLLOW_MIN_STEP_PX = 6;
-	private static readonly FOLLOW_SNAP_PX = 1;
-	// Upward movement (px) we did not write ourselves that counts as the user
-	// grabbing the scroll and leaving the bottom.
-	private static readonly USER_SCROLL_UP_PX = 8;
-	// Keep the loop alive a beat after it settles so back-to-back deltas glide
-	// continuously instead of restarting; stop it once streaming truly goes quiet.
-	private static readonly FOLLOW_IDLE_STOP_MS = 900;
 
 	// While replaying persisted history we must NOT re-fire the interactive planning
 	// question for every turn that happens to carry a `planning_question` payload —
@@ -79,6 +66,16 @@ export class CleanSlateTranscriptView {
 		this.scrollToBottomButton.addEventListener('click', () => this.smoothScrollToBottom());
 		this.updateScrollToBottomButton();
 		this.element.style.overflowAnchor = 'none';
+		const ResizeObserverCtor = dom.getWindow(this.element).ResizeObserver;
+		this.contentResizeObserver = typeof ResizeObserverCtor === 'function'
+			? new ResizeObserverCtor(() => {
+				// Bottom-lock only while the user is following. ResizeObserver catches
+				// delayed markdown/code layout without a continuously-running rAF loop.
+				if (!this.userScrolled) {
+					this.schedulePinnedScroll();
+				}
+			})
+			: undefined;
 		this.element.addEventListener('scroll', () => this.handleScroll(), { passive: true });
 		// Only an explicit upward wheel gesture counts as the user leaving the bottom.
 		this.element.addEventListener('wheel', (e: WheelEvent) => {
@@ -96,6 +93,7 @@ export class CleanSlateTranscriptView {
 	clear(showEmptyState = false): void {
 		this.cancelPendingScroll();
 		this.transcriptRenderer.disposeMarkdownRenders();
+		this.contentResizeObserver?.disconnect();
 		dom.clearNode(this.element);
 		this.userScrolled = false;
 		this.scrollButtonDismissed = false;
@@ -112,6 +110,10 @@ export class CleanSlateTranscriptView {
 		fallbackAssistantContent?: string
 	): void {
 		this.clear();
+		// History restoration can create hundreds of blocks in one synchronous pass.
+		// Mark it as a bulk render so persisted content does not replay live-entry
+		// animations and compete with layout/markdown work during navigation.
+		this.element.classList.add('is-restoring-history');
 		this.isRestoringHistory = true;
 		this.restoreTailPlanningQuestion = undefined;
 		this.restoreAnsweredQuestions.clear();
@@ -127,6 +129,7 @@ export class CleanSlateTranscriptView {
 			}
 		} finally {
 			this.isRestoringHistory = false;
+			this.element.classList.remove('is-restoring-history');
 		}
 		if (stats.renderedCount === 0) {
 			this.renderEmptyState();
@@ -331,6 +334,19 @@ export class CleanSlateTranscriptView {
 	}
 
 	removeStreamingPlaceholders(): void {
+		// The controller normally re-renders an interrupted payload, but a stop can
+		// race with a detached/hidden session. Clear the visual running state too so
+		// no stale shimmer, pulse, or spinner survives that race.
+		this.element.querySelectorAll<HTMLElement>('.cleanSlate-timeline-block.is-active').forEach(block => {
+			block.classList.remove('is-active');
+		});
+		this.element.querySelectorAll<HTMLElement>('.cleanSlate-web-activity.is-running, .cleanSlate-web-block.is-running').forEach(activity => {
+			activity.classList.remove('is-running');
+		});
+		this.element.querySelectorAll<HTMLElement>('.cleanSlate-timeline-block .codicon-modifier-spin').forEach(icon => {
+			icon.classList.remove('codicon-modifier-spin');
+		});
+
 		const messages = this.element.querySelectorAll('.cleanSlate-chat-message.cleanSlate');
 		messages.forEach(msg => {
 			const hasExecutionPlan = !!msg.querySelector('.cleanSlate-message-execution-plan');
@@ -400,7 +416,6 @@ export class CleanSlateTranscriptView {
 			this.userScrolled = false;
 			this.updateOverflowAnchor();
 			this.cancelPendingScroll();
-			this.stopFollowLoop();
 			this.applyScrollToBottom();
 			return;
 		}
@@ -408,85 +423,30 @@ export class CleanSlateTranscriptView {
 		if (this.userScrolled) {
 			return;
 		}
-		// Streaming path: glide toward the bottom instead of snapping each delta.
-		this.ensureFollowLoop();
+		this.schedulePinnedScroll();
 	}
 
-	// Start (or keep feeding) the eased follow loop. Cheap to call on every delta:
-	// it no-ops while the loop is already running and just refreshes the idle clock.
-	private ensureFollowLoop(): void {
-		if (this.userScrolled || this.smoothScrollInProgress) {
+	// Match the content-observer approach used by the reference clients: many
+	// transcript mutations collapse into one bottom-lock write for the next frame.
+	private schedulePinnedScroll(): void {
+		if (this.userScrolled || this.smoothScrollInProgress || this.pendingPinnedScrollFrame !== undefined) {
 			return;
 		}
-		this.followIdleSince = 0;
-		if (this.followFrame !== undefined) {
-			return;
-		}
-		const target = Math.max(0, this.element.scrollHeight - this.element.clientHeight);
-		if (target - this.element.scrollTop <= CleanSlateTranscriptView.FOLLOW_SNAP_PX) {
-			// Already pinned — nothing to animate, just keep the anchor/button honest.
-			this.lastWrittenTop = target;
-			this.updateOverflowAnchor();
-			this.updateScrollToBottomButton();
-			return;
-		}
-		this.startFollowLoop();
-	}
-
-	private startFollowLoop(): void {
 		const win = dom.getWindow(this.element);
-		const step = () => {
-			if (this.userScrolled || this.smoothScrollInProgress) {
-				this.followFrame = undefined;
-				return;
+		this.pendingPinnedScrollFrame = win.requestAnimationFrame(() => {
+			this.pendingPinnedScrollFrame = undefined;
+			if (!this.userScrolled && !this.smoothScrollInProgress) {
+				this.applyScrollToBottom();
 			}
-			const target = Math.max(0, this.element.scrollHeight - this.element.clientHeight);
-			const current = this.element.scrollTop;
-			const diff = target - current;
-
-			if (diff <= CleanSlateTranscriptView.FOLLOW_SNAP_PX) {
-				// Pinned. Linger briefly so the next delta continues the same glide,
-				// then let the loop die once streaming stops producing new content.
-				if (diff > 0) {
-					this.writeFollowTop(target);
-				}
-				const now = Date.now();
-				if (this.followIdleSince === 0) {
-					this.followIdleSince = now;
-				}
-				if (now - this.followIdleSince >= CleanSlateTranscriptView.FOLLOW_IDLE_STOP_MS) {
-					this.followFrame = undefined;
-					this.updateScrollToBottomButton();
-					return;
-				}
-				this.followFrame = win.requestAnimationFrame(step);
-				return;
-			}
-
-			this.followIdleSince = 0;
-			const move = Math.max(CleanSlateTranscriptView.FOLLOW_MIN_STEP_PX, diff * CleanSlateTranscriptView.FOLLOW_EASE);
-			this.writeFollowTop(Math.min(target, current + move));
-			this.followFrame = win.requestAnimationFrame(step);
-		};
-		this.followFrame = win.requestAnimationFrame(step);
+		});
 	}
 
-	// One eased write. Kept to a pure scrollTop write — no layout reads afterward —
-	// so the glide never triggers a synchronous reflow mid-frame. The button stays
-	// hidden and the anchor stays 'none' for the whole follow, both already set when
-	// following began. Records the position so handleScroll can tell our own downward
-	// glide apart from the user dragging the scroll upward.
-	private writeFollowTop(top: number): void {
-		this.lastWrittenTop = top;
-		this.element.scrollTop = top;
-	}
-
-	private stopFollowLoop(): void {
-		if (this.followFrame === undefined) {
+	private cancelPinnedScroll(): void {
+		if (this.pendingPinnedScrollFrame === undefined) {
 			return;
 		}
-		dom.getWindow(this.element).cancelAnimationFrame(this.followFrame);
-		this.followFrame = undefined;
+		dom.getWindow(this.element).cancelAnimationFrame(this.pendingPinnedScrollFrame);
+		this.pendingPinnedScrollFrame = undefined;
 	}
 
 	private smoothScrollToBottom(): void {
@@ -569,11 +529,11 @@ export class CleanSlateTranscriptView {
 
 	private applyScrollToBottom(): void {
 		const target = Math.max(0, this.element.scrollHeight - this.element.clientHeight);
-		this.markAutoScroll();
 		this.lastWrittenTop = target;
 		// Direct scrollTop assignment is immediate (bypasses CSS smooth scrolling),
 		// so the bottom stays pinned in the same frame content grows — no lag/jump.
 		if (Math.abs(this.element.scrollTop - target) > 1) {
+			this.markAutoScroll();
 			this.element.scrollTop = target;
 		}
 		this.updateOverflowAnchor();
@@ -585,18 +545,13 @@ export class CleanSlateTranscriptView {
 			return;
 		}
 		this.userScrolled = true;
-		this.restoreScrollPending = false;
 		this.scrollButtonDismissed = false;
-		this.stopFollowLoop();
+		this.cancelPinnedScroll();
 		this.updateOverflowAnchor();
 		this.updateScrollToBottomButton();
 	}
 
 	private handleScroll(): void {
-		const scrollTop = this.element.scrollTop;
-		const previousScrollTop = this.lastKnownScrollTop;
-		this.lastKnownScrollTop = scrollTop;
-
 		if (this.smoothScrollInProgress) {
 			if (this.distanceFromBottom() < CleanSlateTranscriptView.BOTTOM_THRESHOLD_PX) {
 				this.smoothScrollInProgress = false;
@@ -614,27 +569,15 @@ export class CleanSlateTranscriptView {
 			return;
 		}
 		if (this.distanceFromBottom() < CleanSlateTranscriptView.BOTTOM_THRESHOLD_PX) {
+			this.pendingAutoScrollWrites = 0;
 			this.userScrolled = false;
 			this.updateOverflowAnchor();
-			this.updateScrollToBottomButton();
-			return;
-		}
-		// While the eased follow loop owns the scroll, its own writes only ever move
-		// downward toward the bottom. So the only thing that unsticks following is an
-		// upward move we did not write — the user grabbing the scrollbar/trackpad.
-		if (!this.userScrolled && this.followFrame !== undefined) {
-			const movedUp = scrollTop < previousScrollTop - CleanSlateTranscriptView.USER_SCROLL_UP_PX
-				&& scrollTop < this.lastWrittenTop - CleanSlateTranscriptView.USER_SCROLL_UP_PX;
-			if (movedUp) {
-				this.stopFollowing();
-			}
 			this.updateScrollToBottomButton();
 			return;
 		}
 		// A scroll event that lands exactly where our own programmatic scroll aimed
 		// is ours, not the user's — keep following.
 		if (!this.userScrolled && this.isAutoScroll()) {
-			this.applyScrollToBottom();
 			return;
 		}
 		this.stopFollowing();
@@ -664,7 +607,7 @@ export class CleanSlateTranscriptView {
 
 	private cancelPendingScroll(): void {
 		this.smoothScrollInProgress = false;
-		this.stopFollowLoop();
+		this.cancelPinnedScroll();
 		if (this.pendingScrollFrame === undefined) {
 			return;
 		}
@@ -737,11 +680,10 @@ export class CleanSlateTranscriptView {
 	}
 
 	private stabilizeAfterContentRender(wasFollowing?: boolean): void {
-		// While following the bottom, re-pin in the same frame content changed so
-		// streaming never lags behind or jumps. When the user has scrolled away,
-		// overflow-anchor: auto keeps their viewport stable — no manual fix-up.
+		// While following the bottom, collapse all renderer callbacks into the next
+		// frame. When the user has scrolled away, overflow-anchor keeps their viewport.
 		if (wasFollowing ?? !this.userScrolled) {
-			this.applyScrollToBottom();
+			this.schedulePinnedScroll();
 		}
 	}
 
