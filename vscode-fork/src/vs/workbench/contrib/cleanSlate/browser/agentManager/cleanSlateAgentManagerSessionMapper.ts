@@ -8,6 +8,16 @@ import type { ICleanSlatePersistedSession, ICleanSlatePersistedThreadMessage } f
 import { deriveCleanSlateTranscriptFromHistory, normalizeCleanSlateSessionExecutionState, type ICleanSlateSessionMessage, type ICleanSlateSessionSnapshot, type ICleanSlateTranscriptMessage } from '../chat/types/cleanSlateChatSessionTypes.js';
 
 export class CleanSlateAgentManagerSessionMapper {
+	/** Transcript hydration and title freshness are independent. */
+	mergeSessionTitle(selected: ICleanSlateSessionSnapshot, other: ICleanSlateSessionSnapshot): ICleanSlateSessionSnapshot {
+		const hasTitle = (session: ICleanSlateSessionSnapshot) => !!session.title?.trim()
+			&& !/^(agent|untitled chat)$/i.test(session.title.trim());
+		if (hasTitle(other) && (!hasTitle(selected)
+			|| (other.updatedAt ?? other.savedAt) > (selected.updatedAt ?? selected.savedAt))) {
+			return { ...selected, title: other.title };
+		}
+		return selected;
+	}
 
 	toSessionSnapshot(session: ICleanSlatePersistedSession | undefined): ICleanSlateSessionSnapshot | undefined {
 		if (!session || typeof session.id !== 'string') {
@@ -90,8 +100,30 @@ export class CleanSlateAgentManagerSessionMapper {
 		);
 	}
 
+	/**
+	 * Sidebar summaries intentionally contain only the first user prompt. Treat a
+	 * snapshot as a warm conversation only when it contains data beyond that
+	 * summary, mirroring OpenCode's "messages already present" navigation gate.
+	 */
+	hasHydratedConversationContent(session: ICleanSlateSessionSnapshot): boolean {
+		const messages = session.transcript?.length
+			? session.transcript
+			: session.history;
+		const visibleMessages = messages.filter(message =>
+			!message.isInternalState
+			&& (
+				typeof message.content === 'string' && message.content.trim().length > 0
+				|| typeof message.renderPayload === 'string' && message.renderPayload.trim().length > 0
+				|| Array.isArray(message.images) && message.images.length > 0
+			)
+		);
+		return visibleMessages.length > 1
+			|| visibleMessages.some(message => message.role !== 'user');
+	}
+
 	private toPersistedMessages(messages: readonly ICleanSlateSessionMessage[]): ICleanSlatePersistedThreadMessage[] {
 		return messages.map(message => ({
+			id: 'id' in message && typeof message.id === 'string' ? message.id : undefined,
 			role: message.role,
 			content: message.content,
 			isInternalState: message.isInternalState,

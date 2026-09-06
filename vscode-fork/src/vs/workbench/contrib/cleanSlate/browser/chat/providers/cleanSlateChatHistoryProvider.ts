@@ -46,7 +46,7 @@ export class CleanSlateChatHistoryProvider {
         this.deletedSessionIds = loadCleanSlateDeletedSessionIds(this.storageService);
         this.deletedProjectCutoffs = loadCleanSlateDeletedProjectCutoffs(this.storageService);
         this.deletedBefore = loadCleanSlateDeletedBefore(this.storageService);
-        this.archivedSessions = this.loadArchivedSessions().filter(session => !this.isDeletedSession(session));
+		this.archivedSessions = this.loadArchivedSessions().filter(session => !session.parentSessionId && !this.isDeletedSession(session));
         this.persistArchivedSessions();
         this.readyPromise = this.initializePersistentArchivedSessions();
     }
@@ -114,7 +114,7 @@ export class CleanSlateChatHistoryProvider {
 
     upsertArchivedSession(snapshot: ICleanSlateSessionSnapshot | undefined): void {
         snapshot = this.cloneSnapshot(snapshot);
-        if (!snapshot || !this.hasVisibleSessionContent(snapshot)) {
+		if (!snapshot || snapshot.parentSessionId || !this.hasVisibleSessionContent(snapshot)) {
             return;
         }
         if (this.isDeletedSession(snapshot)) {
@@ -124,6 +124,12 @@ export class CleanSlateChatHistoryProvider {
         const existingIndex = this.archivedSessions.findIndex(session => session.id === snapshot.id);
         if (existingIndex !== -1) {
             const existing = this.archivedSessions.splice(existingIndex, 1)[0];
+			// A live session may have been materialized from listThreadSessions' title-only
+			// summary. Never let that stub replace a previously archived full transcript.
+			if (this.getSessionRichness(snapshot) < this.getSessionRichness(existing)) {
+				this.archivedSessions.unshift(existing);
+				return;
+			}
             const now = Date.now();
             const updatedSnapshot = {
                 ...snapshot,
@@ -149,6 +155,16 @@ export class CleanSlateChatHistoryProvider {
         this.queueArchiveSession(snapshot);
         this._onDidChangeState.fire();
     }
+
+	private getSessionRichness(session: ICleanSlateSessionSnapshot): number {
+		const messages = session.transcript?.length ? session.transcript : session.history;
+		return messages.reduce((total, message) => {
+			if (message.isInternalState) {
+				return total;
+			}
+			return total + Math.max(message.content?.trim().length ?? 0, message.renderPayload?.trim().length ?? 0);
+		}, 0);
+	}
 
     removeArchivedSession(sessionId: string): void {
         rememberCleanSlateDeletedSessionId(this.storageService, this.deletedSessionIds, sessionId);
@@ -436,7 +452,7 @@ export class CleanSlateChatHistoryProvider {
             const persisted = await this.cleanSlateMainService.listArchivedThreadSessions(this.getWorkspaceId());
             const dbSessions = persisted
                 .map(session => this.fromPersistedSession(session))
-                .filter((session): session is ICleanSlateSessionSnapshot => !!session && !this.isDeletedSession(session));
+				.filter((session): session is ICleanSlateSessionSnapshot => !!session && !session.parentSessionId && !this.isDeletedSession(session));
 
             const mergedSessions = this.mergeArchivedSessions(this.archivedSessions, dbSessions);
             if (mergedSessions.length > 0) {
@@ -459,9 +475,12 @@ export class CleanSlateChatHistoryProvider {
         localSessions: readonly ICleanSlateSessionSnapshot[],
         dbSessions: readonly ICleanSlateSessionSnapshot[]
     ): ICleanSlateSessionSnapshot[] {
-        const byId = new Map<string, ICleanSlateSessionSnapshot>();
-        for (const session of [...localSessions, ...dbSessions]) {
-            const cloned = this.cloneSnapshot(session);
+		const byId = new Map<string, ICleanSlateSessionSnapshot>();
+		for (const session of [...localSessions, ...dbSessions]) {
+			if (session.parentSessionId) {
+				continue;
+			}
+			const cloned = this.cloneSnapshot(session);
             if (!cloned || this.isDeletedSession(cloned)) {
                 continue;
             }

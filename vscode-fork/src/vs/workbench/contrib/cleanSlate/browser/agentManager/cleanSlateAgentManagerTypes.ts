@@ -31,4 +31,4 @@ export interface ICleanSlateWorkspaceIdentity {
 	readonly name: readonly string[];
 }
 
-export type CleanSlateAgentManagerRightTab = 'review' | 'artifacts' | 'browser' | 'terminal' | 'file';
+export type CleanSlateAgentManagerRightTab = 'review' | 'artifacts' | 'browser' | 'terminal' | 'file' | 'sideChat';

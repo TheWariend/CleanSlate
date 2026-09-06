@@ -30,13 +30,22 @@ export class CleanSlateAgentManagerSessionRepository {
 		globalListingUnavailable: boolean
 	): Promise<ICleanSlateAgentManagerSessionLoadResult> {
 		const byId = new Map<string, ICleanSlateSessionSnapshot>();
+		const titleSources = new Map<string, ICleanSlateSessionSnapshot>();
 		const insert = (session: ICleanSlateSessionSnapshot | undefined, preferIncoming = false): void => {
-			if (!session || isDeleted(session)) {
+			if (!session || session.parentSessionId || isDeleted(session)) {
 				return;
+			}
+			const titleSource = titleSources.get(session.id);
+			if (!titleSource || this.sessionMapper.mergeSessionTitle(titleSource, session) !== titleSource) {
+				titleSources.set(session.id, session);
 			}
 			const existing = byId.get(session.id);
 			const next = existing && preferIncoming ? this.projectProvider.preservePersistedWorkspaceIdentity(existing, session) : session;
-			if (!existing || preferIncoming || (next.updatedAt ?? next.savedAt ?? 0) >= (existing.updatedAt ?? existing.savedAt ?? 0)) {
+			const existingRichness = existing ? this.getSessionRichness(existing) : -1;
+			const nextRichness = this.getSessionRichness(next);
+			if (!existing
+				|| nextRichness > existingRichness
+				|| nextRichness === existingRichness && (preferIncoming || (next.updatedAt ?? next.savedAt ?? 0) >= (existing.updatedAt ?? existing.savedAt ?? 0))) {
 				byId.set(next.id, next);
 			}
 		};
@@ -74,16 +83,28 @@ export class CleanSlateAgentManagerSessionRepository {
 			insert(session, true);
 		}
 		return {
-			sessions: [...byId.values()].sort((left, right) => (right.updatedAt ?? right.savedAt ?? 0) - (left.updatedAt ?? left.savedAt ?? 0)),
+			// Keep the rich transcript, but independently select the latest known title.
+			sessions: [...byId.values()].map(session => this.sessionMapper.mergeSessionTitle(session, titleSources.get(session.id)!))
+				.sort((left, right) => (right.updatedAt ?? right.savedAt ?? 0) - (left.updatedAt ?? left.savedAt ?? 0)),
 			globalListingUnavailable
 		};
+	}
+
+	private getSessionRichness(session: ICleanSlateSessionSnapshot): number {
+		const messages = session.transcript?.length ? session.transcript : session.history;
+		return messages.reduce((total, message) => {
+			if (message.isInternalState) {
+				return total;
+			}
+			return total + Math.max(message.content?.trim().length ?? 0, message.renderPayload?.trim().length ?? 0);
+		}, 0);
 	}
 
 	public async loadActive(entry: ICleanSlateWorkspaceEntry, isDeleted: (session: ICleanSlateSessionSnapshot) => boolean): Promise<ICleanSlateSessionSnapshot | undefined> {
 		for (const key of this.projectProvider.dedupeProjectValues(this.getWorkspaceEntryLookupKeys(entry))) {
 			try {
 				const active = this.sessionMapper.toSessionSnapshot(await this.mainService.loadActiveThreadSession(key));
-				if (active && !isDeleted(active) && this.projectProvider.isSessionInWorkspaceEntry(active, entry)) {
+				if (active && !active.parentSessionId && !isDeleted(active) && this.projectProvider.isSessionInWorkspaceEntry(active, entry)) {
 					return active;
 				}
 			} catch {
