@@ -307,9 +307,15 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
         this.updateChatTitle();
         this.updateReasoningDropdownState();
         this.updatePlanModeState();
+        this._register(this.onDidChangeBodyVisibility(visible => {
+            if (!visible) {
+                this.historyFlowController.hide();
+            }
+        }));
     }
 
     override dispose(): void {
+        this.historyFlowController.hide();
         this.annotationController.dispose(this.container);
         super.dispose();
     }
@@ -453,6 +459,7 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
                 });
             },
             onSubmit: () => this.handleComposerSubmit(),
+            onStop: () => this.sidebarViewModel.abortGeneration(this),
             onImageAdded: (imageDataUrl) => this.sidebarViewModel.addPendingImage(imageDataUrl),
             onImageRemoved: (index) => this.sidebarViewModel.removePendingImage(index),
             onReasoningSelector: (anchor) => {
@@ -570,7 +577,10 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
             ? fallbackAssistantContent
             : this.sidebarViewModel.getLastAssistantTurn();
 
-        this.transcriptView.restore(history, assistantFallback);
+        this.transcriptView.restore(history, assistantFallback, this.sidebarViewModel.getIsGenerating());
+        const transport = this.sessionProvider.getHostedTransportStatus();
+        if (transport?.state === 'retrying') { this.transcriptView.showTransportRetry(transport); }
+        else if (transport !== null) { this.transcriptView.clearTransportRetry(); }
 
         this.restorePlanPanelFromHistory(history.length > 0 ? history : this.sidebarViewModel.getRawHistoryReference());
         this.planApprovalView?.resetDismissed();

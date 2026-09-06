@@ -494,6 +494,23 @@ export class CleanSlateToolPresentation {
             return 'Reading open files';
         }
 
+		if (toolName === 'spawn_worker') {
+			const description = typeof input?.description === 'string' ? input.description.trim() : '';
+			return description ? `Delegating: ${description}` : 'Starting a child agent';
+		}
+
+		if (toolName === 'wait_worker') {
+			return 'Waiting for child agent';
+		}
+
+		if (toolName === 'list_workers') {
+			return 'Checking child agents';
+		}
+
+		if (toolName === 'cancel_worker') {
+			return 'Stopping child agent';
+		}
+
         if (toolName === 'mcp_call_tool') {
             return typeof input?.toolName === 'string' && input.toolName.trim().length > 0
                 ? `Calling ${input.toolName}`
@@ -547,7 +564,20 @@ export class CleanSlateToolPresentation {
     }
 
     public describeToolResult(toolName: string, result: any): string {
-        const outcome = result?.success === false ? 'failed' : 'completed';
+		const outcome = result?.success === false ? 'failed' : 'completed';
+
+		if (toolName === 'spawn_worker') {
+			const description = typeof result?.description === 'string' ? result.description.trim() : '';
+			const suffix = description ? `: ${description}` : '';
+			return result?.status === 'running' || result?.status === 'queued'
+				? `Child agent started in background${suffix}`
+				: `Child agent ${outcome}${suffix}`;
+		}
+
+		if (toolName === 'wait_worker') {
+			const status = typeof result?.status === 'string' ? result.status : outcome;
+			return `Child agent ${status}`;
+		}
 
         if (this.isCommandExecutionTool(toolName)) {
             const command = typeof result?.command === 'string' ? result.command.trim() : '';

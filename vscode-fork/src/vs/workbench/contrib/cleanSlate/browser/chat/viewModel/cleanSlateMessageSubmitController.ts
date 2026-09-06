@@ -33,10 +33,7 @@ export class CleanSlateMessageSubmitController {
 		}
 
 		const sessionId = this.sidebarViewModel.getActiveSessionId();
-		if (text.trim().toLowerCase() !== 'continue') {
-			this.options.getRenderer().addMessage(text, 'user');
-			this.sidebarViewModel.recordTranscriptMessage({ role: 'user', content: text });
-		}
+		this.sidebarViewModel.recordTranscriptMessage({ role: 'user', content: text, isInternalState: true });
 		this.options.onUpdateTitle();
 
 		return this.sidebarViewModel.sendMessage(
@@ -108,6 +105,9 @@ export class CleanSlateMessageSubmitController {
 			return;
 		}
 
+		// Match the desktop composer pattern: reflect the active run before doing
+		// any transcript/layout work so the send control responds immediately.
+		composerView.setGenerating(true);
 		composerView.clearValue();
 		if (annotations.length > 0) {
 			composerView.suppressAnnotationReferences();
@@ -151,6 +151,11 @@ export class CleanSlateMessageSubmitController {
 			},
 			images
 		).catch(err => {
+			if (this.sidebarViewModel.getActiveSessionId() === sessionId) {
+				// startRun can reject before the controller has a chance to emit its
+				// normal generating=false callback.
+				composerView.setGenerating(false);
+			}
 			console.error(err);
 		}).finally(() => {
 			if (annotations.length > 0) {

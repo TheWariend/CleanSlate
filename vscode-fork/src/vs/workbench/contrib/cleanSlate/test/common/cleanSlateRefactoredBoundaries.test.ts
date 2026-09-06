@@ -136,6 +136,27 @@ suite('CleanSlate refactored boundaries', () => {
 		assert.strictEqual(restored?.agentRuntimeState?.messages[1].toolCallId, 'call-1');
 	});
 
+	test('agent manager distinguishes sidebar summaries from hydrated conversations', () => {
+		const mapper = new CleanSlateAgentManagerSessionMapper();
+		const summary = {
+			id: 'session-summary',
+			title: 'Explain this project',
+			savedAt: 1,
+			planMode: false,
+			reasoningLevel: 'low' as const,
+			history: [{ role: 'user' as const, content: 'Explain this project' }]
+		};
+		assert.strictEqual(mapper.hasVisibleSessionContent(summary), true);
+		assert.strictEqual(mapper.hasHydratedConversationContent(summary), false);
+		assert.strictEqual(mapper.hasHydratedConversationContent({
+			...summary,
+			transcript: [
+				{ role: 'user' as const, content: 'Explain this project' },
+				{ role: 'assistant' as const, content: 'Here is the architecture.' }
+			]
+		}), true);
+	});
+
 	test('strict tool dispatcher rejects malformed native arguments before resolution can run', () => {
 		const tool = {
 			name: 'find_by_name',

@@ -231,7 +231,7 @@ export function formatChatErrorMessage(err: any): string {
         // Fall back to normalized string below.
     }
     if (isUsageLimitError(errStr)) {
-        return 'QUOTA_EXCEEDED: You have reached your plan usage limit. It resets automatically, or add credits to keep going.';
+        return `QUOTA_EXCEEDED: ${stripRepeatedErrorPrefix(errStr).replace(/^(?:Error:\s*)?(?:(?:HTTP\s*)?429\s*:?\s*)?/i, '').trim() || 'You have reached your plan usage limit. It resets automatically, or add credits to keep going.'}`;
     }
     return stripRepeatedErrorPrefix(errStr);
 }

@@ -751,6 +751,11 @@ export class CleanSlateTranscriptRenderer {
     }
 
     disposeMarkdownRenders(): void {
+        // A full view reset replaces reasoning DOM too. Do not carry its cached
+        // rendered text or timers into a restored copy of the same live block.
+        for (const blockId of this.reasoningStreamStates.keys()) {
+            this.clearReasoningStreamStateForBlock(blockId);
+        }
         for (const disposable of this.markdownRenderDisposables.values()) {
             disposable.dispose();
         }
@@ -1982,6 +1987,9 @@ export class CleanSlateTranscriptRenderer {
     }
 
     private getWorkingPlaceholderLabel(toolName: string | undefined): string {
+		if (toolName === 'wait_worker') {
+			return 'Waiting for child agent';
+		}
         if (!toolName || toolName.trim().length === 0) {
             return 'Thinking...';
         }

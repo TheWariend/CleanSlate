@@ -12,6 +12,7 @@ suite('CleanSlateChatSessionTypes', () => {
             { role: 'system', content: '[TASK_BOUNDARY]', isInternalState: true },
             { role: 'user', content: 'Fix reload history' },
             { role: 'user', content: 'continue' },
+            { role: 'user', content: 'continue', isInternalState: true },
             { role: 'assistant', content: 'internal scratch', isInternalState: true },
             { role: 'assistant', content: 'tool card memory', isInternalState: true, renderPayload: '{"summary":"Rendered result"}' },
             { role: 'assistant', content: 'Visible final answer' }
@@ -19,10 +20,11 @@ suite('CleanSlateChatSessionTypes', () => {
 
         assert.deepStrictEqual(transcript.map(message => message.content), [
             'Fix reload history',
+            'continue',
             'tool card memory',
             'Visible final answer'
         ]);
-        assert.strictEqual(transcript[1].renderPayload, '{"summary":"Rendered result"}');
+        assert.strictEqual(transcript[2].renderPayload, '{"summary":"Rendered result"}');
     });
 
     test('clones transcript images without sharing the caller array', () => {

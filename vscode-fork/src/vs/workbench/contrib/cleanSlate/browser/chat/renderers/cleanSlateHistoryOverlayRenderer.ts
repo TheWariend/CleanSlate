@@ -108,7 +108,11 @@ export class CleanSlateHistoryOverlayRenderer {
     }
 
     hide(): void {
-        this.contextViewService.hideContextView();
+        // The context-view service is shared with unrelated menus and popups.
+        // Closing our panel must only dismiss the popup it owns.
+        if (this.isVisible()) {
+            this.contextViewService.hideContextView();
+        }
     }
 
     private renderList(): void {

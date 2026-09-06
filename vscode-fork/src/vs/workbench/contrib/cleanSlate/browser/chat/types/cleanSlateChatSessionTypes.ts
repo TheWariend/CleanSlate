@@ -115,10 +115,9 @@ export function deriveCleanSlateTranscriptFromHistory(
     return normalizeCleanSlateTranscriptOrder(transcript);
 }
 
-export function isCleanSlateControlTranscriptMessage(message: Pick<ICleanSlateSessionMessage, 'role' | 'content' | 'images'>): boolean {
+export function isCleanSlateControlTranscriptMessage(message: Pick<ICleanSlateSessionMessage, 'role' | 'isInternalState'>): boolean {
     return message.role === 'user'
-        && message.content.trim().toLowerCase() === 'continue'
-        && (!Array.isArray(message.images) || message.images.length === 0);
+        && message.isInternalState === true;
 }
 
 const CLEANSLATE_PLANNING_ANSWER_KIND = 'cleanSlate.planningAnswer';

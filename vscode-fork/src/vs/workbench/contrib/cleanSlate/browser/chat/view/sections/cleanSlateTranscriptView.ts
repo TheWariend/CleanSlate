@@ -11,6 +11,7 @@ import { normalizeChatResponse, normalizePlanningQuestion } from '../../runtime/
 import { toPersistableCleanSlateTranscriptPayload } from '../../runtime/cleanSlateTranscriptPersistence.js';
 import { CleanSlateTranscriptRenderer } from '../../renderers/cleanSlateTranscriptRenderer.js';
 import { parseCleanSlateUserSelectionDisplay } from '../../viewModel/cleanSlateChatViewHelpers.js';
+import { formatChatErrorMessage } from '../../runtime/cleanSlateStreamingResponseParser.js';
 
 export class CleanSlateTranscriptView {
 	readonly element: HTMLElement;
@@ -27,6 +28,7 @@ export class CleanSlateTranscriptView {
 	private smoothScrollInProgress = false;
 	private scrollButtonDismissed = false;
 	private transportStatusElement: HTMLElement | undefined;
+	private hostedRestore: { id: string; prefix: string; target: HTMLElement } | undefined;
 	private lastWrittenTop = 0;
 	// How far the settled position may differ from the last value we wrote before
 	// an arriving scroll event counts as the user's rather than ours.
@@ -42,6 +44,7 @@ export class CleanSlateTranscriptView {
 	// the question of the conversation *tail* and re-surface it once, only if the last
 	// turn is an unanswered assistant question (any later user/assistant turn clears it).
 	private isRestoringHistory = false;
+	private isRestoringLiveSession = false;
 	private restoreTailPlanningQuestion: NonNullable<ReturnType<typeof normalizePlanningQuestion>> | undefined;
 	// Questions the transcript already carries an answer for. Tail position alone is not
 	// enough: normalizeCleanSlateTranscriptOrder may hoist an answer above its question,
@@ -91,6 +94,7 @@ export class CleanSlateTranscriptView {
 	}
 
 	clear(showEmptyState = false): void {
+		this.hostedRestore = undefined;
 		this.cancelPendingScroll();
 		this.transcriptRenderer.disposeMarkdownRenders();
 		this.contentResizeObserver?.disconnect();
@@ -106,21 +110,41 @@ export class CleanSlateTranscriptView {
 	}
 
 	restore(
-		history: readonly { role: string; content: string; isInternalState?: boolean; renderPayload?: string; images?: string[] }[],
-		fallbackAssistantContent?: string
+		history: readonly { id?: string; role: string; content: string; isInternalState?: boolean; renderPayload?: string; images?: string[] }[],
+		fallbackAssistantContent?: string,
+		isLiveSession = false
 	): void {
+		const tail = history.at(-1);
+		const hostedId = tail?.role === 'assistant' && tail.id?.startsWith('hosted-') ? tail.id : undefined;
+		const prefix = hostedId ? JSON.stringify(history.slice(0, -1)) : undefined;
+		if (hostedId && tail?.renderPayload && this.hostedRestore?.id === hostedId
+			&& this.hostedRestore.prefix === prefix && this.hostedRestore.target.isConnected) {
+			try {
+				this.isRestoringLiveSession = isLiveSession;
+				const response = this.toRestorableTranscriptPayload(normalizeChatResponse(JSON.parse(tail.renderPayload) as ChatResponse));
+				this.renderJSONResponse(response, isLiveSession, this.hostedRestore.target);
+				return;
+			} catch { /* Fall back to a full restore for an invalid checkpoint. */ }
+			finally { this.isRestoringLiveSession = false; }
+		}
+		const previousMessageId = history.at(-2)?.id;
+		const displayedIds = new Set(Array.from(this.element.querySelectorAll<HTMLElement>('[data-clean-slate-transcript-id]'))
+			.map(element => element.dataset.cleanSlateTranscriptId));
+		const enteringHostedId = isLiveSession && hostedId && !displayedIds.has(hostedId)
+			&& previousMessageId && displayedIds.has(previousMessageId) ? hostedId : undefined;
 		this.clear();
 		// History restoration can create hundreds of blocks in one synchronous pass.
 		// Mark it as a bulk render so persisted content does not replay live-entry
 		// animations and compete with layout/markdown work during navigation.
 		this.element.classList.add('is-restoring-history');
 		this.isRestoringHistory = true;
+		this.isRestoringLiveSession = isLiveSession;
 		this.restoreTailPlanningQuestion = undefined;
 		this.restoreAnsweredQuestions.clear();
 		this.collectAnsweredPlanningQuestions(history);
 		let stats: { renderedCount: number; assistantCount: number };
 		try {
-			stats = this.renderSessionHistory(history);
+			stats = this.renderSessionHistory(history, enteringHostedId);
 			if (stats.assistantCount === 0 && typeof fallbackAssistantContent === 'string' && fallbackAssistantContent.trim().length > 0) {
 				if (this.renderAssistantHistoryMessage({ content: fallbackAssistantContent })) {
 					stats.renderedCount++;
@@ -129,6 +153,7 @@ export class CleanSlateTranscriptView {
 			}
 		} finally {
 			this.isRestoringHistory = false;
+			this.isRestoringLiveSession = false;
 			this.element.classList.remove('is-restoring-history');
 		}
 		if (stats.renderedCount === 0) {
@@ -144,6 +169,11 @@ export class CleanSlateTranscriptView {
 			this.onPlanningQuestion(pendingQuestion);
 		}
 		this.scrollToBottom(true);
+		if (hostedId && prefix !== undefined) {
+			const target = Array.from(this.element.querySelectorAll<HTMLElement>('[data-clean-slate-transcript-id]'))
+				.find(element => element.dataset.cleanSlateTranscriptId === hostedId);
+			if (target) { this.hostedRestore = { id: hostedId, prefix, target }; }
+		}
 	}
 
 	private collectAnsweredPlanningQuestions(
@@ -391,7 +421,10 @@ export class CleanSlateTranscriptView {
 	}
 
 	private hasNonLiveWorkingIndicator(): boolean {
-		const indicators = this.element.querySelectorAll('.cleanSlate-working-placeholder.placeholder, .cleanSlate-working-row');
+		// The fallback is only needed while no real response activity is visible.
+		// Hosted restores can already contain active edits, reasoning or text even
+		// though the renderer correctly removed its own working placeholder.
+		const indicators = this.element.querySelectorAll('.cleanSlate-working-placeholder.placeholder, .cleanSlate-working-row, .cleanSlate-timeline-block.is-active, .cleanSlate-reasoning-block.is-streaming, .cleanSlate-timeline-block.type-assistant_text.is-streaming');
 		for (const indicator of indicators) {
 			if (!indicator.closest('.cleanSlate-chat-message.cleanSlate[data-clean-slate-live-thinking="true"]')) {
 				return true;
@@ -410,6 +443,11 @@ export class CleanSlateTranscriptView {
 	}
 
 	scrollToBottom(force = false): void {
+		// Replaying each user turn must not force layout of the growing transcript.
+		// restore() pins once, after all messages have been inserted.
+		if (this.isRestoringHistory) {
+			return;
+		}
 		// `force` (a new user message, explicit jump) resumes following unconditionally
 		// and lands immediately — a brand-new message shouldn't drift in.
 		if (force) {
@@ -429,7 +467,7 @@ export class CleanSlateTranscriptView {
 	// Match the content-observer approach used by the reference clients: many
 	// transcript mutations collapse into one bottom-lock write for the next frame.
 	private schedulePinnedScroll(): void {
-		if (this.userScrolled || this.smoothScrollInProgress || this.pendingPinnedScrollFrame !== undefined) {
+		if (this.isRestoringHistory || this.userScrolled || this.smoothScrollInProgress || this.pendingPinnedScrollFrame !== undefined) {
 			return;
 		}
 		const win = dom.getWindow(this.element);
@@ -643,7 +681,7 @@ export class CleanSlateTranscriptView {
 		// over an already-generating session (setLiveThinkingIndicator). Once the real
 		// streaming turn re-attaches and shows something, drop the fallback so the two
 		// "Thinking…" indicators never render side by side.
-		if (targetMessage?.dataset.cleanSlateLiveThinking !== 'true') {
+		if (!this.isRestoringHistory && targetMessage?.dataset.cleanSlateLiveThinking !== 'true') {
 			this.dropSupersededLiveThinkingIndicator(targetMessage);
 		}
 
@@ -688,7 +726,8 @@ export class CleanSlateTranscriptView {
 	}
 
 	private renderSessionHistory(
-		history: readonly { id?: string; role: string; content: string; isInternalState?: boolean; renderPayload?: string; images?: string[] }[]
+		history: readonly { id?: string; role: string; content: string; isInternalState?: boolean; renderPayload?: string; images?: string[] }[],
+		enteringHostedId?: string
 	): { renderedCount: number; assistantCount: number } {
 		let renderedCount = 0;
 		let assistantCount = 0;
@@ -714,9 +753,17 @@ export class CleanSlateTranscriptView {
 			}
 
 			if (message.role === 'assistant' || message.role === 'cleanSlate') {
-				if (this.renderAssistantHistoryMessage(message)) {
-					renderedCount++;
-					assistantCount++;
+				const isLiveHostedTail = this.isRestoringLiveSession && message === normalizedHistory.at(-1)
+					&& message.id?.startsWith('hosted-') === true;
+				const animateEntry = message.id === enteringHostedId && enteringHostedId !== undefined;
+				if (animateEntry) { this.element.classList.remove('is-restoring-history'); }
+				try {
+					if (this.renderAssistantHistoryMessage(message, isLiveHostedTail)) {
+						renderedCount++;
+						assistantCount++;
+					}
+				} finally {
+					if (animateEntry) { this.element.classList.add('is-restoring-history'); }
 				}
 			}
 		}
@@ -724,7 +771,11 @@ export class CleanSlateTranscriptView {
 		return { renderedCount, assistantCount };
 	}
 
-	private renderAssistantHistoryMessage(message: { id?: string; content: string; isInternalState?: boolean; renderPayload?: string }): boolean {
+	private renderAssistantHistoryMessage(message: { id?: string; content: string; isInternalState?: boolean; renderPayload?: string }, isLiveHostedTail = false): boolean {
+		if (message.id?.startsWith('hosted-error-')) {
+			this.addMessage(formatChatErrorMessage(message.content), 'cleanSlate');
+			return true;
+		}
 		if (typeof message.renderPayload === 'string' && message.renderPayload.trim().length > 0) {
 			try {
 				const persisted = this.toRestorableTranscriptPayload(normalizeChatResponse(JSON.parse(message.renderPayload) as ChatResponse));
@@ -733,7 +784,10 @@ export class CleanSlateTranscriptView {
 					if (message.id) {
 						target.dataset.cleanSlateTranscriptId = message.id;
 					}
-					this.renderJSONResponse(persisted, this.shouldRestorePayloadAsStreaming(persisted), target);
+					// Between tools every block may be settled while the hosted run is
+					// still generating. Preserve the renderer's exploration continuation
+					// light, just as incremental live updates do. Older turns stay settled.
+					this.renderJSONResponse(persisted, isLiveHostedTail || this.shouldRestorePayloadAsStreaming(persisted), target);
 					return true;
 				}
 			} catch {
@@ -813,6 +867,9 @@ export class CleanSlateTranscriptView {
 	}
 
 	private toRestorableTranscriptPayload(parsed: ChatResponse): ChatResponse {
+		if (this.isRestoringLiveSession) {
+			return parsed;
+		}
 		if (!Array.isArray(parsed.timeline) || parsed.timeline.length === 0) {
 			return parsed;
 		}
@@ -878,6 +935,11 @@ export class CleanSlateTranscriptView {
 	}
 
 	private clearEmptyState(): void {
+		// restore() already cleared the container; don't scan all preceding rows
+		// again for every message in a long conversation.
+		if (this.isRestoringHistory) {
+			return;
+		}
 		const emptyState = this.element.querySelector('.cleanSlate-empty-state');
 		if (emptyState) {
 			emptyState.remove();

@@ -1464,10 +1464,10 @@ export const CLEANSLATE_CHAT_STYLES = `
                 font-size: 12px;
             }
 
-            .cleanSlate-dropdown.mode-dropdown {
-                flex: 0 1 auto;
-                max-width: 96px;
-            }
+			.cleanSlate-dropdown.mode-dropdown {
+				flex: 0 1 auto;
+				max-width: 96px;
+			}
 
             .cleanSlate-dropdown.model-dropdown {
                 flex: 1 1 auto;
@@ -1570,30 +1570,52 @@ export const CLEANSLATE_CHAT_STYLES = `
                 visibility: visible;
             }
 
-            @container (max-width: 380px) {
-                .cleanSlate-input-footer {
-                    gap: 6px;
-                }
+			@container (max-width: 380px) {
+				.cleanSlate-input-footer {
+					gap: 4px;
+				}
 
-                .cleanSlate-footer-left {
-                    gap: 6px;
-                }
+				.cleanSlate-footer-left {
+					gap: 4px;
+				}
 
-                .cleanSlate-dropdown {
-                    padding-left: 6px;
-                    padding-right: 6px;
-                    max-width: 104px;
-                }
+				.cleanSlate-dropdown {
+					padding-left: 4px;
+					padding-right: 4px;
+					max-width: 100px;
+				}
 
-                .cleanSlate-dropdown.mode-dropdown {
-                    max-width: 76px;
-                }
+				.cleanSlate-dropdown.mode-dropdown {
+					width: 28px;
+					max-width: 28px;
+					flex: 0 0 28px;
+					justify-content: center;
+					padding-left: 0;
+					padding-right: 0;
+				}
 
-                .cleanSlate-dropdown.model-dropdown {
-                    max-width: 104px;
-                }
+				.cleanSlate-dropdown.mode-dropdown .dropdown-label {
+					display: none;
+				}
 
-            }
+				.cleanSlate-dropdown.model-dropdown {
+					max-width: 100px;
+					flex-basis: 0;
+				}
+
+				.cleanSlate-edit-mode-chip {
+					flex: 0 0 auto;
+					gap: 2px;
+					padding-left: 4px;
+					padding-right: 4px;
+				}
+
+				.cleanSlate-context-window-button {
+					width: 24px;
+					height: 24px;
+				}
+
+			}
 
             .cleanSlate-context-window-button:hover .cleanSlate-context-window-tooltip,
             .cleanSlate-context-window-button:focus-visible .cleanSlate-context-window-tooltip {
@@ -1630,7 +1652,9 @@ export const CLEANSLATE_CHAT_STYLES = `
 				display: flex;
 				justify-content: center;
 				align-items: center;
-				transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+				appearance: none;
+				padding: 0;
+				font: inherit;
 				border: none;
                 flex-shrink: 0;
 			}
@@ -1644,11 +1668,10 @@ export const CLEANSLATE_CHAT_STYLES = `
 
 			.cleanSlate-send-button:hover {
 				background: rgba(255, 255, 255, 0.12);
-                transform: translateY(-1px);
 			}
 
             .cleanSlate-send-button:active {
-                transform: scale(0.95);
+                background: rgba(255, 255, 255, 0.16);
             }
 
             .cleanSlate-primary-button.approve-btn {
