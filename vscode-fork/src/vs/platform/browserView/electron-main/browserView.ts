@@ -768,6 +768,16 @@ export class BrowserView extends Disposable {
 		});
 	}
 
+	async presentAutomationPointer(x: number, y: number, click: boolean): Promise<void> {
+		const previous = this._automationPointerPoint;
+		this._automationPointerPoint = { x, y };
+		await this.showAutomationPointer(x, y, previous);
+		if (click) {
+			await this.animateAutomationPointerClick('mouseDown', x, y);
+			await this.animateAutomationPointerClick('mouseUp', x, y);
+		}
+	}
+
 	private async showAutomationPointer(x: number, y: number, previousPoint: { x: number; y: number } | undefined): Promise<void> {
 		const script = `(() => {
 			const hostId = '__cleanslate_browser_mouse';

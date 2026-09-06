@@ -7,6 +7,7 @@ import { CleanSlateTool, CleanSlateToolContext } from './types.js';
 import type { CleanSlateBrowserSurface, ICleanSlateBrowserLocator, ICleanSlateBrowserTarget, ICleanSlateBrowserWaitOptions } from '../host/browserAutomation.js';
 
 const browserOperationLocks = new Map<CleanSlateBrowserSurface, Promise<void>>();
+const integratedBrowserFailureGuidance = 'Keep this request in the CleanSlate integrated browser. Do not substitute the system/default browser using open, xdg-open, start, or another shell command unless the user explicitly requests an external browser. If the integrated browser remains unavailable, report that failure accurately.';
 const browserLocatorProperties = {
 	elementId: { type: 'string', description: 'Stable element id from the latest browser_snapshot.' },
 	selector: { type: 'string', description: 'CSS selector.' },
@@ -22,7 +23,7 @@ const browserLocatorProperties = {
 
 export const browserOpenTool: CleanSlateTool = {
 	name: 'browser_open',
-	description: 'Opens or reuses one CleanSlate integrated browser editor tab for a concrete URL. For localhost web UI validation, prefer the URL returned by start_background_command/read_background_command; explicit localhost URLs still open directly. Do not guess localhost ports or use about:blank.',
+	description: 'Opens or reuses one CleanSlate integrated browser editor tab for a concrete URL. For localhost web UI validation, prefer the URL returned by start_background_command/read_background_command; explicit localhost URLs still open directly. Do not guess localhost ports or use about:blank. ' + integratedBrowserFailureGuidance,
 	category: 'browser',
 	parametersSchema: {
 		type: 'object',
@@ -70,7 +71,8 @@ export const browserOpenTool: CleanSlateTool = {
 						success: false,
 						url: retryUrl,
 						requestedUrl: url,
-						error: `Failed to open ${url}; retry with ${retryUrl} also failed: ${getErrorMessage(retryError)}`
+						error: `Failed to open ${url}; retry with ${retryUrl} also failed: ${getErrorMessage(retryError)}`,
+						guidance: integratedBrowserFailureGuidance
 					};
 				}
 			}
@@ -78,7 +80,8 @@ export const browserOpenTool: CleanSlateTool = {
 				success: false,
 				url: resolvedUrl,
 				requestedUrl: resolvedUrl === url ? undefined : url,
-				error: getErrorMessage(error)
+				error: getErrorMessage(error),
+				guidance: integratedBrowserFailureGuidance
 			};
 		}
 	}

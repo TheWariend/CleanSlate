@@ -135,6 +135,7 @@ export interface ICleanSlateBrowserAutomationService {
 	readonly onDidOpenBrowser: Event<ICleanSlateBrowserState>;
 	open(url: string): Promise<ICleanSlateBrowserState>;
 	openInAgentManager(url: string, surface?: CleanSlateBrowserSurface): Promise<ICleanSlateBrowserState>;
+	adoptHostedBrowser(viewId: string, surface: CleanSlateBrowserSurface): Promise<void>;
 	revealOpenBrowser(surface?: CleanSlateBrowserSurface): Promise<ICleanSlateBrowserState | undefined>;
 	layoutOpenBrowser(bounds: ICleanSlateBrowserLayoutBounds, surface?: CleanSlateBrowserSurface): Promise<ICleanSlateBrowserState | undefined>;
 	setOpenBrowserVisible(visible: boolean, surface?: CleanSlateBrowserSurface): Promise<ICleanSlateBrowserState | undefined>;
@@ -186,6 +187,8 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 	private readonly browserModelDisposables = new Map<string, DisposableStore>();
 	private readonly browserLayouts = new Map<CleanSlateBrowserSurface, ICleanSlateBrowserLayoutBounds>();
 	private nextTabId = 1;
+	private readonly hostedViewIds = new Map<CleanSlateBrowserSurface, string>();
+	private readonly browserVisibilityVersions = new Map<CleanSlateBrowserSurface, number>();
 
 	constructor(
 		@IBrowserViewWorkbenchService private readonly browserViewWorkbenchService: IBrowserViewWorkbenchService,
@@ -200,6 +203,29 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 		const browserState = await this.openBrowserEditor(normalizedUrl);
 		this._onDidOpenBrowser.fire(browserState);
 		return browserState;
+	}
+
+	async adoptHostedBrowser(viewId: string, surface: CleanSlateBrowserSurface): Promise<void> {
+		if (this.hostedViewIds.get(surface) === viewId && this.browserModels.get(surface)?.id === viewId) { return; }
+		this.hostedViewIds.set(surface, viewId);
+		const model = await this.browserViewWorkbenchService.getOrCreateBrowserViewModel(viewId);
+		if (this.hostedViewIds.get(surface) !== viewId) { return; }
+		// A handoff moves presentation of the same page. The hidden surface must
+		// stop reacting to its navigation events or it can hide the IDE's page.
+		for (const [other, current] of this.browserModels) {
+			if (other === surface || current.id !== viewId) { continue; }
+			this.browserModels.delete(other);
+			this.hostedViewIds.delete(other);
+			this.browserTabs.get(other)?.delete(viewId);
+			const key = this.browserModelDisposableKey(other, viewId);
+			this.browserModelDisposables.get(key)?.dispose();
+			this.browserModelDisposables.delete(key);
+		}
+		this.trackBrowserModel(surface, model);
+		if (surface === 'ide') {
+			await this.editorService.openEditor({ resource: BrowserViewUri.forUrl(model.url, viewId), options: { pinned: true, revealIfOpened: true } }, ACTIVE_GROUP);
+		}
+		this._onDidOpenBrowser.fire(this.state(surface, model));
 	}
 
 	async openInAgentManager(url: string, surface: CleanSlateBrowserSurface = 'agentManager'): Promise<ICleanSlateBrowserState> {
@@ -222,23 +248,32 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 	}
 
 	async layoutOpenBrowser(bounds: ICleanSlateBrowserLayoutBounds, surface: CleanSlateBrowserSurface = 'ide'): Promise<ICleanSlateBrowserState | undefined> {
+		const version = this.browserVisibilityVersions.get(surface) ?? 0;
 		const model = await this.getOpenCleanSlateBrowserModel(surface);
-		if (!model) {
+		if (!model || version !== (this.browserVisibilityVersions.get(surface) ?? 0)) {
 			return undefined;
 		}
 		this.browserLayouts.set(surface, bounds);
 		await model.layout(this.toBrowserViewBounds(bounds));
+		if (version !== (this.browserVisibilityVersions.get(surface) ?? 0)) { return undefined; }
 		await model.setVisible(true);
+		if (version !== (this.browserVisibilityVersions.get(surface) ?? 0)) {
+			await model.setVisible(false);
+			return undefined;
+		}
 		await model.bringToFront();
 		return this.state(surface, model);
 	}
 
 	async setOpenBrowserVisible(visible: boolean, surface: CleanSlateBrowserSurface = 'ide'): Promise<ICleanSlateBrowserState | undefined> {
+		const version = (this.browserVisibilityVersions.get(surface) ?? 0) + 1;
+		this.browserVisibilityVersions.set(surface, version);
 		const model = await this.getOpenCleanSlateBrowserModel(surface);
-		if (!model) {
+		if (!model || this.browserVisibilityVersions.get(surface) !== version) {
 			return undefined;
 		}
 		await model.setVisible(visible);
+		if (this.browserVisibilityVersions.get(surface) !== version) { return undefined; }
 		if (visible) {
 			await model.bringToFront();
 		}
@@ -583,6 +618,8 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 	}
 
 	private browserViewIdForSurface(surface: CleanSlateBrowserSurface): string {
+		const hosted = this.hostedViewIds.get(surface);
+		if (hosted) { return hosted; }
 		return this.isAgentManagerSurface(surface)
 			? this.agentManagerBrowserViewIdForSurface(surface)
 			: CleanSlateBrowserAutomationService.ideBrowserViewId;

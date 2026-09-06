@@ -18,6 +18,10 @@ export const IBrowserViewMainService = createDecorator<IBrowserViewMainService>(
 
 export interface IBrowserViewMainService extends IBrowserViewService {
 	tryGetBrowserView(id: string): BrowserView | undefined;
+	retainAgentBrowserView(id: string): void;
+	createAgentBrowserView(id: string, sessionId: string): Promise<void>;
+	presentAgentPointer(id: string, x: number, y: number, click: boolean): Promise<void>;
+	releaseAgentBrowserView(id: string): Promise<void>;
 }
 
 // Same as webviews
@@ -42,6 +46,7 @@ export class BrowserViewMainService extends Disposable implements IBrowserViewMa
 	private readonly browserViews = this._register(new DisposableMap<string, BrowserView>());
 	private readonly browserViewsByWebContentsId = new Map<number, BrowserView>();
 	private readonly configuredSessions = new WeakSet<Electron.Session>();
+	private readonly agentOwnedViews = new Set<string>();
 
 	constructor(
 		@IEnvironmentMainService private readonly environmentMainService: IEnvironmentMainService,
@@ -207,7 +212,20 @@ export class BrowserViewMainService extends Disposable implements IBrowserViewMa
 	}
 
 	async destroyBrowserView(id: string): Promise<void> {
+		if (this.agentOwnedViews.has(id)) {
+			await this.browserViews.get(id)?.setVisible(false);
+			return;
+		}
 		this.browserViews.deleteAndDispose(id);
+	}
+
+	retainAgentBrowserView(id: string): void {
+		this.agentOwnedViews.add(id);
+	}
+
+	async releaseAgentBrowserView(id: string): Promise<void> {
+		this.agentOwnedViews.delete(id);
+		await this.destroyBrowserView(id);
 	}
 
 	async layout(id: string, bounds: IBrowserViewBounds): Promise<void> {
@@ -224,6 +242,23 @@ export class BrowserViewMainService extends Disposable implements IBrowserViewMa
 
 	async loadURL(id: string, url: string): Promise<void> {
 		return this._getBrowserView(id).loadURL(url);
+	}
+
+	async createAgentBrowserView(id: string, sessionId: string): Promise<void> {
+		await this.getOrCreateBrowserView(id, BrowserViewStorageScope.Ephemeral, undefined, sessionId);
+		this.retainAgentBrowserView(id);
+		// A newly constructed WebContents has no page for CDP to attach to yet.
+		// Initialize it before the agent searches for its automation identity.
+		try {
+			await this.loadURL(id, 'about:blank');
+		} catch (error) {
+			await this.releaseAgentBrowserView(id);
+			throw error;
+		}
+	}
+
+	async presentAgentPointer(id: string, x: number, y: number, click: boolean): Promise<void> {
+		await this._getBrowserView(id).presentAutomationPointer(x, y, click);
 	}
 
 	async getURL(id: string): Promise<string> {

@@ -1275,6 +1275,12 @@ export class CodeApplication extends Disposable {
 		// CleanSlate Services Registration
 		try {
 			const mainService = accessor.get(ICleanSlateMainService);
+			const browserViews = accessor.get(IBrowserViewMainService);
+			(mainService as NodeCleanSlateMainService).configureHostedBrowserViews({
+				create: (id, sessionId) => browserViews.createAgentBrowserView(id, sessionId),
+				release: id => browserViews.releaseAgentBrowserView(id),
+				pointer: (id, x, y, click) => browserViews.presentAgentPointer(id, x, y, click)
+			});
 			mainProcessElectronServer.registerChannel('cleanSlateMain', new CleanSlateMainChannel(mainService));
 			this.logService.info('CleanSlate: cleanSlateMain IPC channel registered successfully.');
 		} catch (e) {
