@@ -74,7 +74,7 @@ export const executeCommandTool: CleanSlateTool = {
 			toolName: 'execute_command'
 		});
 
-		if (!approved) {
+		if (!approved || context.signal?.aborted) {
 			return {
 				success: false,
 				code: 'user_cancelled',
@@ -255,7 +255,7 @@ export const startBackgroundCommandTool: CleanSlateTool = {
 			toolName: 'start_background_command'
 		});
 
-		if (!approved) {
+		if (!approved || context.signal?.aborted) {
 			return {
 				success: false,
 				code: 'user_cancelled',

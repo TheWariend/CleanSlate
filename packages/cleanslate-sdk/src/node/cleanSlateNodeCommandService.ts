@@ -62,6 +62,7 @@ export class CleanSlateNodeCommandService {
 		const emitter = new Emitter<ICleanSlateCommandOutputEvent | null>();
 		const controller = new AbortController();
 		const cancellation = token.onCancellationRequested(() => controller.abort());
+		if (token.isCancellationRequested) { controller.abort(); }
 		queueMicrotask(async () => {
 			try {
 				const result = await this.executeCommandInternal(options, event => emitter.fire(event), controller.signal);
@@ -89,6 +90,7 @@ export class CleanSlateNodeCommandService {
 	): Promise<ICleanSlateCommandExecutionResult> {
 		const command = this.normalizeCommand(options.command);
 		const cwd = await this.resolveCwd(options.cwd);
+		signal?.throwIfAborted();
 		const startedAt = Date.now();
 		const timeoutMs = this.normalizeTimeout(options.timeoutMs, CleanSlateNodeCommandService.DEFAULT_EXEC_TIMEOUT_MS);
 

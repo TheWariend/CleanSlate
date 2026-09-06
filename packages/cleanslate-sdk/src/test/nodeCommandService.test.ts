@@ -7,8 +7,40 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { CancellationToken } from '../core/cancellation.js';
 import { CleanSlateNodeCommandService } from '../node/cleanSlateNodeCommandService.js';
+import { executeCommandTool, startBackgroundCommandTool } from '../tools/ExecuteCommandTool.js';
+
+for (const tool of [executeCommandTool, startBackgroundCommandTool]) {
+	test(`${tool.name} cannot launch after Stop races with approval`, async () => {
+		const controller = new AbortController();
+		let launches = 0;
+		const result = await tool.run({ command: 'echo regression' }, {
+			signal: controller.signal,
+			workspaceContextService: { getWorkspace: () => ({ folders: [] }) },
+			requestCommandApproval: async () => { controller.abort(); return true; },
+			commandExecutionService: {
+				executeCommand: () => { launches++; },
+				startBackgroundCommand: () => { launches++; }
+			}
+		} as any);
+		assert.equal(result.code, 'user_cancelled');
+		assert.equal(launches, 0);
+	});
+}
 
 describe('CleanSlateNodeCommandService', () => {
+	test('never spawns a command with an already cancelled token', async () => {
+		const service = new CleanSlateNodeCommandService(process.cwd());
+		const events: any[] = [];
+		await new Promise<void>(resolve => {
+			service.executeCommandStream({ command: 'echo must-not-run' }, CancellationToken.Cancelled)(event => {
+				events.push(event);
+				if (event === null) { resolve(); }
+			});
+		});
+		assert.equal(events.some(event => event?.type === 'started'), false);
+		assert.equal(events.some(event => event?.type === 'stdout'), false);
+		service.dispose();
+	});
 	test('streams command output before the final result', async () => {
 		const service = new CleanSlateNodeCommandService(process.cwd());
 		const events: any[] = await new Promise(resolve => {
