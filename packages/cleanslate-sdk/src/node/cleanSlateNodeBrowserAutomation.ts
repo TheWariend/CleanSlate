@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { chromium, Browser, BrowserContext, Dialog, Locator, Page } from 'playwright';
+import { randomUUID } from 'crypto';
 import { Emitter } from '../core/event.js';
 import {
 	CleanSlateBrowserSurface,
@@ -22,6 +23,11 @@ import {
 
 export interface ICleanSlateNodeBrowserAutomationOptions {
 	headless?: boolean;
+	/** Desktop pages are owned by the application, including while its renderer reloads. */
+	createPage?: () => Promise<{ page: Page; id: string }>;
+	closePage?: (id: string) => Promise<void>;
+	onState?: (state: ICleanSlateBrowserState) => void;
+	onPointer?: (id: string, x: number, y: number, click: boolean) => Promise<void>;
 }
 
 export function resolveNodeBrowserHeadless(
@@ -37,6 +43,7 @@ export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutoma
 	private context: BrowserContext | undefined;
 	private activePage: Page | undefined;
 	private nextTabId = 1;
+	private readonly snapshotTokens = new WeakMap<Page, string>();
 	private readonly tabIds = new Map<Page, string>();
 	private readonly consoleEntries: IBrowserViewConsoleEntry[] = [];
 	private readonly networkEntries: IBrowserViewNetworkEntry[] = [];
@@ -91,18 +98,22 @@ export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutoma
 	async snapshot(surface: CleanSlateBrowserSurface, options: { limit?: number } = {}): Promise<ICleanSlateBrowserSnapshot> {
 		const page = await this.page();
 		const limit = Math.min(500, Math.max(1, options.limit ?? 150));
-		const elements = await page.locator('body *:visible').evaluateAll((nodes, max) =>
-			nodes.slice(0, max as number).flatMap((node, index) => {
+		const token = randomUUID();
+		this.snapshotTokens.set(page, token);
+		const elements = await page.locator('body *:visible').evaluateAll((nodes, { max, token }) =>
+			nodes.filter(node => node.id !== '__cleanslate_browser_mouse').slice(0, max).flatMap((node, index) => {
 				const element = node as HTMLElement;
 				const rect = element.getBoundingClientRect();
 				if (rect.width < 1 || rect.height < 1) {
 					return [];
 				}
+				const id = `e-${token}-${index + 1}`;
+				element.setAttribute('data-cleanslate-snapshot-id', id);
 				const text = (element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 300);
 				const role = element.getAttribute('role') || undefined;
 				const name = element.getAttribute('aria-label') || element.getAttribute('title') || undefined;
 				return [{
-					id: `e${index + 1}`,
+					id,
 					tagName: element.tagName.toLowerCase(),
 					selector: thisSelector(element),
 					testId: element.getAttribute('data-testid') || element.getAttribute('data-test') || element.getAttribute('data-cy') || undefined,
@@ -126,10 +137,10 @@ export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutoma
 					if (testId) {
 						return `[data-testid="${CSS.escape(testId)}"]`;
 					}
-					return target.tagName.toLowerCase();
+					return `[data-cleanslate-snapshot-id="${id}"]`;
 				}
-			}), limit);
-		const viewport = page.viewportSize() ?? { width: 1280, height: 720 };
+			}), { max: limit, token });
+		const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
 		const theme = await page.evaluate(() => ({
 			prefersColorScheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
 			colorScheme: getComputedStyle(document.documentElement).colorScheme,
@@ -147,6 +158,7 @@ export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutoma
 
 	async click(surface: CleanSlateBrowserSurface, input: ICleanSlateBrowserTarget): Promise<ICleanSlateBrowserActionResult> {
 		const page = await this.page();
+		await this.presentPointer(page, input, true);
 		if (input.x !== undefined && input.y !== undefined) {
 			await page.mouse.click(input.x, input.y, { button: input.button, clickCount: input.clickCount });
 		} else {
@@ -156,6 +168,7 @@ export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutoma
 	}
 	async hover(surface: CleanSlateBrowserSurface, input: ICleanSlateBrowserTarget): Promise<ICleanSlateBrowserActionResult> {
 		const page = await this.page();
+		await this.presentPointer(page, input);
 		if (input.x !== undefined && input.y !== undefined) {
 			await page.mouse.move(input.x, input.y);
 		} else {
@@ -164,15 +177,18 @@ export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutoma
 		return this.action(surface, 'hover', input);
 	}
 	async fill(surface: CleanSlateBrowserSurface, input: ICleanSlateBrowserLocator & { value: string }): Promise<ICleanSlateBrowserActionResult> {
+		await this.presentPointer(await this.page(), input);
 		await (await this.locator(await this.page(), input)).fill(input.value);
 		return this.action(surface, 'fill', input);
 	}
 	async check(surface: CleanSlateBrowserSurface, input: ICleanSlateBrowserLocator & { checked?: boolean }): Promise<ICleanSlateBrowserActionResult> {
+		await this.presentPointer(await this.page(), input, true);
 		const locator = await this.locator(await this.page(), input);
 		input.checked === false ? await locator.uncheck() : await locator.check();
 		return this.action(surface, 'check', input);
 	}
 	async select(surface: CleanSlateBrowserSurface, input: ICleanSlateBrowserLocator & { values: string[] }) {
+		await this.presentPointer(await this.page(), input);
 		const values = await (await this.locator(await this.page(), input)).selectOption(input.values);
 		return { ...await this.action(surface, 'select', input), values };
 	}
@@ -270,8 +286,7 @@ export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutoma
 		return { success: true, tabs: await this.tabs() };
 	}
 	async newTab(surface: CleanSlateBrowserSurface, options: { url?: string; background?: boolean } = {}) {
-		const context = await this.ensureContext();
-		const page = await context.newPage();
+		const page = this.options.createPage ? await this.createHostedPage() : await (await this.ensureContext()).newPage();
 		this.registerPage(page);
 		if (options.url) {
 			await page.goto(options.url, { waitUntil: 'domcontentloaded' });
@@ -289,10 +304,11 @@ export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutoma
 	}
 	async closeTab(_surface: CleanSlateBrowserSurface, tabId: string) {
 		const page = this.pageForId(tabId);
-		await page.close();
+		if (this.options.closePage) { await this.options.closePage(tabId); }
+		else { await page.close(); }
 		this.tabIds.delete(page);
 		if (this.activePage === page) {
-			this.activePage = this.context?.pages().at(-1);
+			this.activePage = [...this.tabIds.keys()].filter(page => !page.isClosed()).at(-1);
 		}
 		return { success: true as const, tabs: await this.tabs() };
 	}
@@ -338,6 +354,9 @@ export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutoma
 	}
 
 	async dispose(): Promise<void> {
+		if (this.options.closePage) {
+			await Promise.all([...this.tabIds.values()].map(id => this.options.closePage!(id)));
+		}
 		await this.browser?.close();
 		this.browser = undefined;
 		this.context = undefined;
@@ -377,10 +396,20 @@ export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutoma
 		if (this.activePage && !this.activePage.isClosed()) {
 			return this.activePage;
 		}
+		if (this.options.createPage) {
+			this.activePage = await this.createHostedPage();
+			return this.activePage;
+		}
 		const context = await this.ensureContext();
 		const page = context.pages()[0] ?? await context.newPage();
 		this.registerPage(page);
 		this.activePage = page;
+		return page;
+	}
+	private async createHostedPage(): Promise<Page> {
+		const { page, id } = await this.options.createPage!();
+		this.registerPage(page);
+		this.tabIds.set(page, id);
 		return page;
 	}
 	private page(): Promise<Page> {
@@ -438,7 +467,7 @@ export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutoma
 		throw new Error(`Browser tab not found: ${id}`);
 	}
 	private async tabs(): Promise<ICleanSlateBrowserTab[]> {
-		return Promise.all((this.context?.pages() ?? []).map(async page => ({
+		return Promise.all([...this.tabIds.keys()].filter(page => !page.isClosed()).map(async page => ({
 			id: this.idFor(page),
 			url: page.url(),
 			title: await page.title(),
@@ -446,7 +475,7 @@ export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutoma
 		})));
 	}
 	private async state(surface: CleanSlateBrowserSurface, page: Page): Promise<ICleanSlateBrowserState> {
-		return {
+		const state: ICleanSlateBrowserState = {
 			success: true,
 			surface,
 			viewId: this.idFor(page),
@@ -458,6 +487,8 @@ export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutoma
 			canGoForward: true,
 			annotationActive: this.annotationActive
 		};
+		if (page === this.activePage) { this.options.onState?.(state); }
+		return state;
 	}
 	private async action(surface: CleanSlateBrowserSurface, action: string, target: any): Promise<ICleanSlateBrowserActionResult> {
 		return {
@@ -469,11 +500,31 @@ export class CleanSlateNodeBrowserAutomation implements ICleanSlateBrowserAutoma
 	private hasLocator(input: ICleanSlateBrowserLocator): boolean {
 		return Boolean(input.elementId || input.selector || input.testId || input.role || input.label || input.placeholder || input.text);
 	}
+	private async presentPointer(page: Page, input: ICleanSlateBrowserTarget, click = false): Promise<void> {
+		if (!this.options.onPointer) { return; }
+		let x = input.x;
+		let y = input.y;
+		if (x === undefined || y === undefined) {
+			const locator = await this.locator(page, input);
+			await locator.scrollIntoViewIfNeeded();
+			const box = await locator.boundingBox();
+			if (!box) { return; }
+			x = box.x + box.width / 2;
+			y = box.y + box.height / 2;
+		}
+		const id = this.tabIds.get(page);
+		if (id) { await this.options.onPointer(id, x, y, click); }
+	}
+
 	private async locator(page: Page, input: ICleanSlateBrowserLocator): Promise<Locator> {
 		let locator: Locator;
-		if (input.elementId?.match(/^e\d+$/)) {
-			const index = Number(input.elementId.slice(1)) - 1;
-			locator = page.locator('body *:visible').nth(index);
+		if (input.elementId) {
+			const token = this.snapshotTokens.get(page);
+			if (!token || !input.elementId.startsWith(`e-${token}-`) || !/^\d+$/.test(input.elementId.slice(token.length + 3))) {
+				throw new Error('The browser element ID is stale or belongs to another page. Take a fresh browser_snapshot.');
+			}
+			locator = page.locator(`[data-cleanslate-snapshot-id="${input.elementId}"]`);
+			if (await locator.count() !== 1) { throw new Error('The snapshot element was removed or replaced. Take a fresh browser_snapshot.'); }
 		} else if (input.selector) {
 			locator = page.locator(input.selector);
 		} else if (input.testId) {

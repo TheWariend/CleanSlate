@@ -8,6 +8,7 @@ import { Subscribable } from '../host/events.js';
 import { IHeaders, IRequestOptions } from '../host/services.js';
 import { CancellationToken } from '../core/cancellation.js';
 import { VSBuffer } from '../core/buffer.js';
+import type { ICleanSlateChildAgentEvent } from '../services/cleanSlateAgentCoordinator.js';
 
 
 export type AIProvider =
@@ -343,6 +344,50 @@ export interface ICleanSlateThreadSessionUpdate {
     readonly originId: string;
     readonly session: ICleanSlatePersistedSession;
     readonly makeActive?: boolean;
+    /** Ephemeral ownership for a live view; never inferred from saved running flags. */
+    readonly live?: {
+        readonly ownerId: string;
+        readonly isRunning: boolean;
+        readonly runId?: string;
+        readonly approvals?: readonly ICleanSlateHostedApproval[];
+        readonly transportStatus?: ICleanSlateTransportStatus;
+        readonly artifacts?: readonly ICleanSlateHostedArtifact[];
+        readonly browser?: { readonly viewId: string; readonly url: string; readonly title: string };
+        readonly surface?: 'ide' | 'agentManager';
+        readonly childAgentEvents?: readonly { sequence: number; event: ICleanSlateChildAgentEvent }[];
+    };
+    /** View requests are routed to the execution owner and are never persisted. */
+    readonly request?: 'sync' | 'stop' | 'approve' | 'reject' | 'rejectPlan' | 'cancelChild';
+    readonly childAgentId?: string;
+    readonly approvalId?: string;
+    readonly surface?: 'ide' | 'agentManager';
+}
+
+export const CLEANSLATE_HOSTED_AGENT_OWNER = 'cleanslate:main-process';
+
+export interface ICleanSlateHostedApproval {
+    readonly id: string;
+    readonly sessionId: string;
+    readonly command: string;
+    readonly cwd?: string;
+    readonly reason?: string;
+    readonly createdAt: number;
+}
+
+export interface ICleanSlateHostedArtifact {
+    readonly id: string;
+    readonly type: string;
+    readonly content: string;
+    readonly metadata?: any;
+}
+
+export interface ICleanSlateHostedAgentRunRequest {
+    readonly surface?: 'ide' | 'agentManager';
+    readonly session: ICleanSlatePersistedSession;
+    readonly text: string;
+    readonly configuration: ICleanSlateConfiguration;
+    readonly action?: 'message' | 'approvePlan';
+    readonly images?: readonly string[];
 }
 
 export interface ICleanSlateConfiguration {
@@ -1020,6 +1065,9 @@ export interface ICleanSlateMainService {
 
     getRuntimeConfig(): Promise<ICleanSlateRuntimeConfig>;
 
+    /** Accept a run owned by the application process, independently of IPC clients. */
+    startHostedAgentRun?(request: ICleanSlateHostedAgentRunRequest): Promise<ICleanSlateThreadSessionUpdate>;
+
     /**
      * Perform a standard (buffered) request from the Node process to bypass CORS.
      */
@@ -1147,4 +1195,3 @@ export interface ICleanSlateMainService {
     removeThreadSession(sessionId: string): Promise<void>;
     removeArchivedThreadSession(workspaceId: string, sessionId: string): Promise<void>;
 }
-

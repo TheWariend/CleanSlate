@@ -30,6 +30,7 @@ import {
     ICleanSlatePersistedSession,
     ICleanSlateRuntimeConfig,
     ICleanSlateThreadSessionUpdate,
+    ICleanSlateHostedAgentRunRequest,
     ICleanSlateWebFetchOptions,
     ICleanSlateWebFetchResponse,
     ICleanSlateWebSearchOptions,
@@ -111,6 +112,9 @@ export class CleanSlateMainChannel implements IServerChannel {
 				return this.service.saveActiveThreadSession(arg[0], arg[1]);
             case 'publishThreadSession':
                 return this.service.publishThreadSession(arg[0]);
+            case 'startHostedAgentRun':
+                if (!this.service.startHostedAgentRun) { throw new Error('Agent hosting is unavailable.'); }
+                return this.service.startHostedAgentRun(arg[0]);
             case 'clearActiveThreadSession':
                 return this.service.clearActiveThreadSession(arg[0]);
             case 'listThreadSessions':
@@ -327,6 +331,10 @@ export class CleanSlateMainChannelClient implements ICleanSlateMainService {
 
     publishThreadSession(update: ICleanSlateThreadSessionUpdate): Promise<void> {
         return this.channel.call('publishThreadSession', [update]);
+    }
+
+    startHostedAgentRun(request: ICleanSlateHostedAgentRunRequest): Promise<ICleanSlateThreadSessionUpdate> {
+        return this.channel.call('startHostedAgentRun', [request]);
     }
 
     clearActiveThreadSession(workspaceId: string): Promise<void> {

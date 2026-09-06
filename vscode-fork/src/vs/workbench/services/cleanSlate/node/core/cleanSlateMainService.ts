@@ -6,6 +6,14 @@
 import { IRequestService } from '../../../../../platform/request/common/request.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createHash } from 'crypto';
+import { fileURLToPath } from 'url';
+import { CleanSlateHostedAgentRuntime } from '@cleanslate/sdk/node/cleanSlateHostedAgentRuntime.js';
+import { CleanSlateNodeAgentRuntime } from '@cleanslate/sdk/node/cleanSlateNodeAgentRuntime.js';
+import { CleanSlateNodeBrowserAutomation, type ICleanSlateNodeBrowserAutomationOptions } from '@cleanslate/sdk/node/cleanSlateNodeBrowserAutomation.js';
+import { randomUUID } from 'crypto';
+import type { ICleanSlateHostedAgentRunRequest } from '@cleanslate/sdk/protocol/cleanSlateAI.js';
+import type { AgentDefinition } from '@cleanslate/sdk/composer/registry/agentSchema.js';
 import {
     AIProvider,
     ICleanSlateBackgroundCommandOptions,
@@ -110,6 +118,12 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
     private readonly webRetrievalService: CleanSlateWebRetrievalService;
     private readonly threadPersistenceStore: CleanSlateThreadPersistenceStore;
     private readonly localEmbeddingService: CleanSlateLocalEmbeddingService;
+    private readonly agentHost: CleanSlateHostedAgentRuntime;
+    private hostedBrowserViews?: { create(id: string, sessionId: string): Promise<void>; release(id: string): Promise<void>; pointer?(id: string, x: number, y: number, click: boolean): Promise<void> };
+
+    configureHostedBrowserViews(views: NonNullable<NodeCleanSlateMainService['hostedBrowserViews']>): void {
+        this.hostedBrowserViews = views;
+    }
     private cleanSlateEnvCache: Map<string, string> | undefined;
     private modelsDevCatalogCache: { expiresAt: number; value: Record<string, any> } | undefined;
     private modelsDevCatalogRequest: Promise<Record<string, any> | undefined> | undefined;
@@ -124,6 +138,46 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
         this.webRetrievalService = new CleanSlateWebRetrievalService(this.requestService, this.logService);
         this.threadPersistenceStore = this._register(new CleanSlateThreadPersistenceStore(this.environmentService, this.logService));
         this.localEmbeddingService = new CleanSlateLocalEmbeddingService(this.environmentService, this.logService);
+        this.agentHost = this._register(new CleanSlateHostedAgentRuntime((request, hooks) => {
+            const sessionKey = createHash('sha256').update(request.session.id).digest('hex');
+            const storageHome = path.join(this.environmentService.userDataPath, 'cleanslate-agent-host', sessionKey);
+            const root = request.session.projectRoot || request.session.workDir;
+            const rootPath = root?.startsWith('file:') ? fileURLToPath(root) : root || path.join(storageHome, 'workspace');
+            if (!path.isAbsolute(rootPath)) {
+                throw new Error('This workspace cannot be opened by the local agent host.');
+            }
+            fs.mkdirSync(storageHome, { recursive: true });
+            if (!root) { fs.mkdirSync(rootPath, { recursive: true }); }
+            return new CleanSlateNodeAgentRuntime({
+                rootPath, workspaceStorageHome: storageHome, sessionId: request.session.id,
+                mainService: this, configuration: { ...request.configuration },
+                agentDefinition: request.session.agent as AgentDefinition | undefined, approveCommand: hooks.approveCommand,
+                onArtifact: hooks.onArtifact,
+                onAgentEvent: event => {
+                    if (event.type === 'child_agent') {
+                        hooks.onAgentEvent({ type: event.eventType, agent: event.agent, delta: event.delta, streamPart: event.streamPart });
+                    }
+                },
+                browserAutomationService: new CleanSlateNodeBrowserAutomation({
+                    createPage: async () => {
+                        if (!this.hostedBrowserViews) { throw new Error('The integrated browser host is unavailable.'); }
+                        const id = `cleanslate.hosted.${sessionKey}.${randomUUID()}`;
+                        await this.hostedBrowserViews.create(id, request.session.id);
+                        // The SDK and workbench ship different Playwright type versions;
+                        // this adapter uses only their common Page API.
+                        try { return { id, page: await this.browserService.pageForView(id) as unknown as Awaited<ReturnType<NonNullable<ICleanSlateNodeBrowserAutomationOptions['createPage']>>>['page'] }; }
+                        catch (error) { await this.hostedBrowserViews.release(id); throw error; }
+                    },
+                    closePage: async id => { await this.hostedBrowserViews?.release(id); },
+                    onPointer: async (id, x, y, click) => { await this.hostedBrowserViews?.pointer?.(id, x, y, click); },
+                    onState: hooks.onBrowserState
+                }),
+                resolveAttachments: () => hooks.getImages().map(url => ({ type: 'image_url' as const, image_url: { url } }))
+            });
+        }, update => {
+            this._onDidPublishThreadSession.fire(update);
+            void this.persistPublishedThreadSession(update.session);
+        }));
     }
 
     getRuntimeConfig(): Promise<ICleanSlateRuntimeConfig> {
@@ -1584,19 +1638,35 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
     }
 
 	loadThreadSession(sessionId: string): Promise<ICleanSlatePersistedSession | undefined> {
-		return this.threadPersistenceStore.loadSession(sessionId);
+		const hosted = this.agentHost.getSnapshot(sessionId);
+		return hosted ? Promise.resolve(hosted.session) : this.threadPersistenceStore.loadSession(sessionId);
 	}
 
 	loadActiveThreadSession(workspaceId: string): Promise<ICleanSlatePersistedSession | undefined> {
-		return this.threadPersistenceStore.loadActiveSession(workspaceId);
+		return this.threadPersistenceStore.loadActiveSession(workspaceId).then(session => session ? this.agentHost.getSnapshot(session.id)?.session ?? session : undefined);
 	}
 
     saveActiveThreadSession(workspaceId: string, session: ICleanSlatePersistedSession): Promise<void> {
-        return this.threadPersistenceStore.saveActiveSession(workspaceId, session);
+        return this.threadPersistenceStore.saveActiveSession(workspaceId, this.agentHost.getSnapshot(session.id)?.session ?? session);
+    }
+
+    startHostedAgentRun(request: ICleanSlateHostedAgentRunRequest): Promise<ICleanSlateThreadSessionUpdate> {
+        return this.agentHost.start(request);
     }
 
     publishThreadSession(update: ICleanSlateThreadSessionUpdate): Promise<void> {
+        if (update.makeActive) { this.agentHost.setPresentationSurface(update.session.id, 'ide'); }
+        if (update.request && this.agentHost.handleRequest(update)) {
+            return Promise.resolve();
+        }
+        const hosted = !update.request && this.agentHost.getSnapshot(update.session.id);
+        if (hosted) {
+            update = { ...hosted, makeActive: update.makeActive };
+        }
         this._onDidPublishThreadSession.fire(update);
+        if (update.request) {
+            return Promise.resolve();
+        }
         return this.persistPublishedThreadSession(update.session);
     }
 
@@ -1622,14 +1692,16 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
     }
 
     archiveThreadSession(workspaceId: string, session: ICleanSlatePersistedSession): Promise<void> {
-        return this.threadPersistenceStore.archiveSession(workspaceId, session);
+        return this.threadPersistenceStore.archiveSession(workspaceId, this.agentHost.getSnapshot(session.id)?.session ?? session);
     }
 
     removeThreadSession(sessionId: string): Promise<void> {
+        this.agentHost.remove(sessionId);
         return this.threadPersistenceStore.removeSession(sessionId);
     }
 
     removeArchivedThreadSession(workspaceId: string, sessionId: string): Promise<void> {
+        this.agentHost.remove(sessionId);
         return this.threadPersistenceStore.removeArchivedSession(workspaceId, sessionId);
     }
 }

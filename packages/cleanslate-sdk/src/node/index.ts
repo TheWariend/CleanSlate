@@ -33,8 +33,15 @@ export type {
 export { CleanSlateMemoryVectorStore } from './cleanSlateMemoryVectorStore.js';
 export { NodeCleanSlateMainService } from './cleanSlateNodeMainService.js';
 export { CleanSlateNodeAgentRuntime, createNodeProviderConfiguration } from './cleanSlateNodeAgentRuntime.js';
+export { CleanSlateHostedAgentRuntime } from './cleanSlateHostedAgentRuntime.js';
 export type { ICleanSlateNodeAgentRuntimeOptions } from './cleanSlateNodeAgentRuntime.js';
-export type { ICleanSlateNodeAgentSessionSnapshot } from './cleanSlateNodeAgentRuntime.js';
+export type { ICleanSlateNodeAgentSessionSnapshot, ICleanSlateNodeSideChat } from './cleanSlateNodeAgentRuntime.js';
+export { CleanSlateAgentCoordinator, formatCleanSlateChildAgentNotification } from '../services/cleanSlateAgentCoordinator.js';
+export type {
+	ICleanSlateSpawnAgentRequest,
+	ICleanSlateChildAgentSnapshot,
+	ICleanSlateChildAgentEvent
+} from '../services/cleanSlateAgentCoordinator.js';
 export {
 	CLEANSLATE_CODING_PROFILE,
 	CLEANSLATE_GENERAL_PROFILE

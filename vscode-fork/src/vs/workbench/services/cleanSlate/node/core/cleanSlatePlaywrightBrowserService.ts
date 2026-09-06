@@ -326,7 +326,7 @@ export class CleanSlatePlaywrightBrowserService extends Disposable {
 		return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 	}
 
-	private async pageForView(viewId: string): Promise<Page> {
+	async pageForView(viewId: string): Promise<Page> {
 		const deadline = Date.now() + 8_000;
 		let lastPageUrls: string[] = [];
 		while (Date.now() < deadline) {

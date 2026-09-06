@@ -15,6 +15,8 @@ import { resolveArchivedSessionWorkspaceId } from '@cleanslate/sdk/protocol/clea
 type SQLiteDatabase = any;
 
 interface IThreadSessionRow {
+    firstUserContent?: string | null;
+    agentRuntimeState?: string | null;
     id: string;
     parentSessionId: string | null;
     createdAt: number | null;
@@ -151,14 +153,30 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
         const db = await this.getDb();
         const rows = await this.all<IThreadSessionRow>(
             db,
-            `SELECT * FROM ThreadSessions ORDER BY updatedAt DESC`
+            `SELECT s.*, CASE WHEN lower(trim(s.title)) IN ('agent', 'untitled chat', '') THEN
+                (SELECT m.content FROM ThreadMessages m WHERE m.sessionId = s.id
+                 AND m.role = 'user' AND coalesce(m.isInternalState, 0) = 0 AND trim(m.content) <> ''
+                 ORDER BY m.sequence LIMIT 1) END AS firstUserContent
+             FROM ThreadSessions s ORDER BY s.updatedAt DESC`
         );
         return rows.map(row => this.summarizeSession(row));
     }
 
     async archiveSession(workspaceId: string, session: ICleanSlatePersistedSession): Promise<void> {
         await this.enqueueWrite(async db => {
-            const existing = await this.get<Pick<IThreadSessionRow, 'isActive'>>(db, `SELECT isActive FROM ThreadSessions WHERE id = ?`, [session.id]);
+            const existing = await this.get<Pick<IThreadSessionRow, 'updatedAt' | 'isActive' | 'transcript'> & { messageCount: number }>(
+                db,
+                `SELECT s.updatedAt, s.isActive, s.transcript,
+                        (SELECT count(*) FROM ThreadMessages m WHERE m.sessionId = s.id) AS messageCount
+                 FROM ThreadSessions s WHERE s.id = ?`,
+                [session.id]
+            );
+            const incomingUpdatedAt = (Number.isFinite(session.updatedAt) ? session.updatedAt : undefined)
+                ?? (Number.isFinite(session.savedAt) ? session.savedAt : undefined)
+                ?? 0;
+            if (existing && !this.shouldReplaceExistingSession(existing, session, incomingUpdatedAt)) {
+                return;
+            }
             await this.writeSession(db, workspaceId, session, {
                 isActive: existing?.isActive === 1,
                 isArchived: true
@@ -281,6 +299,7 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
             await this.ensureColumn(db, 'ThreadSessions', 'transcript', 'TEXT');
             await this.ensureColumn(db, 'ThreadSessions', 'transcriptVersion', 'INTEGER');
             await this.dropThreadSessionExecutionProfileColumn(db);
+            await this.ensureColumn(db, 'ThreadSessions', 'agentRuntimeState', 'TEXT');
             await this.run(db, `CREATE INDEX IF NOT EXISTS idx_thread_sessions_workspace_active ON ThreadSessions(workspaceId, isActive, updatedAt)`);
             await this.run(db, `CREATE INDEX IF NOT EXISTS idx_thread_sessions_workspace_archived ON ThreadSessions(workspaceId, isArchived, savedAt)`);
             await this.run(db, `CREATE TABLE IF NOT EXISTS ThreadMessages (
@@ -421,8 +440,8 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
                 `INSERT INTO ThreadSessions (
                     id, parentSessionId, createdAt, workspaceId, projectRoot, workDir, status, sessionKey,
                     title, savedAt, updatedAt, workspaceName, planMode, reasoningLevel,
-                    taskState, threadState, agent, transcript, transcriptVersion, isActive, isArchived
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    taskState, threadState, agent, transcript, transcriptVersion, isActive, isArchived, agentRuntimeState
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     parentSessionId = excluded.parentSessionId,
                     createdAt = excluded.createdAt,
@@ -443,7 +462,8 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
                     transcript = excluded.transcript,
                     transcriptVersion = excluded.transcriptVersion,
                     isActive = excluded.isActive,
-                    isArchived = excluded.isArchived`,
+                    isArchived = excluded.isArchived,
+                    agentRuntimeState = excluded.agentRuntimeState`,
                 [
                     normalized.id,
                     normalized.parentSessionId ?? null,
@@ -465,7 +485,8 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
                     this.toJson(normalized.transcript),
                     normalized.transcriptVersion ?? null,
                     flags.isActive ? 1 : 0,
-                    flags.isArchived ? 1 : 0
+                    flags.isArchived ? 1 : 0,
+                    this.toJson(normalized.agentRuntimeState)
                 ]
             );
 
@@ -504,7 +525,7 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
             const lastImportedAt = await this.getWorkspaceStorageImportedAt(db);
             // Bump when the import/merge logic changes so existing installs re-scan every workspace
             // once and re-evaluate rows the mtime guard would otherwise skip.
-            const importLogicVersion = 2;
+            const importLogicVersion = 3;
             const forceFullScan = await this.getWorkspaceStorageImportVersion(db) < importLogicVersion;
             const importStartedAt = Date.now();
             const deletion = await this.readDeletedSessionMarkers();
@@ -836,6 +857,7 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
             })),
             transcript: this.fromJson(row.transcript) as ICleanSlatePersistedSession['transcript'],
             transcriptVersion: typeof row.transcriptVersion === 'number' ? row.transcriptVersion : undefined,
+            agentRuntimeState: this.fromJson(row.agentRuntimeState ?? null) as ICleanSlatePersistedSession['agentRuntimeState'],
             taskState: this.fromJson(row.taskState),
             threadState: this.fromJson(row.threadState),
             agent: this.fromJson(row.agent)
@@ -847,7 +869,16 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
             planMode: row.planMode === 1,
             reasoningLevel: row.reasoningLevel
         });
-        const title = row.title?.trim() || 'Untitled chat';
+        let title = row.title?.trim() || 'Untitled chat';
+        if (/^(agent|untitled chat)$/i.test(title)) {
+            // Old hosted sessions may have persisted the placeholder. Resolve it
+            // during lightweight listing, before anyone opens the conversation.
+            const transcript = this.fromJson(row.transcript) as ICleanSlatePersistedSession['transcript'];
+            const prompt = row.firstUserContent || (Array.isArray(transcript)
+                ? transcript.find(message => message.role === 'user' && !message.isInternalState && message.content?.trim())?.content
+                : undefined);
+            title = prompt?.trim().replace(/\s+/g, ' ').slice(0, 90) || title;
+        }
         return {
             id: row.id,
             parentSessionId: row.parentSessionId ?? undefined,
@@ -898,6 +929,7 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
             history: Array.isArray(session.history) ? session.history.map(message => this.normalizeMessage(message)) : [],
             transcript: Array.isArray(session.transcript) ? session.transcript.map(message => this.normalizeMessage(message)) : undefined,
             transcriptVersion: Number.isFinite(session.transcriptVersion) ? session.transcriptVersion : undefined,
+            agentRuntimeState: session.agentRuntimeState,
             taskState: session.taskState,
             threadState: session.threadState,
             agent: session.agent

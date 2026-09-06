@@ -31,6 +31,7 @@ import {
     ICleanSlateRuntimeConfig,
     ICleanSlateStopBackgroundCommandResult,
     ICleanSlateThreadSessionUpdate,
+    ICleanSlateHostedAgentRunRequest,
     ICleanSlateWebFetchOptions,
     ICleanSlateWebFetchResponse,
     ICleanSlateWebSearchOptions,
@@ -196,6 +197,10 @@ export class CleanSlateMainServiceProxy extends Disposable implements ICleanSlat
 
     publishThreadSession(update: ICleanSlateThreadSessionUpdate): Promise<void> {
         return this.channel.call('publishThreadSession', [update]);
+    }
+
+    startHostedAgentRun(request: ICleanSlateHostedAgentRunRequest): Promise<ICleanSlateThreadSessionUpdate> {
+        return this.channel.call('startHostedAgentRun', [request]);
     }
 
     clearActiveThreadSession(workspaceId: string): Promise<void> {

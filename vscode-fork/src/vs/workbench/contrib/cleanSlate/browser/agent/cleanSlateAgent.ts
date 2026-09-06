@@ -63,6 +63,7 @@ import { buildBrowserAnnotationTaskContext } from './cleanSlateBrowserAnnotation
 import { CleanSlateAgentSession } from '@cleanslate/sdk/agent/cleanSlateAgentSession.js';
 import { CleanSlateToolDispatcher } from './cleanSlateToolDispatcher.js';
 import { composeTurnReminder } from '@cleanslate/sdk/composer/promptComposer.js';
+import { CleanSlateAgentCoordinator, formatCleanSlateChildAgentNotification, type ICleanSlateChildAgentExecutionContext, type ICleanSlateSpawnAgentRequest } from '@cleanslate/sdk/services/cleanSlateAgentCoordinator.js';
 
 interface ICleanSlateTurnControlDecision {
 	intent: CleanSlateTurnIntent;
@@ -108,6 +109,7 @@ export class CleanSlateAgent {
     private mcpToolsLoaded = false;
     private mcpToolsLoadPromise: Promise<void> | undefined;
 	private activeExecutionBudget: ICleanSlateExecutionBudget | undefined;
+	private readonly agentCoordinator: CleanSlateAgentCoordinator;
 
     constructor(
         private threadService: CleanSlateThreadService,
@@ -144,6 +146,23 @@ export class CleanSlateAgent {
         this.artifactPresentationHost = new CleanSlateArtifactPresentationHost(this.instantiationService, this.editorService);
         this.fileHost = new CleanSlateFileHost(this.fileService);
         this.textFileHost = new CleanSlateTextFileHost(this.textFileService);
+		this.agentCoordinator = new CleanSlateAgentCoordinator(
+			(request, context) => this.executeChildAgent(request, context),
+			{ maxConcurrentAgents: 4 }
+		);
+		this.agentCoordinator.onDidChangeAgent(event => {
+			if (event.agent.parentAgentId !== this.sessionId
+				|| (event.agent.status !== 'completed' && event.agent.status !== 'failed' && event.agent.status !== 'cancelled')) {
+				return;
+			}
+			// Completion is model context, not a visible user message. This lets a
+			// later parent turn consume an unattended background result while the
+			// existing Side Chat remains the user-facing lifecycle surface.
+			this.agentSession.appendMessage({
+				role: 'system',
+				content: formatCleanSlateChildAgentNotification(event.agent)
+			});
+		});
         this.toolContext = {
             surface: 'ide',
             modelService: this.modelService,
@@ -174,6 +193,7 @@ export class CleanSlateAgent {
             commandService: this.commandService,
             recentFocusLines: this.recentFocusLines,
             readFileState: this.readFileState,
+			agentCoordinator: this.agentCoordinator,
             requestCommandApproval: async (req: { command: string; cwd?: string; reason?: string; toolName?: string; toolCallId?: string }) => {
                 if (this.shouldAutoApproveCommand()) {
                     return true;
@@ -206,6 +226,22 @@ export class CleanSlateAgent {
         this.registeredTools = [...ALL_TOOLS];
 
     }
+
+	getChildAgent(agentId: string) {
+		return this.agentCoordinator.getAgent(agentId);
+	}
+
+	listChildAgents(parentAgentId = this.sessionId) {
+		return this.agentCoordinator.listAgents(parentAgentId);
+	}
+
+	cancelChildAgent(agentId: string): boolean {
+		return this.agentCoordinator.cancelAgent(agentId, 'Cancelled from Side Chat.');
+	}
+
+	get onDidChangeChildAgent() {
+		return this.agentCoordinator.onDidChangeAgent;
+	}
 
     /**
      * Kick off MCP tool discovery in the background. A cold MCP server start-up can
@@ -416,6 +452,19 @@ export class CleanSlateAgent {
 
     setAgentDefinition(agentDef?: AgentDefinition): void {
         this.currentAgentDef = agentDef;
+    }
+
+    getHostedConfiguration() {
+        return this.configService.getResolvedConfiguration();
+    }
+
+    restoreHostedArtifacts(artifacts: readonly { type: string; content: string; metadata?: any }[]): void {
+        for (const artifact of artifacts) {
+            const current = this.artifactService.getLatestArtifactByType(artifact.type, { sessionId: this.sessionId });
+            if (current?.content !== artifact.content) {
+                this.artifactService.saveArtifact(artifact.type, artifact.content, { ...artifact.metadata, sessionId: this.sessionId });
+            }
+        }
     }
 
     async sendMessage(
@@ -1160,25 +1209,6 @@ export class CleanSlateAgent {
 		}
 		input = prepared.input;
 
-        if (toolName === 'spawn_worker') {
-            yield { type: 'tool_start', toolName, input, toolCallId };
-            let lastWorkerResult = '';
-
-            try {
-                for await (const part of this.runWorkerSubagent(input.prompt, input.description, signal)) {
-                    if (part.type === 'text') {
-                        lastWorkerResult += part.content;
-                    }
-                    yield part;
-                }
-
-                yield { type: 'tool_result', toolName, result: this.sanitizeToolResultForRenderer(toolName, { success: true, result: lastWorkerResult }), toolCallId };
-            } catch (err) {
-                yield { type: 'tool_result', toolName, result: { success: false, error: String(err) }, toolCallId };
-            }
-            return;
-        }
-
         if (toolName === 'read_reference') {
             yield { type: 'tool_start', toolName, input, toolCallId };
             const refId = input.referenceId;
@@ -1298,7 +1328,7 @@ export class CleanSlateAgent {
         workerTaskSessionService.setPhase(AgentPhase.EXECUTION);
 
 		const executionSettings = this.parsingSupport.getExecutionLoopSettings();
-		const executionBudget = this.activeExecutionBudget ?? new CleanSlateExecutionBudget(executionSettings.maxTurns);
+		const executionBudget = new CleanSlateExecutionBudget(executionSettings.maxTurns);
         yield* this.streamWithToolExecution(
             messages,
             spec,
@@ -1313,6 +1343,36 @@ export class CleanSlateAgent {
 			new CleanSlateAgentSession()
         );
     }
+
+	private async executeChildAgent(
+		request: Readonly<ICleanSlateSpawnAgentRequest>,
+		context: ICleanSlateChildAgentExecutionContext
+	): Promise<string> {
+		// A background agent must not share the parent's mutable query runner,
+		// execution budget, message state or focus buffers. Give it a real runtime
+		// instance, then withhold delegation controls to keep the bounded worker
+		// topology explicit until nested lineage is supported.
+		const childThreadService = new CleanSlateThreadService();
+		const childTaskSessionService = new CleanSlateTaskSessionService();
+		const childAgent = this.instantiationService.createInstance(CleanSlateAgent, childThreadService, childTaskSessionService);
+		childAgent.setSessionId(context.id);
+		childAgent.setToolSurface(this.toolContext.surface);
+		childAgent.setIdeWorkspaceContextService(this.workspaceContextService);
+		childAgent.registeredTools = childAgent.registeredTools.filter(tool =>
+			tool.name !== 'spawn_worker'
+			&& tool.name !== 'wait_worker'
+			&& tool.name !== 'list_workers'
+			&& tool.name !== 'cancel_worker'
+		);
+		let output = '';
+		for await (const part of childAgent.runWorkerSubagent(request.prompt, request.description, context.signal)) {
+			context.emitStreamPart(part);
+			if ((part.type === 'chat_text' || part.type === 'text') && part.content) {
+				output += part.content;
+			}
+		}
+		return output.trim();
+	}
 
 	private createExecutionRunnerOptions(runtimeSession: CleanSlateAgentSession = this.agentSession): IExecutionRunnerOptions {
         return {
