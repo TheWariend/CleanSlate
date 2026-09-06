@@ -54,6 +54,7 @@ export interface ICleanSlateCommandApprovalService {
 interface IStoredCommandApproval {
 	readonly request: ICleanSlateCommandApprovalRequest;
 	readonly resolve: (approved: boolean) => void;
+	readonly promise: Promise<boolean>;
 }
 
 export class CleanSlateCommandApprovalService extends Disposable implements ICleanSlateCommandApprovalService {
@@ -78,6 +79,9 @@ export class CleanSlateCommandApprovalService extends Disposable implements ICle
 		readonly toolName?: string;
 		readonly toolCallId?: string;
 	}): Promise<boolean> {
+		if (request.id && this.pending.has(request.id)) {
+			return this.pending.get(request.id)!.promise;
+		}
 		const command = request.command.trim();
 		if (!command) {
 			return Promise.resolve(false);
@@ -105,11 +109,12 @@ export class CleanSlateCommandApprovalService extends Disposable implements ICle
 			createdAt: Date.now()
 		};
 
-		return new Promise<boolean>(resolve => {
-			this.pending.set(id, { request: approvalRequest, resolve });
-			this._onDidRequestApproval.fire(approvalRequest);
-			this._onDidChangeApprovalRequests.fire();
-		});
+		let resolve!: (approved: boolean) => void;
+		const promise = new Promise<boolean>(settle => { resolve = settle; });
+		this.pending.set(id, { request: approvalRequest, resolve, promise });
+		this._onDidRequestApproval.fire(approvalRequest);
+		this._onDidChangeApprovalRequests.fire();
+		return promise;
 	}
 
 	approve(id: string): boolean {

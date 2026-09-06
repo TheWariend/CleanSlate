@@ -30,6 +30,7 @@ import { CleanSlateRenderPayloadCodec } from './cleanSlateRenderPayloadCodec.js'
 import { CleanSlateToolPresentation } from './cleanSlateToolPresentation.js';
 import { CleanSlateCompletionTimelineBuilder } from './cleanSlateCompletionTimelineBuilder.js';
 import { toPersistableCleanSlateTranscriptPayload } from './cleanSlateTranscriptPersistence.js';
+import type { CleanSlateStreamPart } from '@cleanslate/sdk/agent/cleanSlateAgentTypes.js';
 
 export const policy = createTrustedTypesPolicy('cleanSlate-chat', {
     createHTML: (value: string) => value
@@ -50,8 +51,8 @@ export class CleanSlateChatController extends Disposable {
     private readonly filesModifiedService = new CleanSlateFilesModifiedService();
     private readonly fileChangeLedger = new CleanSlateFileChangeLedger();
     private readonly renderPayloadCodec = new CleanSlateRenderPayloadCodec();
-    private readonly toolPresentation = new CleanSlateToolPresentation();
-    private readonly completionTimelineBuilder: CleanSlateCompletionTimelineBuilder;
+	private readonly toolPresentation = new CleanSlateToolPresentation();
+	private readonly completionTimelineBuilder: CleanSlateCompletionTimelineBuilder;
     private activeRenderState?: {
         messageElement: HTMLElement;
         timeline: InteractionBlock[];
@@ -175,6 +176,7 @@ export class CleanSlateChatController extends Disposable {
                 console.warn('[CleanSlateChatController] Failed to checkpoint interrupted transcript:', error);
             }
         }
+		this.activeRenderState = undefined;
         renderer.removeStreamingPlaceholders();
         this._onDidChangeState.fire();
         return true;
@@ -846,8 +848,10 @@ export class CleanSlateChatController extends Disposable {
     }
 
     private shouldCreateGenericToolBlock(toolName: string): boolean {
-        void toolName;
-        return false;
+		return toolName === 'spawn_worker'
+			|| toolName === 'wait_worker'
+			|| toolName === 'list_workers'
+			|| toolName === 'cancel_worker';
     }
 
     private isAuxiliaryCommandStatusTool(toolName: string): boolean {
@@ -1102,7 +1106,8 @@ export class CleanSlateChatController extends Disposable {
         onGeneratingChange?: (isGenerating: boolean) => void,
         existingMessageElement?: HTMLElement,
         images?: string[],
-        onModelTerminatedContinue?: () => void
+        onModelTerminatedContinue?: () => void,
+		streamFactory?: (signal: AbortSignal) => Promise<AsyncIterable<CleanSlateStreamPart>> | AsyncIterable<CleanSlateStreamPart>
     ): Promise<void> {
         const editor = this.codeEditorService.getActiveCodeEditor();
         const selections = editor ? [...(editor.getSelections() || [])] : [];
@@ -1238,15 +1243,17 @@ export class CleanSlateChatController extends Disposable {
             renderer.renderJSONResponse({}, true, messageElement);
             this._onDidChangeState.fire();
 
-            const stream = await this.agent.sendMessage(text, selections, mode, controller.signal, images, status => {
-                if (controller.signal.aborted) {
-                    renderer.clearTransportRetry();
-                } else if (status.state === 'retrying') {
-                    renderer.showTransportRetry(status);
-                } else {
-                    renderer.clearTransportRetry();
-                }
-            });
+            const stream = streamFactory
+				? await streamFactory(controller.signal)
+				: await this.agent.sendMessage(text, selections, mode, controller.signal, images, status => {
+					if (controller.signal.aborted) {
+						renderer.clearTransportRetry();
+					} else if (status.state === 'retrying') {
+						renderer.showTransportRetry(status);
+					} else {
+						renderer.clearTransportRetry();
+					}
+				});
             this._onDidChangeState.fire();
 
             for await (const event of stream) {
@@ -1536,7 +1543,7 @@ export class CleanSlateChatController extends Disposable {
                         render(true);
                     }
                 } else if (event.type === 'tool_progress') {
-                    if (event.progress?.type === 'mutation_stats') {
+					if (event.progress?.type === 'mutation_stats') {
                         this.upsertMutationTimelineBlock(
                             timeline,
                             event.progress.path,
@@ -1887,12 +1894,15 @@ export class CleanSlateChatController extends Disposable {
                     if (genericToolBlockId) {
                         const block = this.findTimelineBlock(timeline, genericToolBlockId);
                         if (block) {
-                            block.isStreaming = false;
-                            block.status = event.result?.success === false ? 'Failed' : 'Completed';
-                            block.toolStatus = event.result?.success === false ? 'failed' : 'completed';
+							block.isStreaming = false;
+							block.status = event.result?.success === false ? 'Failed' : 'Completed';
+							block.toolStatus = event.result?.success === false ? 'failed' : 'completed';
                             if (typeof event.result?.message === 'string' && event.result.message.trim().length > 0) {
                                 block.content = event.result.message.trim();
                             }
+							if (event.toolName === 'spawn_worker' && typeof event.result?.result === 'string' && event.result.result.trim()) {
+								block.details = [this.renderPayloadCodec.clampText(event.result.result.trim(), 4000, true) ?? ''];
+							}
                         }
                         pendingGenericToolBlockIds.delete(event.toolName);
                         render(true);
@@ -1945,7 +1955,7 @@ export class CleanSlateChatController extends Disposable {
                 }
             }
             this.ensureRenderableCompletion(timeline, finalParsed, assistantTurnCompleted, controller.signal.aborted);
-				timeline.forEach(b => b.isStreaming = false);
+	            timeline.forEach(b => b.isStreaming = false);
 	            render(false);
 
             this.syncRunStateFromParsedResponse(finalParsed);
@@ -2010,12 +2020,18 @@ export class CleanSlateChatController extends Disposable {
             if (controller.signal.aborted) {
                 this.taskSessionService.markInterrupted();
             }
-            this.setGenerating(false, onGeneratingChange);
-            renderer.clearTransportRetry();
-            renderer.removeStreamingPlaceholders();
-            this.controllers.delete(sessionAtStart);
-            this.activeRenderState = undefined;
-            this._onDidChangeState.fire();
+			// A cancelled stream can unwind after the user has already submitted a
+			// replacement turn. Only the controller that still owns this session may
+			// clear shared generation/render state; otherwise its stale finally block
+			// would turn the new Send button back into a stuck or incorrect state.
+			if (this.controllers.get(sessionAtStart) === controller) {
+				this.setGenerating(false, onGeneratingChange);
+				renderer.clearTransportRetry();
+				renderer.removeStreamingPlaceholders();
+				this.controllers.delete(sessionAtStart);
+				this.activeRenderState = undefined;
+				this._onDidChangeState.fire();
+			}
         }
     }
 

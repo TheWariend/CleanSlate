@@ -45,8 +45,12 @@ import {
 import { CleanSlateThreadService } from '@cleanslate/sdk/services/cleanSlateThreadService.js';
 import { CleanSlateTaskSessionService, ICleanSlateRunSummary } from '@cleanslate/sdk/services/cleanSlateTaskSessionService.js';
 import type { CleanSlateToolSurface } from '@cleanslate/sdk/services/cleanSlateTools.js';
+import type { ICleanSlateChildAgentEvent, ICleanSlateChildAgentSnapshot } from '@cleanslate/sdk/services/cleanSlateAgentCoordinator.js';
+import { AsyncQueue, type CleanSlateStreamPart } from '@cleanslate/sdk/agent/cleanSlateAgentTypes.js';
 import { CleanSlateChatSessionRunState, CleanSlateSessionAlreadyRunningError, type CleanSlateSessionRunStatus } from './cleanSlateChatSessionRunState.js';
 import { CleanSlateChatSessionSnapshotCodec } from './cleanSlateChatSessionSnapshotCodec.js';
+import { CLEANSLATE_HOSTED_AGENT_OWNER } from '@cleanslate/sdk/protocol/cleanSlateAI.js';
+import { ICleanSlateBrowserAutomationService } from '../../core/cleanSlateBrowserAutomationService.js';
 
 const CLEANSLATE_ACTIVE_SESSION_STORAGE_KEY = 'cleanSlate.chat.activeSession';
 const CLEANSLATE_ACTIVE_SESSION_SAVE_DEBOUNCE_MS = 250;
@@ -57,6 +61,23 @@ export interface ICleanSlateSessionWorkspaceMetadata {
     readonly projectRoot?: string;
     readonly workDir?: string;
     readonly workspaceName?: string;
+}
+
+/**
+ * A child-agent conversation update projected onto the task's existing side-chat
+ * surface. It never enters task history or the parent model's conversation.
+ */
+export interface ICleanSlateChildAgentSurfaceEvent {
+    readonly parentSessionId: string;
+    readonly sideChatSessionId?: string;
+    readonly event: ICleanSlateChildAgentEvent;
+}
+
+interface ICleanSlateChildAgentPresentation {
+	readonly parent: ICleanSlateLiveSession;
+	readonly sideChat: ICleanSlateLiveSession;
+	readonly queue: AsyncQueue<CleanSlateStreamPart>;
+	readonly runId: string;
 }
 
 interface ICleanSlateLiveSession {
@@ -80,12 +101,21 @@ interface ICleanSlateLiveSession {
     agentDefinition?: AgentDefinition;
     transcriptHistory: ICleanSlateTranscriptMessage[];
     status: CleanSlateSessionState;
+    /** This surface is displaying a run owned by another provider. */
+    liveOwnerId?: string;
+    transportStatus?: NonNullable<ICleanSlateThreadSessionUpdate['live']>['transportStatus'];
 }
 
 export class CleanSlateChatSessionProvider extends Disposable {
     private readonly providerId = generateUuid();
     private readonly snapshotCodec = new CleanSlateChatSessionSnapshotCodec();
     private readonly sessions = new Map<string, ICleanSlateLiveSession>();
+	/** Auxiliary conversations belong to a task surface, never to task history. */
+	private readonly sideChats = new Map<string, ICleanSlateLiveSession>();
+	private readonly sideChatRenderers = new Map<string, IResponseRenderer>();
+	private readonly childAgentPresentations = new Map<string, ICleanSlateChildAgentPresentation>();
+	private readonly hostedChildSequences = new Map<string, number>();
+	private readonly hostedChildren = new Map<string, ICleanSlateChildAgentSnapshot>();
     private activeSessionId!: string;
     private activeSessionRevision = 0;
     private persistenceQueue: Promise<void> = Promise.resolve();
@@ -99,10 +129,17 @@ export class CleanSlateChatSessionProvider extends Disposable {
     private liveSyncScheduled = false;
     private applyingPublishedSession = false;
     private externalActiveSessionRefreshPending = false;
+    private disposeAfterRuns = false;
+    private readonly pendingHostedSubmissions = new Map<string, Promise<void>>();
+    private readonly publishedRunningSessions = new Map<string, boolean>();
+    private readonly hostedApprovals = new Map<string, string>();
+    private readonly hostedUpdateVersions = new Map<string, number>();
     private readonly runState = this._register(new CleanSlateChatSessionRunState());
     private readonly readyPromise: Promise<void>;
-    private readonly _onDidChangeState = new Emitter<void>();
-    readonly onDidChangeState: Event<void> = this._onDidChangeState.event;
+	private readonly _onDidChangeState = new Emitter<void>();
+	readonly onDidChangeState: Event<void> = this._onDidChangeState.event;
+	private readonly _onDidChangeChildAgent = new Emitter<ICleanSlateChildAgentSurfaceEvent>();
+	readonly onDidChangeChildAgent: Event<ICleanSlateChildAgentSurfaceEvent> = this._onDidChangeChildAgent.event;
     readonly onDidPendingEditsChange: Event<void>;
 
     constructor(
@@ -120,6 +157,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
     ) {
         super();
         this._register(this._onDidChangeState);
+        this._register(this._onDidChangeChildAgent);
         this.onDidPendingEditsChange = this.editCodeService.onDidPendingEditsChange;
         this._register(this.commandApprovalService.onDidChangeApprovalRequests(() => {
             this._onDidChangeState.fire();
@@ -144,14 +182,65 @@ export class CleanSlateChatSessionProvider extends Disposable {
         this.readyPromise = this.surface === 'agentManager'
             ? Promise.resolve()
             : this.initializePersistentActiveSession(activeSession);
+        void this.readyPromise.then(() => this.requestLiveSessionSync()).catch(error => {
+            console.warn('[CleanSlate] Failed to request live session state:', error);
+        });
     }
 
     whenReady(): Promise<void> {
         return this.readyPromise;
     }
 
+    override dispose(): void {
+        this.hostedApprovals.clear();
+        // An editor/auxiliary view can close during IDE handoff. Keep execution
+        // ownership and the live-control subscription until its runs settle.
+        if (this.hasOwnedRunningSessions()) {
+            this.disposeAfterRuns = true;
+            return;
+        }
+        super.dispose();
+    }
+
     getActiveSessionId(): string {
         return this.activeSessionId;
+    }
+
+    getHostedTransportStatus(): ICleanSlateLiveSession['transportStatus'] | null {
+        return this.activeSession.liveOwnerId === CLEANSLATE_HOSTED_AGENT_OWNER ? this.activeSession.transportStatus : null;
+    }
+
+    hasOwnedRunningSessions(): boolean {
+        return [...this.sessions.values(), ...this.sideChats.values()].some(session => this.runState.isRunning(session.id));
+    }
+
+    private requestLiveSessionSync(): Promise<void> {
+        return this.cleanSlateMainService.publishThreadSession({
+            originId: this.providerId,
+            session: this.toPersistedSession(this.buildSessionSnapshot(this.activeSession)),
+            request: 'sync',
+            surface: this.surface === 'agentManager' ? 'agentManager' : 'ide'
+        });
+    }
+
+    async publishActiveSessionForIdeHandoff(): Promise<void> {
+        await this.whenHostedRunsAccepted();
+        const session = this.activeSession;
+        const snapshot = this.buildSessionSnapshot(session);
+        const persisted = this.toPersistedSession(snapshot);
+        await this.cleanSlateMainService.saveActiveThreadSession(this.getSnapshotWorkspaceId(snapshot), persisted);
+        await this.cleanSlateMainService.publishThreadSession({
+            originId: 'agentManager:handoff',
+            session: persisted,
+            makeActive: true,
+            live: { ownerId: session.liveOwnerId ?? this.providerId, isRunning: this.isLiveSessionRunning(session) }
+        });
+    }
+
+    async whenHostedRunsAccepted(): Promise<void> {
+        // A rejected submission has no renderer-owned work to protect and must
+        // not prevent the user from opening the IDE.
+        await Promise.allSettled(this.pendingHostedSubmissions.values());
     }
 
     consumeExternalActiveSessionRefresh(): boolean {
@@ -289,8 +378,9 @@ export class CleanSlateChatSessionProvider extends Disposable {
         if (!sessionId) {
             return false;
         }
-        const session = this.sessions.get(sessionId);
-        return this.runState.isRunning(sessionId) || session?.controller.getIsGenerating() === true;
+        const session = this.sessions.get(sessionId) ?? this.sideChats.get(sessionId);
+        return session ? this.runState.isRunning(sessionId) || session.controller.getIsGenerating() === true
+            : this.publishedRunningSessions.get(sessionId) === true;
     }
 
     canApprovePlan(): boolean {
@@ -299,6 +389,14 @@ export class CleanSlateChatSessionProvider extends Disposable {
 
     getCurrentTitle(): string {
         return this.ensureSessionTitle(this.activeSession);
+    }
+
+    hasCurrentSessionContent(): boolean {
+        const session = this.activeSession;
+        return this.hasVisibleSessionContent({
+            history: session.threadService.getRawHistoryReference(),
+            transcript: session.transcriptHistory
+        });
     }
 
     getPendingEditsInfo(): { uri: URI; added: number; deleted: number }[] {
@@ -322,25 +420,281 @@ export class CleanSlateChatSessionProvider extends Disposable {
         this._onDidChangeState.fire();
     }
 
-    restoreSession(session: ICleanSlateSessionSnapshot): void {
+	/**
+	 * Creates a conversation attached to the current task without replacing the
+	 * main composer. The side chat receives a read-only context seed, then owns
+	 * an independent runtime, transcript and cancellation boundary.
+	 */
+	createSideChat(title = 'Side chat'): string {
+		const parent = this.activeSession;
+		const existing = Array.from(this.sideChats.values()).find(candidate => candidate.parentSessionId === parent.id);
+		if (existing) {
+			return existing.id;
+		}
+		return this.createSideChatForParent(parent, title).id;
+	}
+
+	private createSideChatForParent(parent: ICleanSlateLiveSession, title = 'Side chat'): ICleanSlateLiveSession {
+		const side = this.createLiveSession(undefined, false, parent.reasoningLevel, {
+			parentSessionId: parent.id,
+			workspaceId: parent.workspaceId,
+			projectRoot: parent.projectRoot,
+			workDir: parent.workDir,
+			workspaceName: parent.workspaceName,
+			title
+		});
+		// Register in the auxiliary layer before seeding context because the thread
+		// history listener fires synchronously. This keeps even the initial seed out
+		// of persistence, publishing, archives and sidebar history.
+		this.sideChats.set(side.id, side);
+		const context = parent.threadService.getActiveTaskHistory()
+			.filter(message => !message.isInternalState && (message.role === 'user' || message.role === 'assistant'))
+			.slice(-8)
+			.map(message => `${message.role}: ${message.content}`)
+			.join('\n\n');
+		if (context) {
+			side.threadService.addMessage('system', [
+				'This is a side conversation attached to another task.',
+				'Use the following prior discussion only as context. Do not claim you performed the parent task.',
+				context
+			].join('\n\n'), true);
+		}
+		this.notifySessionChanged(side);
+		return side;
+	}
+
+	attachSideChatRenderer(sessionId: string, renderer: IResponseRenderer): void {
+		if (this.sideChats.has(sessionId)) {
+			this.sideChatRenderers.set(sessionId, renderer);
+		}
+	}
+
+	detachSideChatRenderer(sessionId: string): void {
+		this.sideChatRenderers.delete(sessionId);
+	}
+
+	getSideChatTranscript(sessionId: string): ICleanSlateTranscriptMessage[] {
+		const session = this.sideChats.get(sessionId);
+		return session ? this.snapshotCodec.cloneTranscript(this.getEffectiveTranscriptHistory(session)) : [];
+	}
+
+	isSideChatGenerating(sessionId: string): boolean {
+		if (this.isSessionRunning(sessionId)) {
+			return true;
+		}
+		const sideChat = this.sideChats.get(sessionId);
+		if (!sideChat) {
+			return false;
+		}
+		const parent = sideChat.parentSessionId ? this.sessions.get(sideChat.parentSessionId) : undefined;
+		return (parent?.agent.listChildAgents(parent.id) ?? [])
+			.some(agent => agent.status === 'queued' || agent.status === 'running');
+	}
+
+	sendSideChatMessage(sessionId: string, text: string, renderer: IResponseRenderer, onGeneratingChange?: (isGenerating: boolean) => void, images?: string[]): Promise<void> {
+		const session = this.sideChats.get(sessionId);
+		if (!session || !session.parentSessionId) {
+			return Promise.reject(new Error('Side chat is no longer available.'));
+		}
+		this.attachSideChatRenderer(sessionId, renderer);
+		return this.sendSessionMessage(session, text, this.createLiveSideChatRenderer(sessionId), onGeneratingChange, images, true, true);
+	}
+
+	abortSideChat(sessionId: string, renderer: IResponseRenderer): void {
+		const session = this.sideChats.get(sessionId);
+		if (!session) {
+			return;
+		}
+		session.controller.abortGeneration(renderer);
+		// Clear both sources of composer state synchronously. Child cancellation
+		// below may still need a moment to terminate an OS process, but the Side
+		// Chat must accept the user's next message immediately.
+		this.runState.cancel(session.id, 'User cancelled the side chat.');
+		session.controller.setExternalGeneratingState(false);
+		const parent = session.parentSessionId ? this.sessions.get(session.parentSessionId) : undefined;
+		for (const worker of parent?.agent.listChildAgents(parent.id) ?? []) {
+			if (worker.status === 'queued' || worker.status === 'running') {
+				parent?.agent.cancelChildAgent(worker.id);
+			}
+		}
+		session.status = 'stopped';
+		this.notifySessionChanged(session);
+	}
+
+	private createLiveSideChatRenderer(sessionId: string): IResponseRenderer {
+		const getRenderer = () => this.sideChatRenderers.get(sessionId);
+		return {
+			addMessage: (text, role, images) => getRenderer()?.addMessage(text, role, images) ?? this.createDetachedMessageElement(role),
+			addUserSelectionMessage: (display, images) => getRenderer()?.addUserSelectionMessage?.(display, images) ?? this.createDetachedMessageElement('user'),
+			addSystemConfirmation: (title, message, icon) => getRenderer()?.addSystemConfirmation(title, message, icon) ?? document.createElement('div'),
+			showTransportRetry: status => getRenderer()?.showTransportRetry(status),
+			clearTransportRetry: () => getRenderer()?.clearTransportRetry(),
+			addModelTerminated: (message, onContinue) => getRenderer()?.addModelTerminated(message, onContinue) ?? document.createElement('div'),
+			renderJSONResponse: (data, isStreaming, target) => getRenderer()?.renderJSONResponse(data, isStreaming, target),
+			scrollToBottom: () => getRenderer()?.scrollToBottom(),
+			removeStreamingPlaceholders: () => getRenderer()?.removeStreamingPlaceholders(),
+			findTranscriptMessageElement: (transcriptId: string) => {
+				const renderer = getRenderer() as (IResponseRenderer & {
+					findTranscriptMessageElement?: (id: string) => HTMLElement | undefined;
+				}) | undefined;
+				return renderer?.findTranscriptMessageElement?.(transcriptId);
+			}
+		} as IResponseRenderer;
+	}
+
+	private applyHostedChildEvents(owner: ICleanSlateLiveSession, live: ICleanSlateThreadSessionUpdate['live']): void {
+		if (live?.ownerId !== CLEANSLATE_HOSTED_AGENT_OWNER) { return; }
+		for (const item of live.childAgentEvents ?? []) {
+			if (item.sequence <= (this.hostedChildSequences.get(owner.id) ?? 0)) { continue; }
+			this.hostedChildSequences.set(owner.id, item.sequence);
+			this.hostedChildren.set(item.event.agent.id, item.event.agent);
+			this.presentChildAgentEvent(owner, item.event);
+		}
+	}
+
+	private presentChildAgentEvent(liveSession: ICleanSlateLiveSession, event: ICleanSlateChildAgentEvent): void {
+		const sessionId = liveSession.id;
+		if (event.agent.parentAgentId !== sessionId) {
+			return;
+		}
+		const sourceSideChat = this.sideChats.get(sessionId);
+		let sideChat = sourceSideChat ?? Array.from(this.sideChats.values()).find(candidate => candidate.parentSessionId === sessionId);
+		if (!sideChat && event.type === 'created' && liveSession) {
+			sideChat = this.createSideChatForParent(liveSession);
+		}
+		this._onDidChangeChildAgent.fire({
+			parentSessionId: sourceSideChat?.parentSessionId ?? sessionId,
+			sideChatSessionId: sideChat?.id,
+			event
+		});
+
+		if (!sideChat || !liveSession || sourceSideChat) {
+			return;
+		}
+		if (event.type === 'created') {
+			this.startChildAgentPresentation(liveSession, sideChat, event.agent);
+			return;
+		}
+		const presentation = this.childAgentPresentations.get(event.agent.id);
+		if (!presentation) {
+			return;
+		}
+		if (event.type === 'progress' && event.streamPart) {
+			presentation.queue.push(event.streamPart);
+		} else if (event.type === 'completed' || event.type === 'failed' || event.type === 'cancelled') {
+			if (event.type === 'failed') {
+				presentation.queue.push({
+					type: 'chat_text',
+					kind: 'final_answer',
+					content: `Worker failed: ${event.agent.error?.trim() || 'Unknown error.'}`
+				});
+			} else if (event.type === 'cancelled' && !event.agent.output?.trim()) {
+				presentation.queue.push({ type: 'chat_text', kind: 'final_answer', content: 'Worker cancelled.' });
+			} else if (event.type === 'completed' && !event.agent.output?.trim()) {
+				presentation.queue.push({ type: 'chat_text', kind: 'final_answer', content: 'Worker completed without a response.' });
+			}
+			presentation.queue.push(undefined);
+		}
+	}
+
+	private startChildAgentPresentation(
+		owner: ICleanSlateLiveSession,
+		sideChat: ICleanSlateLiveSession,
+		agent: ICleanSlateChildAgentSnapshot
+	): void {
+		if (this.childAgentPresentations.has(agent.id)) {
+			return;
+		}
+
+		let run: ReturnType<typeof this.startRun>;
+		try {
+			run = this.startRun(sideChat);
+		} catch (error) {
+			console.error('[CleanSlateChatSessionProvider] Failed to present child agent:', error);
+			return;
+		}
+
+		const queue = new AsyncQueue<CleanSlateStreamPart>();
+		this.childAgentPresentations.set(agent.id, { parent: owner, sideChat, queue, runId: run.runId });
+		sideChat.status = 'running';
+		sideChat.threadService.addMessage('user', agent.prompt);
+		const renderer = this.createSessionScopedRenderer(sideChat, this.createLiveSideChatRenderer(sideChat.id), true);
+		renderer.addMessage(agent.prompt, 'user');
+		this.notifySessionChanged(sideChat);
+
+		const stream = async function* (): AsyncIterable<CleanSlateStreamPart> {
+			while (true) {
+				const part = await queue.next();
+				if (part === undefined) {
+					return;
+				}
+				yield part;
+			}
+		};
+
+		void sideChat.controller.sendMessage(
+			agent.prompt,
+			renderer,
+			'normal',
+			() => this.notifySessionChanged(sideChat),
+			undefined,
+			undefined,
+			undefined,
+			signal => {
+				signal.addEventListener('abort', () => {
+					if (this.hostedChildren.has(agent.id)) {
+						void this.cleanSlateMainService.publishThreadSession({ originId: this.providerId, request: 'cancelChild',
+							childAgentId: agent.id, session: this.toPersistedSession(this.buildSessionSnapshot(owner)) });
+					} else { owner.agent.cancelChildAgent(agent.id); }
+				}, { once: true });
+				return stream();
+			}
+		).finally(() => {
+			const settled = this.hostedChildren.get(agent.id) ?? owner.agent.getChildAgent(agent.id);
+			if (settled?.output?.trim()) {
+				sideChat.threadService.addMessage('assistant', settled.output.trim());
+			}
+			const status = settled?.status === 'failed' ? 'failed'
+				: settled?.status === 'cancelled' ? 'cancelled'
+					: 'completed';
+			this.finishRun(sideChat, run.runId, status, settled?.error);
+			sideChat.status = 'detached';
+			this.childAgentPresentations.delete(agent.id);
+			this.notifySessionChanged(sideChat);
+		});
+	}
+
+    restoreSession(session: ICleanSlateSessionSnapshot, live?: ICleanSlateThreadSessionUpdate['live']): void {
         this.deletedSessionIds.delete(session.id);
         let liveSession = this.sessions.get(session.id);
         if (!liveSession) {
-            liveSession = this.createLiveSessionFromSnapshot(session);
+            liveSession = this.createLiveSessionFromSnapshot(session, !!live);
             this.registerSession(liveSession);
         } else {
-            this.refreshLiveSessionFromSnapshot(liveSession, session);
+            this.refreshLiveSessionFromSnapshot(liveSession, session, !!live);
         }
         this.activeSessionId = liveSession.id;
         this.activeSessionRevision++;
         liveSession.planMode = session.planMode;
         liveSession.reasoningLevel = session.reasoningLevel;
         liveSession.agentDefinition = session.agent;
-        const hasLiveRun = this.runState.isRunning(liveSession.id);
+        if (live && !this.runState.isRunning(liveSession.id)) {
+            liveSession.liveOwnerId = live.ownerId;
+        }
+        const hasLiveRun = this.runState.isRunning(liveSession.id)
+            || (live ? live.isRunning : !!liveSession.liveOwnerId && liveSession.controller.getIsGenerating());
         liveSession.status = hasLiveRun ? 'running' : this.getRestoredSessionStatus(session.status);
         liveSession.controller.setExternalGeneratingState(hasLiveRun);
-        this.persistSession(liveSession);
+        this.applyHostedChildEvents(liveSession, live);
+        // Agent Manager already persists content changes and archives the outgoing
+        // session. Selecting a saved chat must not serialize the entire archive again.
+        if (this.surface !== 'agentManager') {
+            this.persistSession(liveSession);
+        }
         this._onDidChangeState.fire();
+        if (!this.applyingPublishedSession) {
+            void this.requestLiveSessionSync().catch(error => console.warn('[CleanSlate] Failed to request live session state:', error));
+        }
     }
 
     /**
@@ -350,23 +704,26 @@ export class CleanSlateChatSessionProvider extends Disposable {
      * incoming snapshot's richer content. A running session owns the authoritative live transcript,
      * so it is never overwritten here.
      */
-    private refreshLiveSessionFromSnapshot(liveSession: ICleanSlateLiveSession, snapshot: ICleanSlateSessionSnapshot): void {
-        if (this.isLiveSessionRunning(liveSession) || this.isSessionPayloadCurrent(liveSession, snapshot)) {
+    private refreshLiveSessionFromSnapshot(liveSession: ICleanSlateLiveSession, snapshot: ICleanSlateSessionSnapshot, fromLiveUpdate = false): void {
+        if (this.runState.isRunning(liveSession.id)
+            || (!fromLiveUpdate && !!liveSession.liveOwnerId)
+            || this.isSessionPayloadCurrent(liveSession, snapshot)) {
             return;
         }
         if (!this.hasVisibleSessionContent(snapshot)) {
             return;
         }
+        const wasApplyingPublishedSession = this.applyingPublishedSession;
         this.applyingPublishedSession = true;
         try {
             liveSession.threadService.setHistory(this.snapshotCodec.cloneHistoryWithTranscriptImages(snapshot.history, snapshot.transcript));
             liveSession.transcriptHistory = this.snapshotCodec.cloneTranscript(snapshot.transcript?.length ? snapshot.transcript : deriveCleanSlateTranscriptFromHistory(snapshot.history));
-            liveSession.taskSessionService.restoreStateSnapshot(this.snapshotCodec.cloneObject(snapshot.taskState ?? snapshot.threadState), { markActiveTaskInterrupted: true });
+            liveSession.taskSessionService.restoreStateSnapshot(this.snapshotCodec.cloneObject(snapshot.taskState ?? snapshot.threadState), { markActiveTaskInterrupted: !fromLiveUpdate });
             liveSession.agent.restoreRuntimeSnapshot(this.snapshotCodec.cloneObject(snapshot.agentRuntimeState));
             liveSession.agent.setSessionId(liveSession.id);
             liveSession.agent.setAgentDefinition(snapshot.agent);
         } finally {
-            this.applyingPublishedSession = false;
+            this.applyingPublishedSession = wasApplyingPublishedSession;
         }
     }
 
@@ -435,6 +792,31 @@ export class CleanSlateChatSessionProvider extends Disposable {
 
     abortGeneration(renderer: IResponseRenderer): void {
         const session = this.activeSession;
+        const submission = this.pendingHostedSubmissions.get(session.id);
+        if (submission) {
+            void submission.then(() => this.requestHostedStop(session)).catch(() => { });
+            return;
+        }
+        if (session.liveOwnerId && this.isLiveSessionRunning(session)) {
+            void this.cleanSlateMainService.publishThreadSession({
+                originId: this.providerId,
+                session: this.toPersistedSession(this.buildSessionSnapshot(session)),
+                live: { ownerId: session.liveOwnerId, isRunning: true },
+                request: 'stop'
+            }).catch(error => console.warn('[CleanSlate] Failed to stop the live session:', error));
+            return;
+        }
+        this.abortSessionGeneration(session, renderer);
+    }
+
+    private requestHostedStop(session: ICleanSlateLiveSession): Promise<void> {
+        return this.cleanSlateMainService.publishThreadSession({
+            originId: this.providerId, session: this.toPersistedSession(this.buildSessionSnapshot(session)),
+            live: { ownerId: CLEANSLATE_HOSTED_AGENT_OWNER, isRunning: true }, request: 'stop'
+        });
+    }
+
+    private abortSessionGeneration(session: ICleanSlateLiveSession, renderer: IResponseRenderer): void {
         const abortedLiveRun = session.controller.abortGeneration(renderer);
         if (abortedLiveRun) {
             this.runState.cancel(session.id, 'User cancelled the run.');
@@ -464,14 +846,22 @@ export class CleanSlateChatSessionProvider extends Disposable {
         text: string,
         renderer: IResponseRenderer,
         onGeneratingChange?: (isGenerating: boolean) => void,
-        images?: string[]
+        images?: string[],
+		forceVisibleRenderer = false,
+		renderUserMessage = false
     ): Promise<void> {
+        if (this.cleanSlateMainService.startHostedAgentRun && !session.parentSessionId) {
+            return this.submitHostedRun(session, text, onGeneratingChange, images);
+        }
         let run: ReturnType<typeof this.startRun>;
         try {
             run = this.startRun(session);
         } catch (error) {
             return Promise.reject(error);
         }
+		if (renderUserMessage) {
+			this.createSessionScopedRenderer(session, renderer, forceVisibleRenderer).addMessage(text, 'user', images);
+		}
         session.status = 'running';
         session.agent.setAgentDefinition(session.agentDefinition);
         session.agent.setSessionId(session.id);
@@ -487,21 +877,22 @@ export class CleanSlateChatSessionProvider extends Disposable {
             }
             resumeRequested = true;
             void currentRunSettled.then(() => {
-                if (this.sessions.get(session.id) !== session) {
+                if (this.sessions.get(session.id) !== session && this.sideChats.get(session.id) !== session) {
                     return;
                 }
-                return this.sendSessionMessage(session, 'continue', renderer, onGeneratingChange);
+				this.recordTranscriptMessageForSession(session, { role: 'user', content: 'continue', isInternalState: true });
+				return this.sendSessionMessage(session, 'continue', renderer, onGeneratingChange, undefined, forceVisibleRenderer);
             }).catch(error => {
                 console.error('[CleanSlateChatSessionProvider] Failed to resume terminated model run:', error);
             });
         };
         return session.controller.sendMessage(
             text,
-            this.createSessionScopedRenderer(session, renderer),
+			this.createSessionScopedRenderer(session, renderer, forceVisibleRenderer),
             executionFlow,
             (isGenerating: boolean) => {
                 this.notifySessionChanged(session);
-                if (this.isActiveSession(session)) {
+				if (forceVisibleRenderer || this.isActiveSession(session)) {
                     onGeneratingChange?.(isGenerating);
                 }
             },
@@ -530,6 +921,9 @@ export class CleanSlateChatSessionProvider extends Disposable {
         onGeneratingChange?: (isGenerating: boolean) => void
     ): Promise<void> {
         const session = this.activeSession;
+        if (this.cleanSlateMainService.startHostedAgentRun && !session.parentSessionId) {
+            return this.submitHostedRun(session, planStepsContext, onGeneratingChange, undefined, 'approvePlan');
+        }
         let run: ReturnType<typeof this.startRun>;
         try {
             run = this.startRun(session);
@@ -561,7 +955,77 @@ export class CleanSlateChatSessionProvider extends Disposable {
         });
     }
 
+    private submitHostedRun(
+        session: ICleanSlateLiveSession, text: string, onGeneratingChange?: (value: boolean) => void,
+        images?: string[], action: 'message' | 'approvePlan' = 'message'
+    ): Promise<void> {
+        if (this.isLiveSessionRunning(session) || this.pendingHostedSubmissions.has(session.id)) {
+            return Promise.reject(new Error('This chat already has a running agent.'));
+        }
+        const previousOwnerId = session.liveOwnerId;
+        session.liveOwnerId = CLEANSLATE_HOSTED_AGENT_OWNER;
+        session.status = 'running';
+        session.controller.setExternalGeneratingState(true);
+        onGeneratingChange?.(true);
+        const submission = (async () => {
+            try {
+                const configuration = await session.agent.getHostedConfiguration();
+                const version = this.hostedUpdateVersions.get(session.id) ?? 0;
+                const update = await this.cleanSlateMainService.startHostedAgentRun!({
+                    surface: this.surface === 'agentManager' ? 'agentManager' : 'ide',
+                    session: this.toPersistedSession(this.buildSessionSnapshot(session)), text, action, images,
+                    configuration: { ...configuration, planMode: session.planMode, reasoningLevel: session.reasoningLevel }
+                });
+                // Streaming events can arrive before the IPC acknowledgement. Never
+                // replace a newer checkpoint with the initial accepted snapshot.
+                if ((this.hostedUpdateVersions.get(session.id) ?? 0) === version) {
+                    this.applyPublishedThreadSession(update);
+                }
+            } catch (error) {
+                session.liveOwnerId = previousOwnerId;
+                session.controller.setExternalGeneratingState(false);
+                session.status = 'detached';
+                onGeneratingChange?.(false);
+                this._onDidChangeState.fire();
+                throw error;
+            } finally {
+                this.pendingHostedSubmissions.delete(session.id);
+            }
+        })();
+        this.pendingHostedSubmissions.set(session.id, submission);
+        return submission;
+    }
+
+    private syncHostedApprovals(update: ICleanSlateThreadSessionUpdate): void {
+        const requests = update.live?.approvals ?? [];
+        const activeIds = new Set(requests.map(request => request.id));
+        for (const [id, sessionId] of this.hostedApprovals) {
+            if (sessionId === update.session.id && !activeIds.has(id)) {
+                this.hostedApprovals.delete(id);
+                this.commandApprovalService.reject(id);
+            }
+        }
+        for (const request of requests) {
+            if (this.hostedApprovals.has(request.id)) { continue; }
+            this.hostedApprovals.set(request.id, update.session.id);
+            // The approval promise belongs to this view only. Detaching the view
+            // leaves the host's pending decision intact for the next subscriber.
+            void this.commandApprovalService.requestApproval(request).then(approved => {
+                if (!this.hostedApprovals.delete(request.id)) { return; }
+                return this.cleanSlateMainService.publishThreadSession({
+                    originId: this.providerId, session: update.session,
+                    request: approved ? 'approve' : 'reject', approvalId: request.id
+                });
+            }).catch(error => console.warn('[CleanSlate] Failed to resolve hosted approval:', error));
+        }
+    }
+
     rejectPlan(): void {
+        if (this.activeSession.liveOwnerId === CLEANSLATE_HOSTED_AGENT_OWNER) {
+            void this.cleanSlateMainService.publishThreadSession({
+                originId: this.providerId, session: this.toPersistedSession(this.buildSessionSnapshot(this.activeSession)), request: 'rejectPlan'
+            }).catch(error => console.warn('[CleanSlate] Failed to reject hosted plan:', error));
+        }
         this.activeSession.controller.rejectPlan();
         this.persistSession(this.activeSession);
         this._onDidChangeState.fire();
@@ -617,7 +1081,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
     }
 
     private persistSession(session: ICleanSlateLiveSession): void {
-        if (this.applyingPublishedSession) {
+		if (this.applyingPublishedSession || this.sideChats.get(session.id) === session) {
             return;
         }
         const snapshot = this.buildSessionSnapshot(session, this.getWorkspaceName());
@@ -654,6 +1118,15 @@ export class CleanSlateChatSessionProvider extends Disposable {
     }
 
     private notifySessionChanged(session: ICleanSlateLiveSession): void {
+        // Restoring a view can emit controller/history events. They must never
+        // echo a partially restored snapshot back into the execution owner.
+        if (this.applyingPublishedSession) {
+            return;
+        }
+		if (this.sideChats.get(session.id) === session) {
+			this._onDidChangeState.fire();
+			return;
+		}
         this.persistSession(session);
         this.queueLiveSessionPublish(session);
         this._onDidChangeState.fire();
@@ -665,6 +1138,12 @@ export class CleanSlateChatSessionProvider extends Disposable {
      * those consumers only need semantic session/status changes.
      */
     private persistTranscriptContent(session: ICleanSlateLiveSession): void {
+		if (this.sideChats.get(session.id) === session) {
+			return;
+		}
+        // Agent Manager's persistence callback also rebuilds its complete history
+        // tree. The live session already owns this in-memory payload; publish the
+        // coalesced checkpoint and let the settled render update the archive/tree.
         if (this.surface !== 'agentManager') {
             this.persistSession(session);
         }
@@ -672,7 +1151,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
     }
 
     private queueLiveSessionPublish(session: ICleanSlateLiveSession): void {
-        if (this.applyingPublishedSession || this.deletedSessionIds.has(session.id)) {
+        if (this.applyingPublishedSession || session.liveOwnerId || this.sideChats.get(session.id) === session || this.deletedSessionIds.has(session.id)) {
             return;
         }
 
@@ -695,13 +1174,17 @@ export class CleanSlateChatSessionProvider extends Disposable {
                 const sessions = [...this.pendingLiveSyncSessions.values()];
                 this.pendingLiveSyncSessions.clear();
                 for (const session of sessions) {
+                    if (session.liveOwnerId) {
+                        continue;
+                    }
                     const snapshot = this.buildSessionSnapshot(session, session.workspaceName ?? this.getWorkspaceName());
                     if (this.isDeletedSessionSnapshot(snapshot) || !this.hasVisibleSessionContent(snapshot)) {
                         continue;
                     }
                     await this.cleanSlateMainService.publishThreadSession({
                         originId: this.providerId,
-                        session: this.toPersistedSession(snapshot)
+                        session: this.toPersistedSession(snapshot),
+                        live: { ownerId: this.providerId, isRunning: this.isLiveSessionRunning(session) }
                     });
                 }
             }
@@ -718,41 +1201,99 @@ export class CleanSlateChatSessionProvider extends Disposable {
     }
 
     private applyPublishedThreadSession(update: ICleanSlateThreadSessionUpdate): void {
-        if (update.originId === this.providerId) {
+        if (update.originId === this.providerId || (!update.request && update.live?.ownerId === this.providerId)) {
             return;
         }
 
-        const snapshot = this.fromPersistedSession(update.session);
+        const ownedSession = this.sessions.get(update.session.id);
+        if (!update.request && update.live?.ownerId === CLEANSLATE_HOSTED_AGENT_OWNER && ownedSession) {
+            this.applyHostedChildEvents(ownedSession, update.live);
+        }
+        if (!update.request && update.live) {
+            const previous = this.publishedRunningSessions.get(update.session.id);
+            this.publishedRunningSessions.set(update.session.id, update.live.isRunning);
+            if (!ownedSession && previous !== update.live.isRunning) {
+                this._onDidChangeState.fire();
+            }
+        }
+        if (!update.request && update.live?.ownerId === CLEANSLATE_HOSTED_AGENT_OWNER) {
+            this.hostedUpdateVersions.set(update.session.id, (this.hostedUpdateVersions.get(update.session.id) ?? 0) + 1);
+            if (ownedSession || update.makeActive) { this.syncHostedApprovals(update); }
+            ownedSession?.agent.restoreHostedArtifacts(update.live.artifacts ?? []);
+            if (update.live.browser && (!update.live.surface || update.live.surface === this.surface)
+                && (ownedSession && this.isActiveSession(ownedSession) || update.makeActive && this.surface === 'ide' && this.isSnapshotForCurrentWorkspace(update.session as ICleanSlateSessionSnapshot))) {
+                const browser = update.live.browser;
+                const surface = this.surface === 'agentManager' ? `agentManager:${update.session.id}` as const : 'ide';
+                void this.instantiationService.invokeFunction(accessor => accessor.get(ICleanSlateBrowserAutomationService))
+                    .adoptHostedBrowser(browser.viewId, surface)
+                    .catch(error => console.warn('[CleanSlate] Failed to attach hosted browser:', error));
+            }
+        }
+        if (update.request) {
+            if (!ownedSession || ownedSession.liveOwnerId || !this.runState.isRunning(ownedSession.id)) {
+                return;
+            }
+            if (update.request === 'stop' && update.live?.ownerId === this.providerId) {
+                this.abortSessionGeneration(ownedSession, this.createLiveSideChatRenderer(ownedSession.id));
+            } else if (update.request === 'sync') {
+                this.queueLiveSessionPublish(ownedSession);
+            }
+            return;
+        }
+        // A live task is authoritative. A handoff or another view's saved copy
+        // must not replace its native messages or mark its task interrupted.
+        if (ownedSession && this.runState.isRunning(ownedSession.id)) {
+            return;
+        }
+
+        const restored = this.fromPersistedSession(update.session);
+        const snapshot = restored && update.live ? {
+            ...restored,
+            status: update.live.isRunning ? 'running' as const : restored.status,
+            isGenerating: update.live.isRunning
+        } : restored;
         if (snapshot && this.isDeletedSessionSnapshot(snapshot)) {
             return;
         }
         if (update.makeActive && snapshot && this.surface === 'ide' && this.isSnapshotForCurrentWorkspace(snapshot)) {
+            this.pendingLiveSyncSessions.delete(snapshot.id);
             this.externalActiveSessionRefreshPending = true;
-            this.restoreSession(snapshot);
+            this.applyingPublishedSession = true;
+            try {
+                this.restoreSession(snapshot, update.live);
+                this.activeSession.agent.restoreHostedArtifacts(update.live?.artifacts ?? []);
+            } finally {
+                this.applyingPublishedSession = false;
+            }
+            this.persistAppliedPublishedSession(this.activeSession);
             return;
         }
-        if (!snapshot || snapshot.id !== this.activeSessionId) {
+        if (!snapshot) {
             return;
         }
 
         const session = this.sessions.get(snapshot.id);
-        if (!session || this.isSessionPayloadCurrent(session, snapshot)) {
+        if (!session || (session.liveOwnerId && !update.live) || (update.live?.ownerId !== CLEANSLATE_HOSTED_AGENT_OWNER && this.isSessionPayloadCurrent(session, snapshot))) {
             return;
         }
+
+        this.pendingLiveSyncSessions.delete(session.id);
 
         this.applyingPublishedSession = true;
         try {
             const executionState = normalizeCleanSlateSessionExecutionState(snapshot);
             session.threadService.setHistory(this.snapshotCodec.cloneHistoryWithTranscriptImages(snapshot.history, snapshot.transcript));
             session.transcriptHistory = this.snapshotCodec.cloneTranscript(snapshot.transcript?.length ? snapshot.transcript : deriveCleanSlateTranscriptFromHistory(snapshot.history));
-            session.taskSessionService.restoreStateSnapshot(this.snapshotCodec.cloneObject(snapshot.taskState ?? snapshot.threadState), { markActiveTaskInterrupted: true });
+            session.taskSessionService.restoreStateSnapshot(this.snapshotCodec.cloneObject(snapshot.taskState ?? snapshot.threadState), { markActiveTaskInterrupted: !update.live });
 			session.agent.restoreRuntimeSnapshot(this.snapshotCodec.cloneObject(snapshot.agentRuntimeState));
             session.planMode = executionState.planMode;
             session.reasoningLevel = executionState.reasoningLevel;
             session.agentDefinition = snapshot.agent;
             session.agent.setSessionId(session.id);
             session.agent.setAgentDefinition(snapshot.agent);
-            const hasLiveRun = this.runState.isRunning(session.id);
+            session.liveOwnerId = update.live?.ownerId;
+            session.transportStatus = update.live?.transportStatus;
+            const hasLiveRun = update.live?.isRunning === true;
             session.status = hasLiveRun ? 'running' : this.getRestoredSessionStatus(snapshot.status);
             session.controller.setExternalGeneratingState(hasLiveRun);
         } finally {
@@ -760,7 +1301,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
         }
 
         this.persistAppliedPublishedSession(session);
-        this.externalActiveSessionRefreshPending = true;
+        this.externalActiveSessionRefreshPending ||= this.isActiveSession(session);
         this._onDidChangeState.fire();
     }
 
@@ -784,7 +1325,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 
     private persistAppliedPublishedSession(session: ICleanSlateLiveSession): void {
         const snapshot = this.buildSessionSnapshot(session, this.getWorkspaceName());
-        if (this.surface === 'agentManager') {
+        if (this.surface === 'agentManager' || !this.isActiveSession(session)) {
             if (this.hasVisibleSessionContent(snapshot)) {
                 this.onDidUpdateInactiveSession?.(snapshot);
             }
@@ -810,15 +1351,15 @@ export class CleanSlateChatSessionProvider extends Disposable {
             && this.getRestoredSessionStatus(session.status) === this.getRestoredSessionStatus(snapshot.status);
     }
 
-    private hasVisibleSessionContent(snapshot: ICleanSlateSessionSnapshot): boolean {
-        return [...snapshot.history, ...(snapshot.transcript ?? [])].some(message =>
+    private hasVisibleSessionContent(snapshot: Pick<ICleanSlateSessionSnapshot, 'history' | 'transcript'>): boolean {
+        const isVisible = (message: ICleanSlateTranscriptMessage): boolean =>
             !message.isInternalState
             && (
                 typeof message.content === 'string' && message.content.trim().length > 0
                 || typeof message.renderPayload === 'string' && message.renderPayload.trim().length > 0
                 || Array.isArray(message.images) && message.images.length > 0
-            )
-        );
+            );
+        return snapshot.history.some(isVisible) || (snapshot.transcript?.some(isVisible) ?? false);
     }
 
     private registerSession(session: ICleanSlateLiveSession): void {
@@ -847,6 +1388,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
             throw new CleanSlateSessionAlreadyRunningError(session.id);
         }
         try {
+            session.liveOwnerId = undefined;
             const run = this.runState.start(session.id, session.workspaceId);
             session.controller.setExternalGeneratingState(true);
             this.notifySessionChanged(session);
@@ -860,8 +1402,13 @@ export class CleanSlateChatSessionProvider extends Disposable {
     }
 
     private finishRun(session: ICleanSlateLiveSession, runId: string, status: Exclude<CleanSlateSessionRunStatus, 'idle' | 'running'>, reason?: string): void {
-        this.runState.finish(session.id, runId, status, reason);
-        session.controller.setExternalGeneratingState(false);
+		const finished = this.runState.finish(session.id, runId, status, reason);
+		if (finished) {
+			session.controller.setExternalGeneratingState(false);
+		}
+        if (this.disposeAfterRuns && !this.hasOwnedRunningSessions()) {
+            super.dispose();
+        }
     }
 
     private getRestoredSessionStatus(status: CleanSlateSessionState | undefined): CleanSlateSessionState {
@@ -940,6 +1487,10 @@ export class CleanSlateChatSessionProvider extends Disposable {
                 this.notifySessionChanged(liveSession);
             }
         });
+		const childAgentListener = agent.onDidChangeChildAgent(event => {
+			if (liveSession) { this.presentChildAgentEvent(liveSession, event); }
+		});
+		instantiationStore.add(childAgentListener);
 
         liveSession = {
             id: sessionId,
@@ -966,7 +1517,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
         return liveSession;
     }
 
-    private createLiveSessionFromSnapshot(snapshot: ICleanSlateSessionSnapshot): ICleanSlateLiveSession {
+    private createLiveSessionFromSnapshot(snapshot: ICleanSlateSessionSnapshot, fromLiveUpdate = false): ICleanSlateLiveSession {
         const executionState = normalizeCleanSlateSessionExecutionState(snapshot);
         const session = this.createLiveSession(snapshot.id, executionState.planMode, executionState.reasoningLevel, {
             parentSessionId: snapshot.parentSessionId,
@@ -980,7 +1531,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
         });
         session.threadService.setHistory(this.snapshotCodec.cloneHistoryWithTranscriptImages(snapshot.history, snapshot.transcript));
         session.transcriptHistory = this.snapshotCodec.cloneTranscript(snapshot.transcript?.length ? snapshot.transcript : deriveCleanSlateTranscriptFromHistory(snapshot.history));
-        session.taskSessionService.restoreStateSnapshot(this.snapshotCodec.cloneObject(snapshot.taskState ?? snapshot.threadState), { markActiveTaskInterrupted: true });
+        session.taskSessionService.restoreStateSnapshot(this.snapshotCodec.cloneObject(snapshot.taskState ?? snapshot.threadState), { markActiveTaskInterrupted: !fromLiveUpdate });
 		session.agent.restoreRuntimeSnapshot(this.snapshotCodec.cloneObject(snapshot.agentRuntimeState));
         session.agentDefinition = snapshot.agent;
         session.agent.setSessionId(session.id);
@@ -990,14 +1541,17 @@ export class CleanSlateChatSessionProvider extends Disposable {
 
     private ensureSessionTitle(
         session: ICleanSlateLiveSession,
-        activeObjective: string = session.taskSessionService.getRunSummary().objective ?? '',
-        history: readonly { role: string; content: string }[] = session.controller.getHistory()
+        activeObjective?: string,
+        history?: readonly { role: string; content: string }[]
     ): string {
         if (session.title && !this.isPlaceholderTitle(session.title)) {
             return session.title;
         }
 
-        const titleText = this.deriveStableTitleText(activeObjective, history);
+        const titleText = this.deriveStableTitleText(
+            activeObjective ?? session.taskSessionService.getRunSummary().objective ?? '',
+            history ?? session.threadService.getRawHistoryReference()
+        );
         if (titleText) {
             session.title = titleText.length > 90 ? `${titleText.slice(0, 90)}...` : titleText;
             return session.title;
@@ -1016,11 +1570,16 @@ export class CleanSlateChatSessionProvider extends Disposable {
         return normalized === 'agent' || normalized === 'untitled chat';
     }
 
-    private createSessionScopedRenderer(session: ICleanSlateLiveSession, renderer: IResponseRenderer): IResponseRenderer {
+	private createSessionScopedRenderer(session: ICleanSlateLiveSession, renderer: IResponseRenderer, forceVisible = false): IResponseRenderer {
+		const isVisible = () => (forceVisible || this.isActiveSession(session))
+            && (renderer as IResponseRenderer & { isVisible?: () => boolean }).isVisible?.() !== false;
         const visibleTargets = new WeakMap<HTMLElement, HTMLElement>();
         const findTranscriptMessageElement = (renderer as IResponseRenderer & {
             findTranscriptMessageElement?: (transcriptId: string) => HTMLElement | undefined;
         }).findTranscriptMessageElement?.bind(renderer);
+        // Painting and durability have different latency requirements. Keep the
+        // visible transcript frame-paced, while persisting only the latest payload
+        // in each short window. A settled render always flushes synchronously.
         const pendingStreamingPayloads = new Map<string, ChatResponse>();
         let streamingPayloadTimer: ReturnType<typeof setTimeout> | undefined;
         const persistExistingTranscriptPayload = (transcriptId: string, data: ChatResponse, isStreaming: boolean, emitStateChange: boolean): void => {
@@ -1033,11 +1592,16 @@ export class CleanSlateChatSessionProvider extends Disposable {
             streamingPayloadTimer = undefined;
             const pending = [...pendingStreamingPayloads];
             pendingStreamingPayloads.clear();
-            for (const [transcriptId, data] of pending) persistExistingTranscriptPayload(transcriptId, data, true, false);
+            for (const [transcriptId, data] of pending) {
+                persistExistingTranscriptPayload(transcriptId, data, true, false);
+            }
         };
         const queueStreamingPayload = (transcriptId: string, data: ChatResponse): void => {
             pendingStreamingPayloads.set(transcriptId, data);
-            if (streamingPayloadTimer === undefined) streamingPayloadTimer = setTimeout(flushStreamingPayloads, CLEANSLATE_STREAMING_TRANSCRIPT_SAVE_INTERVAL_MS);
+            if (streamingPayloadTimer !== undefined) {
+                return;
+            }
+            streamingPayloadTimer = setTimeout(flushStreamingPayloads, CLEANSLATE_STREAMING_TRANSCRIPT_SAVE_INTERVAL_MS);
         };
         const removePendingStreamingPayload = (transcriptId: string): void => {
             pendingStreamingPayloads.delete(transcriptId);
@@ -1049,7 +1613,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 
         return {
             addMessage: (text: string, role: 'user' | 'cleanSlate', images?: string[]): HTMLElement => {
-                const element = this.isActiveSession(session)
+				const element = isVisible()
                     ? renderer.addMessage(text, role, images)
                     : this.createDetachedMessageElement(role);
                 const transcriptId = this.recordTranscriptMessageForSession(session, {
@@ -1063,7 +1627,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
                 return element;
             },
             addUserSelectionMessage: (display, images?: string[]): HTMLElement => {
-                const element = this.isActiveSession(session) && renderer.addUserSelectionMessage
+				const element = isVisible() && renderer.addUserSelectionMessage
                     ? renderer.addUserSelectionMessage(display, images)
                     : this.createDetachedMessageElement('user');
                 const content = [display.label, display.command].filter(Boolean).join(' ');
@@ -1079,28 +1643,28 @@ export class CleanSlateChatSessionProvider extends Disposable {
                 return element;
             },
             addSystemConfirmation: (title: string, message: string, icon?: string): HTMLElement => {
-                return this.isActiveSession(session)
+				return isVisible()
                     ? renderer.addSystemConfirmation(title, message, icon)
                     : document.createElement('div');
             },
 			showTransportRetry: (status): void => {
-				if (this.isActiveSession(session)) {
+				if (isVisible()) {
 					renderer.showTransportRetry(status);
 				}
 			},
 			clearTransportRetry: (): void => {
-				if (this.isActiveSession(session)) {
+				if (isVisible()) {
 					renderer.clearTransportRetry();
 				}
 			},
 			addModelTerminated: (message, onContinue): HTMLElement => {
-				return this.isActiveSession(session)
+				return isVisible()
 					? renderer.addModelTerminated(message, onContinue)
 					: document.createElement('div');
 			},
             renderJSONResponse: (data, isStreaming, targetMessage) => {
                 let renderTarget = targetMessage;
-                if (this.isActiveSession(session)) {
+				if (isVisible()) {
                     const transcriptId = targetMessage?.dataset.cleanSlateTranscriptId;
                     const restoredTarget = transcriptId ? findTranscriptMessageElement?.(transcriptId) : undefined;
                     if (restoredTarget) {
@@ -1154,12 +1718,12 @@ export class CleanSlateChatSessionProvider extends Disposable {
                 }
             },
             removeStreamingPlaceholders: () => {
-                if (this.isActiveSession(session)) {
+				if (isVisible()) {
                     renderer.removeStreamingPlaceholders();
                 }
             },
             scrollToBottom: () => {
-                if (this.isActiveSession(session)) {
+				if (isVisible()) {
                     renderer.scrollToBottom();
                 }
             }

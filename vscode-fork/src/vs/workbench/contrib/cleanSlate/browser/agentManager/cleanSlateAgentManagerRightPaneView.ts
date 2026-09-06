@@ -80,6 +80,8 @@ export class CleanSlateAgentManagerRightPaneView {
 				return { icon: Codicon.globe, label: localize('cleanSlate.agentManager.browserTab', 'Browser') };
 			case 'file':
 				return { icon: Codicon.file, label: localize('cleanSlate.agentManager.fileTab', 'File') };
+			case 'sideChat':
+				return { icon: Codicon.commentDiscussion, label: localize('cleanSlate.agentManager.sideChatTab', 'Side chat') };
 			case 'terminal':
 			default:
 				return { icon: Codicon.terminal, label: localize('cleanSlate.agentManager.terminalTab', 'Terminal') };

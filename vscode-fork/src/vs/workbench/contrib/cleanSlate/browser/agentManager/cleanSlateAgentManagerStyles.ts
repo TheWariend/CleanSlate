@@ -720,6 +720,71 @@ registerThemingParticipant((_theme, collector) => {
 			background: var(--vscode-terminal-background, var(--cleanSlate-agent-manager-panel-bg));
 		}
 
+		.cleanSlate-agent-manager-right-body.side-chat {
+			padding: 0;
+			overflow: hidden;
+		}
+
+		.cleanSlate-agent-manager-side-chat-host {
+			width: 100%;
+			height: 100%;
+			min-width: 0;
+			min-height: 0;
+			max-width: none;
+		}
+
+		/* Side chat lives in a resizable pane. Do not inherit the main chat's
+		 * 80px outer gutter or its 40px composer padding: at the pane's minimum
+		 * width those nested gutters leave the footer narrower than its controls. */
+		.cleanSlate-agent-manager-side-chat-host > .cleanSlate-agent-manager-transcript,
+		.cleanSlate-agent-manager-side-chat-host > .cleanSlate-agent-manager-bottom {
+			width: 100%;
+			max-width: none;
+		}
+
+		.cleanSlate-agent-manager-side-chat-host .cleanSlate-chat-messages {
+			padding: 20px 16px 24px;
+		}
+
+		.cleanSlate-agent-manager-side-chat-host .cleanSlate-agent-manager-bottom .cleanSlate-chat-input-container {
+			padding: 0 12px 10px;
+		}
+
+		.cleanSlate-agent-manager-side-chat-host .cleanSlate-chat-input-container.compact {
+			min-height: 0;
+		}
+
+		.cleanSlate-agent-manager-side-chat-host .cleanSlate-agent-manager-bottom .cleanSlate-workspace-label {
+			display: none;
+		}
+
+		.cleanSlate-agent-manager-side-chat-host .cleanSlate-agent-manager-bottom .cleanSlate-input-box {
+			border-radius: 14px;
+			padding: 5px 10px;
+			box-shadow: 0 8px 28px var(--cleanSlate-agent-manager-shadow) !important;
+		}
+
+		.cleanSlate-agent-manager-side-chat-host .cleanSlate-agent-manager-bottom .cleanSlate-chat-input {
+			min-height: 24px;
+			max-height: 72px;
+			padding: 1px 0;
+			line-height: 1.4;
+		}
+
+		.cleanSlate-agent-manager-side-chat-host .cleanSlate-agent-manager-bottom .cleanSlate-input-footer {
+			gap: 4px;
+			margin-top: 2px;
+			padding: 0;
+		}
+
+		.cleanSlate-agent-manager-side-chat-host .cleanSlate-agent-manager-bottom .cleanSlate-footer-left {
+			gap: 4px;
+		}
+
+		.cleanSlate-agent-manager-side-chat-host .cleanSlate-agent-manager-bottom .cleanSlate-dropdown {
+			padding: 2px 5px;
+		}
+
 		.cleanSlate-agent-manager-terminal-container {
 			position: relative;
 			width: 100%;
@@ -1035,6 +1100,7 @@ registerThemingParticipant((_theme, collector) => {
 
 			.cleanSlate-agent-manager-new-chat {
 				color: var(--cleanSlate-agent-manager-text);
+				margin-bottom: 4px;
 			}
 
 				.cleanSlate-agent-manager-nav-button > .codicon {
@@ -2680,7 +2746,6 @@ registerThemingParticipant((_theme, collector) => {
 		@media (prefers-reduced-motion: no-preference) {
 			.cleanSlate-agent-manager-surface {
 				animation: cleanSlateAgentManagerSurfaceEnter 180ms var(--cleanSlate-agent-manager-ease);
-				transition: grid-template-columns 180ms var(--cleanSlate-agent-manager-ease);
 			}
 
 			.cleanSlate-agent-manager-nav,

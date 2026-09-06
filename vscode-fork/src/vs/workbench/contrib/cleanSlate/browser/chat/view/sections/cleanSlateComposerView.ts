@@ -22,12 +22,15 @@ export interface ICleanSlateContextWindowUsage {
 }
 
 export interface ICleanSlateComposerViewOptions {
+	/** Uses the same composer controls in a space-efficient secondary pane. */
+	readonly compact?: boolean;
 	readonly workspaceName?: string;
 	readonly onWorkspaceSelector?: (anchor: HTMLElement) => void;
 	/** Optional larger surface that should accept dropped image files. */
 	readonly imageDropTarget?: HTMLElement;
 	readonly mountPanels: (inputBox: HTMLElement) => void;
 	readonly onSubmit: () => void;
+	readonly onStop?: () => void;
 	readonly onImageAdded: (imageDataUrl: string) => void;
 	readonly onImageRemoved: (index: number) => void;
 	readonly onReasoningSelector: (anchor: HTMLElement) => void;
@@ -64,7 +67,7 @@ export class CleanSlateComposerView {
 	private readonly selectionRefsContainer: HTMLElement;
 	private readonly annotationRefsContainer: HTMLElement;
 	private readonly inputElement: HTMLTextAreaElement;
-	private sendButton!: HTMLElement;
+	private sendButton!: HTMLButtonElement;
 	private reasoningDropdown!: HTMLElement;
 	private planModeChip!: HTMLElement;
 	private editModeChip!: HTMLElement;
@@ -85,6 +88,7 @@ export class CleanSlateComposerView {
 
 	constructor(container: HTMLElement, private readonly options: ICleanSlateComposerViewOptions) {
 		this.inputContainer = dom.append(container, dom.$('.cleanSlate-chat-input-container'));
+		this.inputContainer.classList.toggle('compact', options.compact === true);
 		this.commandPopup = dom.append(this.inputContainer, dom.$('.cleanSlate-agent-popup'));
 
 		this.renderWorkspaceLabel();
@@ -104,6 +108,10 @@ export class CleanSlateComposerView {
 		this.inputElement = dom.append(this.inputBox, dom.$('textarea.cleanSlate-chat-input')) as HTMLTextAreaElement;
 		this.inputElement.placeholder = 'Ask anything (⌘L)';
 		this.inputElement.rows = 1;
+		if (this.options.compact) {
+			this.inputElement.style.minHeight = '24px';
+			this.inputElement.style.maxHeight = '72px';
+		}
 		this.resizeInput();
 
 		const inputFooter = dom.append(this.inputBox, dom.$('.cleanSlate-input-footer'));
@@ -158,6 +166,9 @@ export class CleanSlateComposerView {
 			? '<i class="codicon codicon-debug-stop"></i>'
 			: '<i class="codicon codicon-arrow-right"></i>';
 		this.sendButton.innerHTML = (policy ? policy.createHTML(html) : html) as unknown as string;
+		this.sendButton.setAttribute('aria-busy', String(isGenerating));
+		this.sendButton.setAttribute('aria-label', isGenerating ? 'Stop generation' : 'Send message');
+		this.sendButton.title = isGenerating ? 'Stop generation' : 'Send message';
 	}
 
 	updateModel(label: string, warning: boolean, provider: AIProvider, model: string | undefined): void {
@@ -168,6 +179,7 @@ export class CleanSlateComposerView {
 
 		labelElement.textContent = label;
 		labelElement.style.color = warning ? 'var(--vscode-notificationsWarningIcon-foreground)' : '';
+		this.modelDropdown.title = `Model: ${label}`;
 		setCleanSlateProviderLogo(this.modelProviderLogo, provider, model);
 	}
 
@@ -176,6 +188,7 @@ export class CleanSlateComposerView {
 		if (labelElement) {
 			labelElement.textContent = label;
 		}
+		this.reasoningDropdown.title = `Reasoning level: ${label}`;
 	}
 
 	updatePlanMode(isActive: boolean): void {
@@ -219,7 +232,7 @@ export class CleanSlateComposerView {
 		if (!this.workspaceLabel || !this.workspaceLabelText) {
 			return;
 		}
-		this.workspaceLabel.style.display = label ? 'flex' : 'none';
+		this.workspaceLabel.style.display = this.options.compact ? 'none' : (label ? 'flex' : 'none');
 		this.workspaceLabelText.textContent = label ?? '';
 	}
 
@@ -385,6 +398,8 @@ export class CleanSlateComposerView {
 		photoBtn.onclick = () => this.fileInput.click();
 
 		this.reasoningDropdown = dom.append(leftFooter, dom.$('.cleanSlate-dropdown.mode-dropdown.reasoning-dropdown'));
+		this.reasoningDropdown.setAttribute('aria-label', 'Reasoning level');
+		this.reasoningDropdown.title = 'Reasoning level';
 		const reasoningLabel = dom.append(this.reasoningDropdown, dom.$('span.dropdown-label'));
 		reasoningLabel.textContent = 'None';
 		dom.append(this.reasoningDropdown, dom.$('i.codicon.codicon-chevron-down'));
@@ -398,6 +413,8 @@ export class CleanSlateComposerView {
 		this.updatePlanMode(false);
 
 		this.modelDropdown = dom.append(leftFooter, dom.$('.cleanSlate-dropdown.model-dropdown'));
+		this.modelDropdown.setAttribute('aria-label', 'Model');
+		this.modelDropdown.title = 'Model';
 		this.modelProviderLogo = dom.append(this.modelDropdown, dom.$('.model-provider-logo'));
 		this.modelProviderLogo.style.display = 'none';
 		const modelLabel = dom.append(this.modelDropdown, dom.$('span.dropdown-label'));
@@ -431,9 +448,18 @@ export class CleanSlateComposerView {
 	}
 
 	private buildRightFooter(rightFooter: HTMLElement): void {
-		this.sendButton = dom.append(rightFooter, dom.$('.cleanSlate-send-button'));
+		this.sendButton = dom.append(rightFooter, dom.$('button.cleanSlate-send-button')) as HTMLButtonElement;
+		this.sendButton.type = 'button';
+		this.sendButton.setAttribute('aria-label', 'Send message');
+		this.sendButton.title = 'Send message';
 		dom.append(this.sendButton, dom.$('i.codicon.codicon-arrow-right'));
-		this.sendButton.onclick = () => this.options.onSubmit();
+		this.sendButton.onclick = () => {
+			if (this.sendButton.getAttribute('aria-busy') === 'true' && this.options.onStop) {
+				this.options.onStop();
+			} else {
+				this.options.onSubmit();
+			}
+		};
 	}
 
 	private buildContextWindowIndicator(parent: HTMLElement): void {
@@ -605,6 +631,11 @@ export class CleanSlateComposerView {
 	}
 
 	private resizeInput(): void {
+		if (this.options.compact && this.inputElement.value.length === 0) {
+			this.inputElement.style.height = '24px';
+			this.inputElement.style.overflowY = 'hidden';
+			return;
+		}
 		this.inputElement.style.height = 'auto';
 		const scrollHeight = this.inputElement.scrollHeight;
 		// Before the composer is attached and laid out, scrollHeight is 0.
@@ -616,9 +647,10 @@ export class CleanSlateComposerView {
 			this.inputElement.style.height = '';
 			return;
 		}
-		const height = Math.min(scrollHeight, CleanSlateComposerView.InputMaxHeight);
+		const maxHeight = this.options.compact ? 72 : CleanSlateComposerView.InputMaxHeight;
+		const height = Math.min(scrollHeight, maxHeight);
 		this.inputElement.style.height = `${height}px`;
-		this.inputElement.style.overflowY = scrollHeight > CleanSlateComposerView.InputMaxHeight ? 'auto' : 'hidden';
+		this.inputElement.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
 	}
 
 	private updateCommandPopup(): void {
