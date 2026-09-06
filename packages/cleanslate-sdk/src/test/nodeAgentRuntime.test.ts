@@ -90,6 +90,26 @@ describe('CleanSlateNodeAgentRuntime', () => {
 		runtime.dispose();
 	});
 
+	test('creates and closes an isolated side-chat runtime', () => {
+		const runtime = new CleanSlateNodeAgentRuntime({
+			rootPath: process.cwd(),
+			sessionId: 'parent-chat',
+			configuration: createNodeProviderConfiguration({
+				provider: 'openai',
+				model: 'gpt-4o',
+				apiKey: 'test'
+			})
+		});
+		const side = runtime.createSideChat({ id: 'side-1', title: 'Quick question' });
+
+		assert.equal(side.runtime === runtime, false);
+		assert.deepEqual(runtime.listSideChats(), [{ id: 'side-1', title: 'Quick question', createdAt: side.createdAt }]);
+		assert.equal(runtime.getSideChat('side-1')?.runtime, side.runtime);
+		assert.equal(runtime.closeSideChat('side-1'), true);
+		assert.deepEqual(runtime.listSideChats(), []);
+		runtime.dispose();
+	});
+
 	test('runs the existing agent loop with the complete tool registry', async () => {
 		const runtime = new CleanSlateNodeAgentRuntime({
 			rootPath: process.cwd(),
@@ -115,9 +135,41 @@ describe('CleanSlateNodeAgentRuntime', () => {
 			parts.push(part);
 		}
 
-		assert.equal(runtime.getAvailableToolCount(), 60);
+		assert.equal(runtime.getAvailableToolCount(), 63);
 		assert.equal(request.options.tools.some((tool: any) => tool.name === 'prepare_pull_request'), true);
 		assert.equal(parts.some(part => part.type === 'chat_text' && part.content === 'All done.' && part.kind === 'final_answer'), true);
+		assert.equal(parts.some(part => part.type === 'task_complete'), true);
+		runtime.dispose();
+	});
+
+	test('ends after a final answer accompanying successful read-only tool work', async () => {
+		const runtime = new CleanSlateNodeAgentRuntime({
+			rootPath: process.cwd(),
+			configuration: createNodeProviderConfiguration({
+				provider: 'openai',
+				model: 'gpt-4o',
+				apiKey: 'test'
+			})
+		});
+		let requestCount = 0;
+		(runtime as any).mainService.openAICompatibleChatStream = () => {
+			requestCount++;
+			const emitter = new Emitter<any>();
+			setTimeout(() => {
+				emitter.fire('data: {"type":"tool_call","call":{"id":"tool-1","toolName":"read_file","input":{"path":"package.json"}}}\n\n');
+				emitter.fire('data: {"type":"text","content":"Inspection complete.","phase":"final_answer"}\n\n');
+				emitter.fire(null);
+			}, 0);
+			return emitter.event;
+		};
+
+		const parts: any[] = [];
+		for await (const part of runtime.run('Inspect package.json and report.')) {
+			parts.push(part);
+		}
+
+		assert.equal(requestCount, 1);
+		assert.equal(parts.some(part => part.type === 'tool_result' && part.toolName === 'read_file'), true);
 		assert.equal(parts.some(part => part.type === 'task_complete'), true);
 		runtime.dispose();
 	});

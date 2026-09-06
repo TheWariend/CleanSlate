@@ -29,14 +29,14 @@ Node 20 or later.
 
 ## The tools
 
-`ALL_TOOLS` exports 60 tools. Availability depends on what the host provides —
+`ALL_TOOLS` exports 63 tools. Availability depends on what the host provides —
 a surface with no browser has no browser tools.
 
 | Group | Count | Tools |
 | --- | --- | --- |
 | Discovery | 12 | `read_file`, `read_file_range`, `semantic_search`, `search_workspace`, `search_codebase`, `find_by_name`, `grep_search`, `web_search`, `web_fetch`, `list_dir`, `read_lints`, `find_references` |
 | Browser | 26 | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_type`, `browser_key`, `browser_scroll`, `browser_screenshot`, `browser_diagnostics`, tab and annotation control, … |
-| System | 9 | `spawn_worker`, `list_skills`, `mcp_list_tools`, `mcp_call_tool`, `read_reference`, `update_todo`, `ask_question`, `submit_artifact`, `prepare_pull_request` |
+| System | 12 | `spawn_worker`, `wait_worker`, `list_workers`, `cancel_worker`, `list_skills`, `mcp_list_tools`, `mcp_call_tool`, `read_reference`, `update_todo`, `ask_question`, `submit_artifact`, `prepare_pull_request` |
 | Edit | 4 | `apply_edit`, `multi_file_replace`, `write_file`, `file_history_rewind` |
 | Execution | 4 | `execute_command`, `start_background_command`, `read_background_command`, `stop_background_command` |
 | Symbols | 3 | `read_symbols`, `get_definitions`, `undo_edit` |
@@ -46,12 +46,57 @@ a surface with no browser has no browser tools.
 ```js
 import { ALL_TOOLS, getToolByName } from '@cleanslate/sdk';
 
-ALL_TOOLS.length;                  // 60
+ALL_TOOLS.length;                  // 63
 getToolByName('multi_file_replace');
 ```
 
 Every command-running tool passes through the host's approval gate first, which
 refuses by default.
+
+### Child agents
+
+`spawn_worker` is backed by `CleanSlateAgentCoordinator`. It starts a child in
+the background and returns its ID immediately. `wait_worker`, `list_workers`
+and `cancel_worker` observe or control that child separately, so the parent can
+continue work or start other children in parallel. The coordinator owns child
+identity, lifecycle, cancellation and concurrency; a host only supplies the
+function that runs one child.
+
+In the IDE, the existing Side Chat tab is the worker conversation surface. It
+shows the delegated prompt as the user turn and streams the child agent's reply
+into the following assistant turn without adding a new panel or creating a
+sidebar/history conversation. The SDK coordinator stays UI-agnostic; other
+hosts can project the same lifecycle events however they choose.
+
+```js
+import { CleanSlateAgentCoordinator } from '@cleanslate/sdk';
+
+const agents = new CleanSlateAgentCoordinator(async (request, child) => {
+  child.emitProgress('Inspecting the requested scope');
+  return runIsolatedAgent(request.prompt, child.signal);
+});
+
+agents.onDidChangeAgent(({ type, agent }) => {
+  console.log(type, agent.id, agent.status);
+});
+```
+
+`CleanSlateNodeAgentRuntime` wires this automatically. Use `listChildAgents()`,
+`cancelChildAgent(id)` and `onAgentEvent` to build a terminal or web UI around it.
+
+### Side conversations
+
+`CleanSlateConversationBranchService` stores an explicit conversation tree. A
+side chat has its own message list and a `parentId`; hosts choose whether to
+start empty or inherit the parent's messages. The service has no UI or provider
+dependency, so an IDE can place a side chat in a companion pane while a server
+can expose the same branch over an API.
+
+The Node runtime also provides `createSideChat()`, `listSideChats()`,
+`getSideChat(id)` and `closeSideChat(id)`. Each returned side chat contains an
+independent `CleanSlateNodeAgentRuntime`; by default it receives a bounded,
+read-only context seed from its parent but never shares mutable conversation
+state.
 
 ## Entry points
 

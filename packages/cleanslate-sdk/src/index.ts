@@ -95,6 +95,23 @@ export type {
 export { ALL_TOOLS, getToolByName } from './tools/registry.js';
 export type { CleanSlateTool, CleanSlateToolContext } from './tools/types.js';
 export type { ICleanSlatePullRequestMetadata } from './tools/PreparePullRequestTool.js';
+export { CleanSlateAgentCoordinator, formatCleanSlateChildAgentNotification } from './services/cleanSlateAgentCoordinator.js';
+export type {
+	CleanSlateChildAgentKind,
+	CleanSlateChildAgentStatus,
+	ICleanSlateSpawnAgentRequest,
+	ICleanSlateChildAgentSnapshot,
+	ICleanSlateChildAgentEvent,
+	ICleanSlateChildAgentExecutionContext,
+	CleanSlateChildAgentExecutor,
+	ICleanSlateAgentCoordinatorOptions,
+	ICleanSlateWaitForAgentOptions
+} from './services/cleanSlateAgentCoordinator.js';
+export { CleanSlateConversationBranchService } from './services/cleanSlateConversationBranchService.js';
+export type {
+	CleanSlateConversationKind,
+	ICleanSlateConversationBranch
+} from './services/cleanSlateConversationBranchService.js';
 
 export { CleanSlateExecutionQueryEngine } from './agent/cleanSlateExecutionQuery.js';
 export {

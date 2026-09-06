@@ -26,6 +26,7 @@ import { orderUserTurnLast } from './cleanSlateProviderMessageOrder.js';
 import { CleanSlateStreamingToolEvent, CleanSlateStreamingToolExecutor, ICleanSlateStreamingToolExecution } from './cleanSlateStreamingToolExecutor.js';
 import { CleanSlateExecutionEditPolicy } from './cleanSlateExecutionEditPolicy.js';
 import { cancellationTokenFromAbortSignal } from '../services/cleanSlateCancellation.js';
+import { CancellationTokenSource } from '../core/cancellation.js';
 import { estimateCleanSlateFileReadTokens } from '../tools/cleanSlateFileReadPolicy.js';
 import type { ICleanSlatePullRequestMetadata } from '../tools/PreparePullRequestTool.js';
 
@@ -268,9 +269,10 @@ export class CleanSlateExecutionQueryEngine {
             const streamedToolCalls: ParsedToolCall[] = [];
             const streamedToolCallKeys = new Set<string>();
             const yieldedStreamingExecutions: IExecutionToolExecution[] = [];
-            let finishedDuringModelStream = false;
+                       let finishedDuringModelStream = false;
             let concludedWithPlanSignal = false;
             let completedBlockingToolDuringModelStream = false;
+			let sawFinalAnswerText = false;
             let nextToolIndex = 0;
             const streamingToolExecutor = new CleanSlateStreamingToolExecutor({
                 isConcurrencySafe: toolCall => this.isParallelToolCall(toolCall),
@@ -294,107 +296,119 @@ export class CleanSlateExecutionQueryEngine {
             yield { type: 'assistant_turn_start', phase: runPhase, turnId, turnIndex: visibleTurnIndex };
             yield { type: 'context_usage', turnId, ...contextUsage };
             this.refreshFileReadBudget(providerMessages, turnNativeTools);
-            const response = await this.options.cleanSlateService.chat(providerMessages, {
-                tools: turnNativeTools,
-				sessionId: this.options.getSessionId?.(),
-                cancellationToken: cancellationTokenFromAbortSignal(signal)
-            });
-            const responseIterator = response[Symbol.asyncIterator]();
-            let nextModelPart = responseIterator.next();
-            let nextToolEvent: Promise<IExecutionToolStreamEvent | undefined> | undefined;
-            const collectToolEventParts = (event: IExecutionToolStreamEvent | undefined): CleanSlateStreamPart[] => {
-                if (!event) {
-                    return [];
-                }
-                if (event.type === 'parts') {
-                    return event.batch.parts;
-                }
-                yieldedStreamingExecutions.push(event.execution);
-                if (!this.isParallelToolCall(event.execution.toolCall)) {
-                    completedBlockingToolDuringModelStream = true;
-                }
-                return event.execution.parts;
-            };
+            const modelCancellation = new CancellationTokenSource(cancellationTokenFromAbortSignal(signal));
+            try {
+                const response = await this.options.cleanSlateService.chat(providerMessages, {
+                    tools: turnNativeTools,
+                    sessionId: this.options.getSessionId?.(),
+                    cancellationToken: modelCancellation.token
+                });
+                const responseIterator = response[Symbol.asyncIterator]();
+                let nextModelPart = responseIterator.next();
+                let nextToolEvent: Promise<IExecutionToolStreamEvent | undefined> | undefined;
+                const collectToolEventParts = (event: IExecutionToolStreamEvent | undefined): CleanSlateStreamPart[] => {
+                    if (!event) {
+                        return [];
+                    }
+                    if (event.type === 'parts') {
+                        return event.batch.parts;
+                    }
+                    yieldedStreamingExecutions.push(event.execution);
+                    if (!this.isParallelToolCall(event.execution.toolCall)) {
+                        completedBlockingToolDuringModelStream = true;
+                    }
+                    return event.execution.parts;
+                };
 
-            while (!signal?.aborted) {
-                if (!nextToolEvent && streamingToolExecutor.hasUnfinishedWork()) {
-                    nextToolEvent = streamingToolExecutor.nextEvent();
+                while (!signal?.aborted) {
+                    if (!nextToolEvent && streamingToolExecutor.hasUnfinishedWork()) {
+                        nextToolEvent = streamingToolExecutor.nextEvent();
+                    }
+
+                    const next = await Promise.race([
+                        nextModelPart.then(result => ({ type: 'model' as const, result })),
+                        ...(nextToolEvent ? [nextToolEvent.then(event => ({ type: 'tool' as const, event }))] : [])
+                    ]);
+
+                    if (next.type === 'tool') {
+                        nextToolEvent = undefined;
+                        for (const executionPart of collectToolEventParts(next.event)) {
+                            yield executionPart;
+                            if (executionPart.type === 'task_complete' || (executionPart.type === 'tool_result' && executionPart.toolName === PHASE_CONCLUSION_SIGNAL_PLAN_CREATED)) {
+                                finishedDuringModelStream = true;
+                                concludedWithPlanSignal = concludedWithPlanSignal || (executionPart.type === 'tool_result' && executionPart.toolName === PHASE_CONCLUSION_SIGNAL_PLAN_CREATED);
+                            }
+                        }
+                        if (finishedDuringModelStream || completedBlockingToolDuringModelStream) {
+                            // return() queues behind an outstanding next(). Close the
+                            // model transport first, without cancelling the worker/run.
+                            modelCancellation.cancel();
+                            if (typeof responseIterator.return === 'function') {
+                                await responseIterator.return().catch(() => undefined);
+                            }
+                            break;
+                        }
+                        continue;
+                    }
+
+                    const modelResult = next.result;
+                    if (modelResult.done) {
+                        break;
+                    }
+
+                    const part = modelResult.value;
+                    nextModelPart = responseIterator.next();
+                    if (signal?.aborted) {
+                        break;
+                    }
+                    if (part.type === 'transport_status') {
+                        yield part;
+                    } else if (part.type === 'reasoning') {
+                        yield { type: 'reasoning', content: part.content };
+                    } else if (part.type === 'text') {
+                        currentResponse += part.content;
+                        if (part.phase === 'final_answer' && part.content.trim().length > 0) {
+                            sawFinalAnswerText = true;
+                        }
+                        // Every normal text block renders, even when a tool call
+                        // follows it. Phase is presentation metadata, never
+                        // permission for the host to discard assistant text.
+                        yield {
+                            type: 'chat_text',
+                            content: part.content,
+                            kind: part.phase === 'commentary'
+                                ? 'commentary'
+                                : part.phase === 'final_answer' ? 'final_answer' : 'assistant'
+                        };
+                    } else if (part.type === 'tool_call') {
+                        const streamedToolCall = this.parseStreamedToolCall(part.call, toolCallLedger);
+                        if (streamedToolCall) {
+                            const key = toolCallLedger.getTurnKey(streamedToolCall);
+                            if (!streamedToolCallKeys.has(key) && toolCallLedger.shouldAcceptInCurrentTurn(streamedToolCall)) {
+                                streamedToolCallKeys.add(key);
+                                streamedToolCalls.push(streamedToolCall);
+                                streamingToolExecutor.addTool(streamedToolCall, nextToolIndex++);
+                            }
+                        }
+                    }
+
+                    if (finishedDuringModelStream) {
+                        break;
+                    }
                 }
 
-                const next = await Promise.race([
-                    nextModelPart.then(result => ({ type: 'model' as const, result })),
-                    ...(nextToolEvent ? [nextToolEvent.then(event => ({ type: 'tool' as const, event }))] : [])
-                ]);
-
-                if (next.type === 'tool') {
-                    nextToolEvent = undefined;
-                    for (const executionPart of collectToolEventParts(next.event)) {
+                if (!finishedDuringModelStream && nextToolEvent) {
+                    for (const executionPart of collectToolEventParts(await nextToolEvent)) {
                         yield executionPart;
                         if (executionPart.type === 'task_complete' || (executionPart.type === 'tool_result' && executionPart.toolName === PHASE_CONCLUSION_SIGNAL_PLAN_CREATED)) {
                             finishedDuringModelStream = true;
                             concludedWithPlanSignal = concludedWithPlanSignal || (executionPart.type === 'tool_result' && executionPart.toolName === PHASE_CONCLUSION_SIGNAL_PLAN_CREATED);
                         }
                     }
-                    if (finishedDuringModelStream || completedBlockingToolDuringModelStream) {
-                        if (typeof responseIterator.return === 'function') {
-                            await responseIterator.return();
-                        }
-                        break;
-                    }
-                    continue;
                 }
 
-                const modelResult = next.result;
-                if (modelResult.done) {
-                    break;
-                }
-
-                const part = modelResult.value;
-                nextModelPart = responseIterator.next();
-                if (signal?.aborted) {
-                    break;
-                }
-                if (part.type === 'transport_status') {
-                    yield part;
-                } else if (part.type === 'reasoning') {
-                    yield { type: 'reasoning', content: part.content };
-                } else if (part.type === 'text') {
-                    currentResponse += part.content;
-                    // Every normal text block renders, even when a tool call
-                    // follows it. Phase is presentation metadata, never
-                    // permission for the host to discard assistant text.
-                    yield {
-                        type: 'chat_text',
-                        content: part.content,
-                        kind: part.phase === 'commentary'
-                            ? 'commentary'
-                            : part.phase === 'final_answer' ? 'final_answer' : 'assistant'
-                    };
-                } else if (part.type === 'tool_call') {
-                    const streamedToolCall = this.parseStreamedToolCall(part.call, toolCallLedger);
-                    if (streamedToolCall) {
-                        const key = toolCallLedger.getTurnKey(streamedToolCall);
-                        if (!streamedToolCallKeys.has(key) && toolCallLedger.shouldAcceptInCurrentTurn(streamedToolCall)) {
-                            streamedToolCallKeys.add(key);
-                            streamedToolCalls.push(streamedToolCall);
-                            streamingToolExecutor.addTool(streamedToolCall, nextToolIndex++);
-                        }
-                    }
-                }
-
-                if (finishedDuringModelStream) {
-                    break;
-                }
-            }
-
-            if (!finishedDuringModelStream && nextToolEvent) {
-                for (const executionPart of collectToolEventParts(await nextToolEvent)) {
-                    yield executionPart;
-                    if (executionPart.type === 'task_complete' || (executionPart.type === 'tool_result' && executionPart.toolName === PHASE_CONCLUSION_SIGNAL_PLAN_CREATED)) {
-                        finishedDuringModelStream = true;
-                        concludedWithPlanSignal = concludedWithPlanSignal || (executionPart.type === 'tool_result' && executionPart.toolName === PHASE_CONCLUSION_SIGNAL_PLAN_CREATED);
-                    }
-                }
+            } finally {
+                modelCancellation.dispose(true);
             }
 
             yield { type: 'assistant_turn_complete', phase: runPhase, turnId, turnIndex: visibleTurnIndex };
@@ -429,6 +443,7 @@ export class CleanSlateExecutionQueryEngine {
 				let shouldRestartAfterMutation = false;
 				let sawConfirmedMutation = false;
 				let sawUserCancelledCommand = false;
+				let allToolCallsSucceeded = true;
 				let sawToolCallLoop = false;
 				const recoveryPrompts: string[] = [];
 
@@ -437,7 +452,10 @@ export class CleanSlateExecutionQueryEngine {
 						return;
 					}
 					messages.push(this.nativeToolTranscript.buildToolResultMessage(execution.toolCall, execution.result));
-					if (this.editPolicy.isUserCancelledCommandResult(execution.toolCall, execution.result)) {
+					if (execution.result?.success === false) {
+						allToolCallsSucceeded = false;
+					}
+					if (this.isUserCancelledExecution(execution.toolCall, execution.result)) {
 						sawUserCancelledCommand = true;
 					}
 					if (this.isToolCallLoopResult(execution.result)) {
@@ -492,7 +510,10 @@ export class CleanSlateExecutionQueryEngine {
 							return;
 						}
 						messages.push(this.nativeToolTranscript.buildToolResultMessage(execution.toolCall, execution.result));
-						if (this.editPolicy.isUserCancelledCommandResult(execution.toolCall, execution.result)) {
+						if (execution.result?.success === false) {
+							allToolCallsSucceeded = false;
+						}
+						if (this.isUserCancelledExecution(execution.toolCall, execution.result)) {
 							sawUserCancelledCommand = true;
 						}
 						if (this.isToolCallLoopResult(execution.result)) {
@@ -527,6 +548,28 @@ export class CleanSlateExecutionQueryEngine {
 					yield { type: 'chat_text', content: stopMessage, kind: 'model_terminated_pause' };
 					activeThreadService.addMessage('assistant', stopMessage);
 					activeTaskSessionService.recordAssistantSummary(stopMessage);
+					return;
+				}
+
+				// Some native transports can return successful read-only tool calls and
+				// a definitive final-answer block in the same assistant turn. The final
+				// phase is an explicit stop signal; requesting another model turn here
+				// repeats the investigation indefinitely and keeps the UI in Stop mode.
+				if (sawFinalAnswerText && allToolCallsSucceeded && !shouldRestartAfterMutation && recoveryPrompts.length === 0) {
+					if (markCompletedOnFinish) {
+						activeTaskSessionService.markCompleted();
+					}
+					messages.push({ role: 'assistant', content: currentResponse });
+					yield {
+						type: 'task_complete',
+						result: {
+							phase: AgentPhase.EXECUTION,
+							executionFlow,
+							verified: true,
+							completionSource: 'host_finalized',
+							completionState: this.buildCompletionState(guardState, currentResponse, queryState.plannedFileTargets, queryState.pullRequest)
+						}
+					};
 					return;
 				}
 
@@ -727,6 +770,11 @@ export class CleanSlateExecutionQueryEngine {
         activeTaskSessionService.recordAssistantSummary(summary);
         return true;
     }
+
+	private isUserCancelledExecution(toolCall: ParsedToolCall, result: any): boolean {
+		return this.editPolicy.isUserCancelledCommandResult(toolCall, result)
+			|| result?.code === 'user_cancelled';
+	}
 
 	private pauseForQuestion(
 		toolCall: ParsedToolCall,

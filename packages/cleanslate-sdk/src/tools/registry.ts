@@ -22,7 +22,7 @@ import { updateTodoTool } from './UpdateTodoTool.js';
 import { submitArtifactTool } from './SubmitArtifactTool.js';
 import { preparePullRequestTool } from './PreparePullRequestTool.js';
 import { askQuestionTool } from './AskQuestionTool.js';
-import { spawnWorkerTool } from './SpawnWorkerTool.js';
+import { cancelWorkerTool, listWorkersTool, spawnWorkerTool, waitWorkerTool } from './SpawnWorkerTool.js';
 import { readReferenceTool } from './ReadReferenceTool.js';
 import { readLintsTool } from './ReadLintsTool.js';
 import { readSymbolsTool } from './ReadSymbolsTool.js';
@@ -109,6 +109,9 @@ export const ALL_TOOLS: CleanSlateTool[] = [
     browserClearAnnotationsTool,
     listDirTool,
     spawnWorkerTool,
+	waitWorkerTool,
+	listWorkersTool,
+	cancelWorkerTool,
     listSkillsTool,
     mcpListToolsTool,
     mcpCallTool,

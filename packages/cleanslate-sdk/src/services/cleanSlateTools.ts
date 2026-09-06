@@ -5,6 +5,8 @@
 
 // Core Infrastructure
 export * from '../tools/types.js';
+export * from './cleanSlateAgentCoordinator.js';
+export * from './cleanSlateConversationBranchService.js';
 export * from '../tools/utils.js';
 export * from '../tools/registry.js';
 

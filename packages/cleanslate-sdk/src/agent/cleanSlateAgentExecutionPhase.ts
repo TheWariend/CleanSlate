@@ -54,7 +54,13 @@ export class CleanSlateAgentExecutionPhase {
         }
 
         if (toolName === 'spawn_worker') {
-            return 'Nested worker spawning is disabled inside phase workers.';
+			// The normal agent also runs inside the execution-phase loop, so phase
+			// alone cannot tell us whether this is a child. Hosts expose delegation
+			// only on runtimes that may spawn; child runtimes remove the tool.
+			const canSpawnChild = this.options.getTools?.().some(tool => tool.name === 'spawn_worker') === true;
+			if (!canSpawnChild) {
+				return 'Nested worker spawning is disabled inside child agents.';
+			}
         }
 
         return undefined;

@@ -13,6 +13,7 @@ import { IWorkspaceFolder } from '../host/workspace.js';
 import { CleanSlateNodeFileService, CleanSlateNodeModelService, CleanSlateNodeTextFileService } from './cleanSlateNodeFileServices.js';
 import { CleanSlateNodeCommandService } from './cleanSlateNodeCommandService.js';
 import { CleanSlateNodeBrowserAutomation } from './cleanSlateNodeBrowserAutomation.js';
+import type { ICleanSlateBrowserAutomationService } from '../host/browserAutomation.js';
 import { CleanSlateNodeIndexService, ICleanSlateEmbeddingRequest } from './cleanSlateNodeIndexService.js';
 import { CleanSlateNodeMcpClient } from './cleanSlateNodeMcpClient.js';
 import { CleanSlateNodeLanguageCommands } from './cleanSlateNodeLanguageCommands.js';
@@ -61,6 +62,7 @@ export interface ICleanSlateNodeRuntimeOptions {
 	configuration: Record<string, any>;
 	/** Whether browser automation should run without a visible browser window. */
 	browserHeadless?: boolean;
+	browserAutomationService?: ICleanSlateBrowserAutomationService;
 	/** Host fetch implementation used only by the terminal embedding transport. */
 	fetcher?: typeof fetch;
 	/**
@@ -143,7 +145,7 @@ export function createCleanSlateNodeToolContext(options: ICleanSlateNodeRuntimeO
 	const modelService = new CleanSlateNodeModelService(textFileService);
 	const workspaceContextService = new CleanSlateNodeWorkspaceService(options.rootPath);
 	const commandExecutionService = new CleanSlateNodeCommandService(path.resolve(options.rootPath));
-	const browserAutomationService = new CleanSlateNodeBrowserAutomation({ headless: options.browserHeadless });
+	const browserAutomationService = options.browserAutomationService ?? new CleanSlateNodeBrowserAutomation({ headless: options.browserHeadless });
 	const indexService = new CleanSlateNodeIndexService(path.resolve(options.rootPath), {
 		configuration: options.configuration as any,
 		embeddingTransport: { request: request => fetchEmbeddingRequest(request, options.fetcher) }

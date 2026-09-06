@@ -20,6 +20,7 @@ import {
 	ICleanSlateConfigurationService,
 	ICleanSlateAgentRuntimeSnapshot,
 	ICleanSlateLogger,
+	ICleanSlateMainService,
 	ICleanSlateManagedAccount,
 	ICleanSlateManagedEntitlements,
 	ICleanSlatePendingAgentInteraction,
@@ -31,6 +32,7 @@ import { CleanSlateTaskSessionService, ICleanSlateTaskSessionSnapshot } from '..
 import { ICleanSlateThreadMessage } from '../services/cleanSlateThreadService.js';
 import { CleanSlateTaskKind, CleanSlateWorkspaceShape } from '../services/cleanSlateTaskState.js';
 import { CleanSlateThreadService } from '../services/cleanSlateThreadService.js';
+import { CleanSlateAgentCoordinator, formatCleanSlateChildAgentNotification, type ICleanSlateSpawnAgentRequest } from '../services/cleanSlateAgentCoordinator.js';
 import { ALL_TOOLS } from '../tools/registry.js';
 import type { CleanSlateTool } from '../tools/types.js';
 import type { ICleanSlateDomainProfile } from '../agent/cleanSlateDomainProfile.js';
@@ -40,6 +42,8 @@ import { NodeCleanSlateMainService } from './cleanSlateNodeMainService.js';
 
 export interface ICleanSlateNodeAgentRuntimeOptions {
 	rootPath: string;
+	/** A desktop host can reuse its authenticated transport and runtime endpoints. */
+	mainService?: ICleanSlateMainService;
 	/** Private host directory for per-workspace state such as edit recovery history. */
 	workspaceStorageHome?: string;
 	configuration: ICleanSlateConfiguration;
@@ -53,8 +57,13 @@ export interface ICleanSlateNodeAgentRuntimeOptions {
 	instructions?: string | ((task: string) => string | Promise<string>);
 	/** Whether browser automation should run without a visible browser window. */
 	browserHeadless?: boolean;
+	browserAutomationService?: import('../host/browserAutomation.js').ICleanSlateBrowserAutomationService;
+	/** Child runtimes share the parent's desktop browser without owning its lifetime. */
+	disposeBrowserAutomationService?: boolean;
 	approveCommand?: (request: { command: string; cwd?: string; reason?: string }) => Promise<boolean>;
 	onProgress?: (event: { type: string; [key: string]: any }) => void;
+	/** Desktop hosts present artifacts in their own views instead of an external viewer. */
+	onArtifact?: (artifact: { id: string; type: string; content: string; metadata?: any }) => void;
 	onManagedTokenRefresh?: (token: string) => void | Promise<void>;
 	fetcher?: typeof fetch;
 	logger?: Partial<ICleanSlateLogger>;
@@ -65,6 +74,12 @@ export interface ICleanSlateNodeAgentRuntimeOptions {
 	approveTool?: (request: { toolName: string; category?: string; input: unknown }) => boolean | Promise<boolean>;
 	/** Multimodal parts explicitly attached by the host for a user turn. */
 	resolveAttachments?: (task: string) => IChatMessagePart[] | Promise<IChatMessagePart[]>;
+	/** Maximum child agents owned by this runtime at once. */
+	maxConcurrentAgents?: number;
+	/** Receives portable child-agent lifecycle events for a host UI or logger. */
+	onAgentEvent?: (event: { type: string; [key: string]: any }) => void;
+	/** @internal Prevents recursive worker trees. */
+	workerDepth?: number;
 }
 
 export interface ICleanSlateNodeAgentSessionSnapshot {
@@ -75,6 +90,13 @@ export interface ICleanSlateNodeAgentSessionSnapshot {
 	threadHistory: ICleanSlateThreadMessage[];
 }
 
+export interface ICleanSlateNodeSideChat {
+	id: string;
+	title: string;
+	createdAt: number;
+	runtime: CleanSlateNodeAgentRuntime;
+}
+
 class NodeConfigurationService implements ICleanSlateConfigurationService {
 	declare readonly _serviceBrand: undefined;
 	readonly onDidChangeConfiguration = Event.None;
@@ -82,7 +104,7 @@ class NodeConfigurationService implements ICleanSlateConfigurationService {
 
 	constructor(
 		private configuration: ICleanSlateConfiguration,
-		private readonly mainService: NodeCleanSlateMainService,
+		private readonly mainService: ICleanSlateMainService,
 		private readonly onManagedTokenRefresh?: (token: string) => void | Promise<void>,
 		private readonly fetcher: typeof fetch = fetch
 	) { }
@@ -186,7 +208,7 @@ function createLogger(overrides: Partial<ICleanSlateLogger> = {}): ICleanSlateLo
  */
 export class CleanSlateNodeAgentRuntime {
 	private readonly rootPath: string;
-	private readonly mainService: NodeCleanSlateMainService;
+	private readonly mainService: ICleanSlateMainService;
 	private readonly configService: NodeConfigurationService;
 	private readonly headlessRuntime: CleanSlateHeadlessRuntime;
 	private readonly queryRunner: CleanSlateQueryRunner;
@@ -194,6 +216,8 @@ export class CleanSlateNodeAgentRuntime {
 	private readonly agentSession = new CleanSlateAgentSession();
 	private readonly threadService = new CleanSlateThreadService();
 	private readonly taskSessionService = new CleanSlateTaskSessionService();
+	private readonly agentCoordinator: CleanSlateAgentCoordinator;
+	private readonly sideChats = new Map<string, ICleanSlateNodeSideChat>();
 	private readonly sessionId: string;
 	private readonly contextService = {
 		_serviceBrand: undefined,
@@ -203,15 +227,33 @@ export class CleanSlateNodeAgentRuntime {
 	constructor(private readonly options: ICleanSlateNodeAgentRuntimeOptions) {
 		this.rootPath = path.resolve(options.rootPath);
 		this.sessionId = options.sessionId?.trim() || `cli-${process.pid}-${Date.now()}`;
-		this.mainService = new NodeCleanSlateMainService(this.rootPath);
+		this.mainService = options.mainService ?? new NodeCleanSlateMainService(this.rootPath);
 		this.configService = new NodeConfigurationService(options.configuration, this.mainService, options.onManagedTokenRefresh, options.fetcher);
 		const cleanSlateService = new CleanSlateService(this.configService, this.mainService, createLogger(options.logger));
 		this.cleanSlateService = cleanSlateService;
+		this.agentCoordinator = new CleanSlateAgentCoordinator(
+			(request, context) => this.runChildAgent(request, context.id, context.signal, context.emitStreamPart),
+			{ maxConcurrentAgents: options.maxConcurrentAgents }
+		);
+		this.agentCoordinator.onDidChangeAgent(event => {
+			options.onAgentEvent?.({
+				type: 'child_agent',
+				eventType: event.type,
+				agent: event.agent,
+				delta: event.delta,
+				streamPart: event.streamPart
+			});
+			if (event.agent.parentAgentId === this.sessionId
+				&& (event.agent.status === 'completed' || event.agent.status === 'failed' || event.agent.status === 'cancelled')) {
+				this.agentSession.appendMessage({ role: 'system', content: formatCleanSlateChildAgentNotification(event.agent) });
+			}
+		});
 		this.headlessRuntime = new CleanSlateHeadlessRuntime({
 			rootPath: this.rootPath,
 			workspaceStorageHome: options.workspaceStorageHome,
 			configuration: options.configuration,
 			browserHeadless: options.browserHeadless,
+			browserAutomationService: options.browserAutomationService,
 			fetcher: options.fetcher,
 			tools: options.tools ?? ALL_TOOLS,
 			cleanSlateService,
@@ -221,8 +263,15 @@ export class CleanSlateNodeAgentRuntime {
 			onProgress: options.onProgress
 		});
 		const toolContext = this.headlessRuntime.getToolContext();
+		// Tools (including spawn_worker) must use the same owner as model calls.
+		toolContext.sessionId = this.sessionId;
+		if (options.onArtifact) {
+			toolContext.artifactPresentationHost = { openArtifact: async () => { } };
+			toolContext.artifactService.onDidArtifactChange(options.onArtifact);
+		}
 		toolContext.cleanSlateMainService = this.mainService;
 		toolContext.contextService = this.contextService;
+		toolContext.agentCoordinator = this.agentCoordinator;
 		const parsingSupport = new CleanSlateAgentParsingSupport(this.configService);
 		const executionSupport = new CleanSlateAgentExecutionSupport(
 			toolContext.workspaceContextService,
@@ -252,6 +301,12 @@ export class CleanSlateNodeAgentRuntime {
 
 	async *run(task: string, signal?: AbortSignal): AsyncIterable<CleanSlateStreamPart> {
 		yield* this.runInPhase(task, AgentPhase.EXECUTION, signal);
+	}
+
+	async configureRun(configuration: ICleanSlateConfiguration, agentDefinition?: AgentDefinition): Promise<void> {
+		Object.assign(this.options.configuration, configuration);
+		this.options.agentDefinition = agentDefinition;
+		await this.configService.updateConfiguration(configuration);
 	}
 
 	async *plan(task: string, signal?: AbortSignal): AsyncIterable<CleanSlateStreamPart> {
@@ -320,6 +375,11 @@ export class CleanSlateNodeAgentRuntime {
 		return this.agentSession.getSnapshot()?.pendingInteraction;
 	}
 
+	rejectPlan(): void {
+		this.taskSessionService.setAwaitingApproval(false);
+		this.taskSessionService.setPhase(AgentPhase.PLANNING);
+	}
+
 	getSessionSnapshot(): ICleanSlateNodeAgentSessionSnapshot {
 		return {
 			version: 1,
@@ -343,6 +403,57 @@ export class CleanSlateNodeAgentRuntime {
 		this.agentSession.clear();
 		this.taskSessionService.reset();
 		this.threadService.clearHistory();
+	}
+
+	/** Creates an independent conversational runtime attached to this session. */
+	createSideChat(options: { id?: string; title?: string; inheritContext?: boolean } = {}): ICleanSlateNodeSideChat {
+		const id = options.id?.trim() || `${this.sessionId}-side-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+		if (this.sideChats.has(id)) {
+			throw new Error(`Side chat already exists: ${id}`);
+		}
+		const inheritedHistory = options.inheritContext === false
+			? ''
+			: this.threadService.getActiveTaskHistory()
+				.filter(message => !message.isInternalState && (message.role === 'user' || message.role === 'assistant'))
+				.slice(-8)
+				.map(message => `${message.role}: ${message.content}`)
+				.join('\n\n');
+		const parentAdditionalContext = this.options.additionalContext;
+		const runtime = new CleanSlateNodeAgentRuntime({
+			...this.options,
+			sessionId: id,
+			disposeBrowserAutomationService: !this.options.browserAutomationService,
+			additionalContext: async task => {
+				const base = typeof parentAdditionalContext === 'function'
+					? await parentAdditionalContext(task)
+					: parentAdditionalContext;
+				return [
+					base?.trim(),
+					inheritedHistory ? `Parent conversation context (read-only):\n${inheritedHistory}` : ''
+				].filter(Boolean).join('\n\n');
+			}
+		});
+		const sideChat = { id, title: options.title?.trim() || 'Side chat', createdAt: Date.now(), runtime };
+		this.sideChats.set(id, sideChat);
+		return sideChat;
+	}
+
+	listSideChats(): Array<Omit<ICleanSlateNodeSideChat, 'runtime'>> {
+		return Array.from(this.sideChats.values()).map(({ id, title, createdAt }) => ({ id, title, createdAt }));
+	}
+
+	getSideChat(id: string): ICleanSlateNodeSideChat | undefined {
+		return this.sideChats.get(id);
+	}
+
+	closeSideChat(id: string): boolean {
+		const sideChat = this.sideChats.get(id);
+		if (!sideChat) {
+			return false;
+		}
+		sideChat.runtime.dispose();
+		this.sideChats.delete(id);
+		return true;
 	}
 
 	getModels(): Promise<string[]> {
@@ -391,10 +502,73 @@ export class CleanSlateNodeAgentRuntime {
 	}
 
 	dispose(): void {
+		for (const sideChat of this.sideChats.values()) {
+			sideChat.runtime.dispose();
+		}
+		this.sideChats.clear();
 		const context = this.headlessRuntime.getToolContext();
 		(context.commandExecutionService as { dispose?: () => void }).dispose?.();
-		void (context.browserAutomationService as { dispose?: () => Promise<void> }).dispose?.();
+		if (this.options.disposeBrowserAutomationService !== false) {
+			void (context.browserAutomationService as { dispose?: () => Promise<void> }).dispose?.();
+		}
 		void (context.mcpClientService as { dispose?: () => Promise<void> }).dispose?.();
+	}
+
+	listChildAgents() {
+		return this.agentCoordinator.listAgents(this.sessionId);
+	}
+
+	cancelChildAgent(agentId: string): boolean {
+		return this.agentCoordinator.cancelAgent(agentId);
+	}
+
+	private async runChildAgent(
+		request: Readonly<ICleanSlateSpawnAgentRequest>,
+		agentId: string,
+		signal: AbortSignal,
+		emitStreamPart: (part: CleanSlateStreamPart) => void
+	): Promise<string> {
+		const workerDepth = this.options.workerDepth ?? 0;
+		if (workerDepth >= 1) {
+			throw new Error('Nested child agents are disabled. Return the work to the parent agent instead.');
+		}
+		const child = new CleanSlateNodeAgentRuntime({
+			...this.options,
+			sessionId: agentId,
+			workerDepth: workerDepth + 1,
+			disposeBrowserAutomationService: !this.options.browserAutomationService,
+			// A child receives the same capabilities, but not delegation authority.
+			tools: (this.options.tools ?? ALL_TOOLS).filter(tool =>
+				tool.name !== 'spawn_worker'
+				&& tool.name !== 'wait_worker'
+				&& tool.name !== 'list_workers'
+				&& tool.name !== 'cancel_worker'
+			),
+			instructions: async task => {
+				const base = typeof this.options.instructions === 'function'
+					? await this.options.instructions(task)
+					: this.options.instructions;
+				return [
+					base?.trim(),
+					`You are a ${request.kind ?? 'worker'} child agent. Complete only this bounded assignment and return a concise, evidence-backed result to the parent.`,
+					`Assignment label: ${request.description}`
+				].filter(Boolean).join('\n\n');
+			},
+			onProgress: event => this.options.onProgress?.({ ...event, agentId }),
+			onAgentEvent: event => this.options.onAgentEvent?.(event)
+		});
+		let output = '';
+		try {
+			for await (const part of child.run(request.prompt, signal)) {
+				emitStreamPart(part);
+				if ((part.type === 'chat_text' || part.type === 'text') && part.content) {
+					output += part.content;
+				}
+			}
+			return output.trim();
+		} finally {
+			child.dispose();
+		}
 	}
 
 	private async buildPromptContext(task = ''): Promise<string> {

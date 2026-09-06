@@ -20,6 +20,7 @@ import { ITreeSitterHost } from '../host/services.js';
 import { IEnvironmentHost } from '../host/workspace.js';
 import { ICommandHost } from '../host/workspace.js';
 import { ICleanSlateBrowserAutomationService } from '../host/browserAutomation.js';
+import type { CleanSlateAgentCoordinator } from '../services/cleanSlateAgentCoordinator.js';
 
 export type CleanSlateToolSurface = 'ide' | 'agentManager';
 
@@ -73,6 +74,8 @@ export interface CleanSlateToolContext {
     fileReadBudget?: CleanSlateFileReadBudgetContext;
     requestCommandApproval: (request: { command: string; cwd?: string; reason?: string; toolName?: string; toolCallId?: string }) => Promise<boolean>;
     onProgress?: (event: { type: string; [key: string]: any }) => void;
+    /** Shared child-agent lifecycle. Required by spawn_worker. */
+    agentCoordinator?: CleanSlateAgentCoordinator;
 }
 
 export interface CleanSlateReadFileState {
