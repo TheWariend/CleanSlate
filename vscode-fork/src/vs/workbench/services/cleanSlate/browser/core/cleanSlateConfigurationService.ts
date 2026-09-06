@@ -86,6 +86,18 @@ export class CleanSlateConfigurationService implements ICleanSlateConfigurationS
     ) {
         this.initialization = this.migrateLegacySettingsConfiguration();
         this.secretsLoadPromise = this.loadSecrets();
+        this.cleanSlateMainService.onDidRefreshManagedToken(token => {
+            const managedToken = token.trim();
+            if (!managedToken || managedToken === this.secretCache.managedToken) {
+                return;
+            }
+            // Update synchronously so a new submission cannot resend the token
+            // that the hosted runtime has just rotated.
+            this.secretCache.managedToken = managedToken;
+            void this.secretStorageService.set(SECRET_KEYS.managedToken, managedToken).then(undefined, error => {
+                this.logger.error(`Unable to persist the refreshed CleanSlate session: ${String(error)}`);
+            });
+        });
         this.secretStorageService.onDidChangeSecret(key => {
             if (key === SECRET_KEYS.managedToken) {
                 this.secretsLoadPromise = this.loadSecrets();

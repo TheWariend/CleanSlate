@@ -62,6 +62,8 @@ export class CleanSlateMainChannel implements IServerChannel {
                 return this.listenCancellable(arg, token => this.service.executeCommandStream(arg[0], token)) as unknown as Event<T>;
             case 'onDidPublishThreadSession':
                 return this.service.onDidPublishThreadSession as unknown as Event<T>;
+            case 'onDidRefreshManagedToken':
+                return this.service.onDidRefreshManagedToken as unknown as Event<T>;
         }
 
         throw new Error(`Event not found: ${event}`);
@@ -187,9 +189,11 @@ export class CleanSlateMainChannel implements IServerChannel {
 export class CleanSlateMainChannelClient implements ICleanSlateMainService {
     declare readonly _serviceBrand: undefined;
     readonly onDidPublishThreadSession: Event<ICleanSlateThreadSessionUpdate>;
+    readonly onDidRefreshManagedToken: Event<string>;
 
     constructor(private readonly channel: any) {
         this.onDidPublishThreadSession = this.channel.listen('onDidPublishThreadSession');
+        this.onDidRefreshManagedToken = this.channel.listen('onDidRefreshManagedToken');
     }
 
     getRuntimeConfig(): Promise<ICleanSlateRuntimeConfig> {

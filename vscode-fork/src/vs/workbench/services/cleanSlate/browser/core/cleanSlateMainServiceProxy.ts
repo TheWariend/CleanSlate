@@ -49,6 +49,7 @@ export class CleanSlateMainServiceProxy extends Disposable implements ICleanSlat
     readonly _serviceBrand: undefined;
     private readonly channel: IChannel;
     readonly onDidPublishThreadSession: Event<ICleanSlateThreadSessionUpdate>;
+    readonly onDidRefreshManagedToken: Event<string>;
 
     constructor(
         @ICleanSlateChannelService channelService: ICleanSlateChannelService
@@ -56,6 +57,7 @@ export class CleanSlateMainServiceProxy extends Disposable implements ICleanSlat
         super();
         this.channel = channelService.getChannel('cleanSlateMain');
         this.onDidPublishThreadSession = this.channel.listen('onDidPublishThreadSession');
+        this.onDidRefreshManagedToken = this.channel.listen('onDidRefreshManagedToken');
     }
 
     getRuntimeConfig(): Promise<ICleanSlateRuntimeConfig> {

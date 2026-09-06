@@ -115,6 +115,8 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
     private readonly anthropicMessageAdapter = new CleanSlateAnthropicMessageAdapter(this.providerSchemaNormalizer);
     private readonly _onDidPublishThreadSession = this._register(new Emitter<ICleanSlateThreadSessionUpdate>());
     readonly onDidPublishThreadSession: Event<ICleanSlateThreadSessionUpdate> = this._onDidPublishThreadSession.event;
+    private readonly _onDidRefreshManagedToken = this._register(new Emitter<string>());
+    readonly onDidRefreshManagedToken: Event<string> = this._onDidRefreshManagedToken.event;
     private readonly webRetrievalService: CleanSlateWebRetrievalService;
     private readonly threadPersistenceStore: CleanSlateThreadPersistenceStore;
     private readonly localEmbeddingService: CleanSlateLocalEmbeddingService;
@@ -151,6 +153,8 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
             return new CleanSlateNodeAgentRuntime({
                 rootPath, workspaceStorageHome: storageHome, sessionId: request.session.id,
                 mainService: this, configuration: { ...request.configuration },
+                onManagedTokenRefresh: token => this._onDidRefreshManagedToken.fire(token),
+                managedSessionExpiredMessage: 'Your CleanSlate session expired. Sign in again.',
                 agentDefinition: request.session.agent as AgentDefinition | undefined, approveCommand: hooks.approveCommand,
                 onArtifact: hooks.onArtifact,
                 onAgentEvent: event => {
