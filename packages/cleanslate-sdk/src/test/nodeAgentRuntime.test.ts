@@ -35,7 +35,7 @@ describe('CleanSlateNodeAgentRuntime', () => {
 	test('loads CleanSlate managed models and persists a refreshed account token', async () => {
 		const requests: string[] = [];
 		let refreshedToken: string | undefined;
-		const fetcher = (async (input: string | URL | Request) => {
+		const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
 			const url = String(input);
 			requests.push(url);
 			if (url.endsWith('/auth/refresh')) {
@@ -44,11 +44,11 @@ describe('CleanSlateNodeAgentRuntime', () => {
 					headers: { 'Content-Type': 'application/json' }
 				});
 			}
-			const entitlementAttempt = requests.filter(value => value.endsWith('/entitlements')).length;
-			return new Response(entitlementAttempt === 1
+			const rejected = new Headers(init?.headers).get('Authorization') === 'Bearer expired-token';
+			return new Response(rejected
 				? JSON.stringify({ message: 'expired' })
 				: JSON.stringify({ data: { models: [{ id: 'managed-model', name: 'Managed Model' }] } }), {
-				status: entitlementAttempt === 1 ? 401 : 200,
+				status: rejected ? 401 : 200,
 				headers: { 'Content-Type': 'application/json' }
 			});
 		}) as typeof fetch;
@@ -69,6 +69,10 @@ describe('CleanSlateNodeAgentRuntime', () => {
 		assert.deepEqual(await runtime.getModels(), ['managed-model']);
 		assert.equal(refreshedToken, 'fresh-token');
 		assert.equal(requests.some(url => url.endsWith('/auth/refresh')), true);
+		await runtime.configureRun(configuration);
+		assert.deepEqual(await runtime.getModels(), ['managed-model']);
+		assert.equal(requests.filter(url => url.endsWith('/auth/refresh')).length, 1,
+			'a stale host snapshot must not overwrite the token refreshed by the headless runtime');
 		runtime.dispose();
 	});
 

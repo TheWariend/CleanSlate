@@ -1062,6 +1062,8 @@ export interface ICleanSlateRuntimeConfig {
 export interface ICleanSlateMainService {
     readonly _serviceBrand: undefined;
     readonly onDidPublishThreadSession: Subscribable<ICleanSlateThreadSessionUpdate>;
+    /** A hosted runtime rotated the managed credential and the owning UI must persist it. */
+    readonly onDidRefreshManagedToken: Subscribable<string>;
 
     getRuntimeConfig(): Promise<ICleanSlateRuntimeConfig>;
 

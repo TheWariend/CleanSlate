@@ -97,6 +97,7 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 	private modelsDevCatalogCache: { expiresAt: number; value: Record<string, any> } | undefined;
 	private modelsDevCatalogRequest: Promise<Record<string, any> | undefined> | undefined;
 	readonly onDidPublishThreadSession: Event<ICleanSlateThreadSessionUpdate> = Event.None;
+	readonly onDidRefreshManagedToken: Event<string> = Event.None;
 
 	constructor(
 		rootPath: string = process.cwd(),

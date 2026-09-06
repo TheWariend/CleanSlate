@@ -65,6 +65,8 @@ export interface ICleanSlateNodeAgentRuntimeOptions {
 	/** Desktop hosts present artifacts in their own views instead of an external viewer. */
 	onArtifact?: (artifact: { id: string; type: string; content: string; metadata?: any }) => void;
 	onManagedTokenRefresh?: (token: string) => void | Promise<void>;
+	/** Surface-specific recovery copy. CLI hosts default to the setup command. */
+	managedSessionExpiredMessage?: string;
 	fetcher?: typeof fetch;
 	logger?: Partial<ICleanSlateLogger>;
 	sessionId?: string;
@@ -101,13 +103,17 @@ class NodeConfigurationService implements ICleanSlateConfigurationService {
 	declare readonly _serviceBrand: undefined;
 	readonly onDidChangeConfiguration = Event.None;
 	private managedAccount: ICleanSlateManagedAccount | undefined;
+	private managedTokenFromHost: string | undefined;
 
 	constructor(
 		private configuration: ICleanSlateConfiguration,
 		private readonly mainService: ICleanSlateMainService,
 		private readonly onManagedTokenRefresh?: (token: string) => void | Promise<void>,
+		private readonly managedSessionExpiredMessage = 'Your CleanSlate session expired. Run cleanslate --setup to sign in again.',
 		private readonly fetcher: typeof fetch = fetch
-	) { }
+	) {
+		this.managedTokenFromHost = configuration.providers?.cleanslate?.apiKey;
+	}
 
 	getConfiguration(): ICleanSlateConfiguration {
 		return this.configuration;
@@ -116,7 +122,26 @@ class NodeConfigurationService implements ICleanSlateConfigurationService {
 		return Promise.resolve(this.configuration);
 	}
 	updateConfiguration(config: Partial<ICleanSlateConfiguration>): Promise<void> {
-		this.configuration = { ...this.configuration, ...config };
+		const incomingManagedToken = config.providers?.cleanslate?.apiKey;
+		const currentManagedToken = this.configuration.providers?.cleanslate?.apiKey;
+		const preserveRefreshedToken = !!incomingManagedToken
+			&& incomingManagedToken === this.managedTokenFromHost
+			&& !!currentManagedToken
+			&& currentManagedToken !== incomingManagedToken;
+		if (incomingManagedToken && incomingManagedToken !== this.managedTokenFromHost) {
+			this.managedTokenFromHost = incomingManagedToken;
+		}
+		this.configuration = {
+			...this.configuration,
+			...config,
+			providers: config.providers ? {
+				...config.providers,
+				cleanslate: config.providers.cleanslate ? {
+					...config.providers.cleanslate,
+					apiKey: preserveRefreshedToken ? currentManagedToken : incomingManagedToken
+				} : config.providers.cleanslate
+			} : this.configuration.providers
+		};
 		return Promise.resolve();
 	}
 	async refreshManagedToken(rejectedToken?: string): Promise<string> {
@@ -134,7 +159,7 @@ class NodeConfigurationService implements ICleanSlateConfigurationService {
 		});
 		const body = await this.readJson(response);
 		if (response.status === 401) {
-			throw new Error('Your CleanSlate session expired. Run cleanslate --setup to sign in again.');
+			throw new Error(this.managedSessionExpiredMessage);
 		}
 		if (!response.ok || typeof body?.token !== 'string' || !body.token) {
 			throw new Error(body?.message || `Unable to refresh the CleanSlate session (${response.status}).`);
@@ -228,7 +253,7 @@ export class CleanSlateNodeAgentRuntime {
 		this.rootPath = path.resolve(options.rootPath);
 		this.sessionId = options.sessionId?.trim() || `cli-${process.pid}-${Date.now()}`;
 		this.mainService = options.mainService ?? new NodeCleanSlateMainService(this.rootPath);
-		this.configService = new NodeConfigurationService(options.configuration, this.mainService, options.onManagedTokenRefresh, options.fetcher);
+		this.configService = new NodeConfigurationService(options.configuration, this.mainService, options.onManagedTokenRefresh, options.managedSessionExpiredMessage, options.fetcher);
 		const cleanSlateService = new CleanSlateService(this.configService, this.mainService, createLogger(options.logger));
 		this.cleanSlateService = cleanSlateService;
 		this.agentCoordinator = new CleanSlateAgentCoordinator(
