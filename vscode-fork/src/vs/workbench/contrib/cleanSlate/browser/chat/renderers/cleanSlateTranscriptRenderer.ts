@@ -22,6 +22,7 @@ import { normalizeTerminalOutput } from '../../tools/terminalUtils.js';
 import { renderAnsiToHtml } from './cleanSlateAnsiRenderer.js';
 import { CleanSlateWebActivityRenderer } from './cleanSlateWebActivityRenderer.js';
 import { CleanSlateTranscriptFileRenderer } from './cleanSlateTranscriptFileRenderer.js';
+import { CleanSlateStreamingText } from './cleanSlateStreamingText.js';
 
 interface ICleanSlateAssistantMarkdownStreamState {
     renderedContent: string;
@@ -54,6 +55,7 @@ export class CleanSlateTranscriptRenderer {
     private readonly directTimelineBlockIndexes = new WeakMap<HTMLElement, Map<string, HTMLElement>>();
     private readonly fileRenderer: CleanSlateTranscriptFileRenderer;
     private readonly webActivityRenderer = new CleanSlateWebActivityRenderer();
+    private readonly streamingText = new CleanSlateStreamingText();
     // Per-message streaming markdown: committed blocks render once (so their async
     // code widgets survive) and their raw text is never re-lexed; only the trailing,
     // still-growing block re-renders each tick.
@@ -612,7 +614,12 @@ export class CleanSlateTranscriptRenderer {
             blockEl.classList.add(`type-${block.type}`);
             if (!container.closest('.is-restoring-history')) {
                 blockEl.classList.add('is-entering');
-                blockEl.addEventListener('animationend', () => blockEl?.classList.remove('is-entering'), { once: true });
+                const finishEntrance = (event: AnimationEvent) => {
+                    if (event.target !== blockEl || event.animationName !== 'cleanSlateBlockIn') { return; }
+                    blockEl!.classList.remove('is-entering');
+                    blockEl!.removeEventListener('animationend', finishEntrance);
+                };
+                blockEl.addEventListener('animationend', finishEntrance);
             }
         }
         blockEl!.classList.toggle('is-active', activeBlockId === block.id);
@@ -751,6 +758,10 @@ export class CleanSlateTranscriptRenderer {
     }
 
     disposeMarkdownRenders(): void {
+        this.streamingText.dispose();
+        for (const blockId of this.streamingMarkdownStates.keys()) {
+            this.clearAssistantMarkdownStreamStateForBlock(blockId);
+        }
         // A full view reset replaces reasoning DOM too. Do not carry its cached
         // rendered text or timers into a restored copy of the same live block.
         for (const blockId of this.reasoningStreamStates.keys()) {
@@ -830,12 +841,15 @@ export class CleanSlateTranscriptRenderer {
             header.setAttribute('aria-expanded', 'true');
             dom.append(header, dom.$('span.cleanSlate-reasoning-label'));
             dom.append(header, dom.$('span.cleanSlate-reasoning-chevron.codicon.codicon-chevron-down'));
-            body = dom.append(el, dom.$('.cleanSlate-reasoning-body.cleanSlate-message-content'));
+            const viewport = dom.append(el, dom.$('.cleanSlate-reasoning-body-viewport'));
+            const clip = dom.append(viewport, dom.$('.cleanSlate-reasoning-body-clip'));
+            body = dom.append(clip, dom.$('.cleanSlate-reasoning-body.cleanSlate-message-content'));
 
             header.addEventListener('click', () => {
                 el.dataset.userToggled = 'true';
                 el.classList.toggle('is-collapsed');
                 header!.setAttribute('aria-expanded', String(!el.classList.contains('is-collapsed')));
+                viewport.setAttribute('aria-hidden', String(el.classList.contains('is-collapsed')));
             });
             // Expanded while the model is thinking; auto-collapse once the thought
             // is complete, unless the user has manually toggled it.
@@ -869,6 +883,7 @@ export class CleanSlateTranscriptRenderer {
             el.classList.remove('is-collapsed');
         }
         header.setAttribute('aria-expanded', String(!el.classList.contains('is-collapsed')));
+        el.querySelector('.cleanSlate-reasoning-body-viewport')?.setAttribute('aria-hidden', String(el.classList.contains('is-collapsed')));
     }
 
     private renderReasoningAtStreamPace(blockId: string, body: HTMLElement, content: string, isStreaming: boolean): boolean {
@@ -892,6 +907,10 @@ export class CleanSlateTranscriptRenderer {
         state.targetContent = content;
 
         if (isStreaming) {
+            if (state.completionTimer !== undefined) {
+                state.cancelCompletionTimer?.(state.completionTimer);
+                state.completionTimer = undefined;
+            }
             this.scheduleReasoningFrame(blockId, body);
             return true;
         }
@@ -909,6 +928,8 @@ export class CleanSlateTranscriptRenderer {
                 state!.completionTimer = undefined;
                 if (reasoningBlock?.isConnected && reasoningBlock.dataset.userToggled !== 'true') {
                     reasoningBlock.classList.add('is-collapsed');
+                    reasoningBlock.querySelector('.cleanSlate-reasoning-header')?.setAttribute('aria-expanded', 'false');
+                    reasoningBlock.querySelector('.cleanSlate-reasoning-body-viewport')?.setAttribute('aria-hidden', 'true');
                 }
                 this.clearReasoningStreamStateForBlock(blockId);
             }, CleanSlateTranscriptRenderer.REASONING_COMPLETION_HOLD_MS);
@@ -939,23 +960,15 @@ export class CleanSlateTranscriptRenderer {
             return;
         }
 
-        // Streaming reasoning is almost always a pure append (the thought grows by
-        // a suffix each delta). In that case append only the new tail as a text
-        // node instead of reassigning the whole textContent — the latter re-lays
-        // out the entire, ever-growing thought every frame (O(n²) over the stream)
-        // and is what makes long thoughts feel laggy. Fall back to a full replace
-        // when the prefix diverges (e.g. stripReasoningEmphasis collapsing a
-        // just-completed `*`→`**` token shifts earlier characters).
-        if (rendered.length > 0 && content.startsWith(rendered) && body.firstChild) {
-            body.appendChild(body.ownerDocument.createTextNode(content.slice(rendered.length)));
+        // Reasoning stays in a single text node. Frame-coalesced appends avoid
+        // creating and retiring animated spans while the Thinking light paints.
+        const text = body.firstChild;
+        if (text?.nodeType === Node.TEXT_NODE && body.childNodes.length === 1 && content.startsWith(rendered)) {
+            (text as Text).appendData(content.slice(rendered.length));
         } else {
             body.textContent = content;
         }
         state.renderedText = content;
-
-        // Avoid reading scrollHeight for every streamed delta. Browsers clamp
-        // this assignment to the current scroll range without a forced read.
-        body.scrollTop = Number.MAX_SAFE_INTEGER;
     }
 
     private cancelReasoningFrame(state: ICleanSlateReasoningStreamState): void {
@@ -996,7 +1009,6 @@ export class CleanSlateTranscriptRenderer {
 
     private updateAssistantTextBlock(block: InteractionBlock, el: HTMLElement, onDidRender?: () => void): void {
         const content = block.content || '';
-        void onDidRender;
         el.classList.add('cleanSlate-message-content');
         el.classList.add('cleanSlate-assistant-text-block');
         el.classList.toggle('is-streaming', block.isStreaming === true);
@@ -1009,13 +1021,19 @@ export class CleanSlateTranscriptRenderer {
         }
 
         const streamState = this.assistantMarkdownStreamStates.get(block.id);
-        if (streamState && streamState.renderedContent !== content) {
+        if (streamState) {
             this.renderAssistantMarkdownStream(block.id, el, content, false, onDidRender);
             return;
         }
 
+        const renderKey = `assistant-text:${block.id}:${content}`;
+        // Settled checkpoints repeat the final text. Its committed code widgets
+        // still own live disposables even after the stream itself has ended.
+        if (el.dataset.renderKey === renderKey) {
+            return;
+        }
         this.clearAssistantMarkdownStreamStateForBlock(block.id);
-        this.setMarkdownIfChanged(el, content, `assistant-text:${block.id}:${content}`);
+        this.setMarkdownIfChanged(el, content, renderKey);
     }
 
     private static readonly REASONING_COMPLETION_HOLD_MS = 1800;
@@ -1035,14 +1053,30 @@ export class CleanSlateTranscriptRenderer {
             this.assistantMarkdownStreamStates.set(blockId, state);
         }
 
-        // Once streaming ends, render the final content in full and drop the state.
+        // Keep committed paragraphs and code widgets mounted at completion.
+        // Only the growing tail needs its final (complete-token) render.
         if (!isStreaming) {
-            const didRender = this.setMarkdownIfChanged(el, content, `assistant-text:${blockId}:${content}`, false);
-            state.renderedContent = content;
-            if (didRender) {
+            // Reference definitions can arrive after the paragraph that uses them.
+            // Those documents need one complete parse to resolve cross-block links.
+            if (this.hasMarkdownReferenceDefinitions(content)) {
+                this.clearAssistantMarkdownStreamStateForBlock(blockId);
+                this.setMarkdownIfChanged(el, content, `assistant-text:${blockId}:${content}`, false);
                 onDidRender?.();
+                return;
             }
-            this.clearAssistantMarkdownStreamStateForBlock(blockId);
+            this.setStreamingMarkdown(blockId, el, content);
+            const markdownState = this.streamingMarkdownStates.get(blockId);
+            const tail = el.querySelector<HTMLElement>(':scope > .cleanSlate-stream-tail');
+            if (markdownState && tail) {
+                const finalTail = content.slice(markdownState.committedRaw.length);
+                const rendered = this.renderMarkdownFragment(finalTail, false);
+                tail.replaceChildren(rendered.element);
+                this.decorateCodeBlocks(tail, this.extractFenceLanguages(finalTail));
+                markdownState.disposables.push(rendered);
+            }
+            el.dataset.renderKey = `assistant-text:${blockId}:${content}`;
+            this.assistantMarkdownStreamStates.delete(blockId);
+            onDidRender?.();
             return;
         }
 
@@ -1054,6 +1088,16 @@ export class CleanSlateTranscriptRenderer {
         state.renderedContent = content;
         if (didRender) {
             onDidRender?.();
+        }
+    }
+
+    private hasMarkdownReferenceDefinitions(content: string): boolean {
+        try {
+            return Object.keys(marked.lexer(content).links).length > 0;
+        } catch {
+            // Let the full markdown renderer handle malformed input instead of
+            // leaving partially parsed fragments as the completed response.
+            return true;
         }
     }
 
@@ -1129,7 +1173,7 @@ export class CleanSlateTranscriptRenderer {
         if (lastVisual >= 0) {
             const rendered = this.renderMarkdownFragment(tokens[lastVisual].raw, true);
             try {
-                this.morphChildren(tailEl, rendered.element);
+                this.morphChildren(tailEl, rendered.element, !el.closest('.is-restoring-history'));
             } finally {
                 rendered.dispose();
             }
@@ -1231,18 +1275,36 @@ export class CleanSlateTranscriptRenderer {
     // Minimal DOM morph (morphdom-style): make target's children match source's,
     // updating in place and preserving unchanged nodes. Inserted/replaced nodes are
     // cloned so disposing the source render leaves the live tree intact.
-    private morphChildren(target: Node, source: Node): void {
+    private morphChildren(target: Node, source: Node, animate = false): void {
+        const revealText = animate && !(target instanceof Element && target.closest('pre, code, [data-code]'));
         const sourceKids = source.childNodes;
         for (let i = 0; i < sourceKids.length; i++) {
             const s = sourceKids[i];
             const t = target.childNodes[i];
+            // Treat a transient text wrapper as the source's single text node.
+            // This keeps markdown morphing keyed without restarting older fades.
+            if (s.nodeType === Node.TEXT_NODE && (revealText && !!s.textContent?.trim()
+                || t instanceof HTMLElement && t.classList.contains('cleanSlate-stream-text'))) {
+                let text = t instanceof HTMLElement && t.classList.contains('cleanSlate-stream-text') ? t : undefined;
+                if (!text) {
+                    text = (target.ownerDocument || document).createElement('span');
+                    text.className = 'cleanSlate-stream-text';
+                    if (t) { target.replaceChild(text, t); } else { target.appendChild(text); }
+                }
+                this.streamingText.update(text, s.textContent || '', revealText);
+                continue;
+            }
             if (!t) {
-                target.appendChild(s.cloneNode(true));
+                const clone = s.cloneNode(false);
+                target.appendChild(clone);
+                if (s.nodeType === Node.ELEMENT_NODE) { this.morphChildren(clone, s, revealText); }
                 continue;
             }
             if (t.nodeType !== s.nodeType
                 || (t.nodeType === Node.ELEMENT_NODE && (t as Element).tagName !== (s as Element).tagName)) {
-                target.replaceChild(s.cloneNode(true), t);
+                const clone = s.cloneNode(false);
+                target.replaceChild(clone, t);
+                if (s.nodeType === Node.ELEMENT_NODE) { this.morphChildren(clone, s, revealText); }
                 continue;
             }
             if (t.nodeType === Node.TEXT_NODE || t.nodeType === Node.COMMENT_NODE) {
@@ -1253,7 +1315,7 @@ export class CleanSlateTranscriptRenderer {
             }
             if (t.nodeType === Node.ELEMENT_NODE) {
                 this.morphAttributes(t as Element, s as Element);
-                this.morphChildren(t, s);
+                this.morphChildren(t, s, revealText);
             }
         }
         while (target.childNodes.length > sourceKids.length) {

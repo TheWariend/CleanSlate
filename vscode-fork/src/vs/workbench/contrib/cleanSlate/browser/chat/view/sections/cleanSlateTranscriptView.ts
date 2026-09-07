@@ -34,9 +34,6 @@ export class CleanSlateTranscriptView {
 	// an arriving scroll event counts as the user's rather than ours.
 	private static readonly AUTO_SCROLL_TOLERANCE_PX = 2;
 	private static readonly BOTTOM_THRESHOLD_PX = 10;
-	// Fraction of the remaining distance to close each frame, plus a floor so the
-	// glide never crawls to a stop on the last pixels. Tuned to keep up with fast
-	// streaming while still visibly easing.
 
 	// While replaying persisted history we must NOT re-fire the interactive planning
 	// question for every turn that happens to carry a `planning_question` payload —
@@ -72,13 +69,18 @@ export class CleanSlateTranscriptView {
 		const ResizeObserverCtor = dom.getWindow(this.element).ResizeObserver;
 		this.contentResizeObserver = typeof ResizeObserverCtor === 'function'
 			? new ResizeObserverCtor(() => {
-				// Bottom-lock only while the user is following. ResizeObserver catches
-				// delayed markdown/code layout without a continuously-running rAF loop.
-				if (!this.userScrolled) {
-					this.schedulePinnedScroll();
+				// ResizeObserver runs after layout and before paint. Pin here so a
+				// reasoning line wrap, collapse, or delayed markdown layout never
+				// paints at the old scroll position for a frame before catching up.
+				if (!this.isRestoringHistory && !this.userScrolled && !this.smoothScrollInProgress) {
+					this.cancelPinnedScroll();
+					this.applyScrollToBottom();
 				}
 			})
 			: undefined;
+		// The visible viewport changes when the composer grows or a side chat opens,
+		// even if none of the existing message rows change their own dimensions.
+		this.contentResizeObserver?.observe(this.element);
 		this.element.addEventListener('scroll', () => this.handleScroll(), { passive: true });
 		// Only an explicit upward wheel gesture counts as the user leaving the bottom.
 		this.element.addEventListener('wheel', (e: WheelEvent) => {
@@ -98,8 +100,10 @@ export class CleanSlateTranscriptView {
 		this.cancelPendingScroll();
 		this.transcriptRenderer.disposeMarkdownRenders();
 		this.contentResizeObserver?.disconnect();
+		this.contentResizeObserver?.observe(this.element);
 		dom.clearNode(this.element);
 		this.userScrolled = false;
+		this.pendingAutoScrollWrites = 0;
 		this.scrollButtonDismissed = false;
 		this.element.style.overflowAnchor = 'none';
 		this.transportStatusElement = undefined;
@@ -377,7 +381,7 @@ export class CleanSlateTranscriptView {
 			icon.classList.remove('codicon-modifier-spin');
 		});
 
-		const messages = this.element.querySelectorAll('.cleanSlate-chat-message.cleanSlate');
+		const messages = this.element.querySelectorAll<HTMLElement>('.cleanSlate-chat-message.cleanSlate');
 		messages.forEach(msg => {
 			const hasExecutionPlan = !!msg.querySelector('.cleanSlate-message-execution-plan');
 			const hasTranscript = !!msg.querySelector('.cleanSlate-message-transcript');
@@ -385,9 +389,9 @@ export class CleanSlateTranscriptView {
 			if (placeholders.length > 0 && (hasExecutionPlan || hasTranscript)) {
 				placeholders.forEach(placeholder => placeholder.remove());
 			} else if (placeholders.length > 0) {
-				msg.remove();
+				this.removeMessageElement(msg);
 			} else if (!hasExecutionPlan && !hasTranscript && msg.textContent?.trim() === '') {
-				msg.remove();
+				this.removeMessageElement(msg);
 			}
 		});
 	}
@@ -436,6 +440,7 @@ export class CleanSlateTranscriptView {
 	private removeMessageElement(message: HTMLElement): void {
 		const row = message.closest('.cleanSlate-chat-message-row');
 		if (row?.parentElement === this.element) {
+			this.contentResizeObserver?.unobserve(row);
 			row.remove();
 			return;
 		}
@@ -488,7 +493,7 @@ export class CleanSlateTranscriptView {
 	}
 
 	private smoothScrollToBottom(): void {
-		if (!this.canScroll()) {
+		if (!this.canScroll() || dom.getWindow(this.element).matchMedia('(prefers-reduced-motion: reduce)').matches) {
 			this.scrollToBottom(true);
 			return;
 		}
@@ -622,15 +627,16 @@ export class CleanSlateTranscriptView {
 	}
 
 	private updateScrollToBottomButton(): void {
-		const showBottomFade = this.canScroll()
-			&& this.distanceFromBottom() >= CleanSlateTranscriptView.BOTTOM_THRESHOLD_PX;
+		const scrollRange = this.element.scrollHeight - this.element.clientHeight;
+		const awayFromBottom = scrollRange > 1
+			&& scrollRange - this.element.scrollTop >= CleanSlateTranscriptView.BOTTOM_THRESHOLD_PX;
+		const showBottomFade = awayFromBottom;
 		this.bottomEdgeFade.classList.toggle('visible', showBottomFade);
 
 		const show = !this.smoothScrollInProgress
 			&& !this.scrollButtonDismissed
 			&& this.userScrolled
-			&& this.canScroll()
-			&& this.distanceFromBottom() >= CleanSlateTranscriptView.BOTTOM_THRESHOLD_PX;
+			&& awayFromBottom;
 		this.scrollToBottomButton.classList.toggle('visible', show);
 		// Fully remove the control from rendering and hit testing at the bottom.
 		// Opacity alone can leave a stale circular button visible after layout shifts.
@@ -640,7 +646,10 @@ export class CleanSlateTranscriptView {
 	}
 
 	private updateOverflowAnchor(): void {
-		this.element.style.overflowAnchor = this.userScrolled ? 'auto' : 'none';
+		const anchor = this.userScrolled ? 'auto' : 'none';
+		if (this.element.style.overflowAnchor !== anchor) {
+			this.element.style.overflowAnchor = anchor;
+		}
 	}
 
 	private cancelPendingScroll(): void {

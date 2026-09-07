@@ -40,6 +40,7 @@ export class CleanSlateTranscriptFileRenderer {
     private readonly finishDiffExpandedKeys = new Set<string>();
     private readonly fileDiffExpandedBlockIds = new Set<string>();
     private readonly fileDeltaCounterStates = new Map<string, ICleanSlateDeltaCounterState>();
+    private readonly fileDiffRenderStates = new WeakMap<HTMLElement, Pick<InteractionBlock, 'path' | 'added' | 'deleted' | 'beforeContent' | 'afterContent' | 'diff'>>();
     private readonly reviewRenderer = new CleanSlateReviewRenderer();
 
     constructor(
@@ -361,25 +362,29 @@ export class CleanSlateTranscriptFileRenderer {
                     <details class="cleanSlate-activity-disclosure activity-group">
                         <summary class="cleanSlate-activity-summary">
                             <svg class="cleanSlate-activity-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3z" fill="currentColor"/></svg>
-                            <span class="cleanSlate-activity-label">${summaryText}</span>
+                            <span class="cleanSlate-activity-label"></span>
                         </summary>
                         <div class="cleanSlate-activity-content activity-details">
-                            ${detailsHtml}
                         </div>
                     </details>
                 `;
-                const detailKey = details
-                    .map((detail, index) => `${detail}|${detailsMetadata[index]?.path || ''}|${detailsMetadata[index]?.range || ''}|${detailsMetadata[index]?.type || ''}`)
-                    .join('\n');
+                // Keep the disclosure and its animated label mounted as tools
+                // accumulate. Replacing the shell resets the highlight and open state.
+                this.setTrustedHtmlIfChanged(el, html, 'file-activity-shell');
+                const summaryEl = el.querySelector('.cleanSlate-activity-label') as HTMLElement;
+                if (summaryEl.textContent !== summaryText) {
+                    summaryEl.textContent = summaryText;
+                }
+                const contentEl = el.querySelector('.cleanSlate-activity-content') as HTMLElement;
                 const didChange = this.setTrustedHtmlIfChanged(
-                    el,
-                    html,
-                    `activity:${status}:${summaryText}:${detailKey}`
+                    contentEl,
+                    detailsHtml,
+                    detailsHtml
                 );
 
                 // Inject icons and attach listeners
                 if (didChange) {
-                    el.querySelectorAll('.clickable-file').forEach((item, i) => {
+                    contentEl.querySelectorAll('.activity-detail-item').forEach((item, i) => {
                         const meta = detailsMetadata[i];
                         const iconContainer = item.querySelector('.file-icon-container') as HTMLElement;
 
@@ -444,21 +449,6 @@ export class CleanSlateTranscriptFileRenderer {
         const added = block.added || 0;
         const deleted = block.deleted || 0;
         const hasMutationStats = typeof block.added === 'number' || typeof block.deleted === 'number';
-        const suffixParts: string[] = [];
-        if (hasMutationStats) {
-            suffixParts.push(`<span class="stat-added cleanSlate-delta-counter" data-delta-kind="added" data-delta-target="${added}">+${added}</span>`);
-            suffixParts.push(`<span class="stat-deleted cleanSlate-delta-counter" data-delta-kind="deleted" data-delta-target="${deleted}">-${deleted}</span>`);
-        }
-        if (warningCount > 0) {
-            suffixParts.push(`<span class="file-marker-count">!${warningCount}</span>`);
-        }
-
-        const suffixHtml = suffixParts.length > 0
-            ? `<span class="file-range cleanSlate-file-delta">${suffixParts.join(' ')}</span>`
-            : '';
-        const spinnerHtml = block.isStreaming
-            ? '<span class="cleanSlate-file-spinner" style="margin-left: 8px;"></span>'
-            : '';
         const hasDiffPreview = this.hasFileDiffPreview(block);
         const diffKey = this.getFileDiffKey(block);
         if (!hasDiffPreview) {
@@ -466,62 +456,68 @@ export class CleanSlateTranscriptFileRenderer {
             this.disposeFinishDiffEditor(diffKey);
         }
         const isExpanded = hasDiffPreview && this.fileDiffExpandedBlockIds.has(block.id);
-        const chevronHtml = hasDiffPreview
-            ? '<i class="codicon codicon-chevron-right cleanSlate-file-diff-chevron"></i>'
-            : '';
-        const diffHtml = hasDiffPreview
-            ? `<div class="cleanSlate-file-diff-editor" data-file-diff-key="${this.escapeHtml(diffKey)}" data-file-path="${this.escapeHtml(path)}" ${isExpanded ? '' : 'hidden'}></div>`
-            : '';
-        const rowTag = hasDiffPreview ? 'button' : 'div';
-        const rowAttrs = hasDiffPreview
-            ? `type="button" data-file-diff-toggle="${this.escapeHtml(diffKey)}" aria-expanded="${isExpanded ? 'true' : 'false'}"`
-            : '';
-
         const compactHtml = `
-            <div class="cleanSlate-file-mutation-card${hasDiffPreview ? ' has-diff-preview' : ''}${isExpanded ? ' is-open' : ''}" title="${this.escapeHtml(path)}">
-                <${rowTag} class="cleanSlate-file-analyzed cleanSlate-file-mutation-row" ${rowAttrs}>
-                    <span class="analyzed-label">${statusLabel}</span>
+            <div class="cleanSlate-file-mutation-card">
+                <button type="button" class="cleanSlate-file-analyzed cleanSlate-file-mutation-row" disabled>
+                    <span class="analyzed-label"></span>
                     <i class="codicon codicon-file" style="font-size: 12px; margin-right: 4px; opacity: 0.8;"></i>
-                    <span class="file-name" style="cursor: pointer;">${this.escapeHtml(basename)}</span>
-                    ${suffixHtml}
-                    ${spinnerHtml}
-                    ${chevronHtml}
-                </${rowTag}>
-                ${diffHtml}
+                    <span class="file-name"></span>
+                    <span class="file-range cleanSlate-file-delta">
+                        <span class="stat-added cleanSlate-delta-counter" data-delta-kind="added"></span>
+                        <span class="stat-deleted cleanSlate-delta-counter" data-delta-kind="deleted"></span>
+                        <span class="file-marker-count"></span>
+                    </span>
+                    <span class="cleanSlate-file-spinner" style="margin-left: 8px;"></span>
+                    <i class="codicon codicon-chevron-right cleanSlate-file-diff-chevron"></i>
+                </button>
+                <div class="cleanSlate-file-diff-editor" hidden></div>
             </div>
         `;
-        const renderKey = [
-            'file',
-            statusLabel,
-            path,
-            added,
-            deleted,
-            warningCount,
-            block.isStreaming === true,
-            hasDiffPreview,
-            isExpanded,
-            this.getFileDiffContentSignature(block)
-        ].join(':');
-        if (el.dataset.renderKey !== renderKey) {
-            this.disposeFinishDiffEditor(diffKey);
-        }
-        const didChange = this.setTrustedHtmlIfChanged(
-            el,
-            compactHtml,
-            renderKey
-        );
-        if (didChange && hasDiffPreview) {
-            this.setupFileDiffToggle(block, el);
-        }
+        // Streaming counts, status and diff text must not replace the animated
+        // row. Keep the same nodes through Editing -> Modified and update leaves.
+        this.setTrustedHtmlIfChanged(el, compactHtml, 'file-mutation-shell');
+        const card = el.querySelector('.cleanSlate-file-mutation-card') as HTMLElement;
+        const row = el.querySelector('.cleanSlate-file-mutation-row') as HTMLButtonElement;
+        const label = row.querySelector('.analyzed-label') as HTMLElement;
+        const name = row.querySelector('.file-name') as HTMLElement;
+        const delta = row.querySelector('.cleanSlate-file-delta') as HTMLElement;
+        const addedEl = row.querySelector('[data-delta-kind="added"]') as HTMLElement;
+        const deletedEl = row.querySelector('[data-delta-kind="deleted"]') as HTMLElement;
+        const marker = row.querySelector('.file-marker-count') as HTMLElement;
+        const spinner = row.querySelector('.cleanSlate-file-spinner') as HTMLElement;
+        const chevron = row.querySelector('.cleanSlate-file-diff-chevron') as HTMLElement;
+        const diffContainer = el.querySelector('.cleanSlate-file-diff-editor') as HTMLElement;
+
+        card.title = path;
+        card.classList.toggle('has-diff-preview', hasDiffPreview);
+        card.classList.toggle('is-open', isExpanded);
+        row.disabled = !hasDiffPreview;
+        row.dataset.fileDiffToggle = diffKey;
+        row.setAttribute('aria-expanded', String(isExpanded));
+        row.classList.toggle('is-open', isExpanded);
+        if (label.textContent !== statusLabel) label.textContent = statusLabel;
+        if (name.textContent !== basename) name.textContent = basename;
+        delta.style.display = hasMutationStats || warningCount > 0 ? '' : 'none';
+        addedEl.style.display = deletedEl.style.display = hasMutationStats ? '' : 'none';
+        addedEl.dataset.deltaTarget = String(added);
+        deletedEl.dataset.deltaTarget = String(deleted);
+        marker.style.display = warningCount > 0 ? '' : 'none';
+        if (marker.textContent !== `!${warningCount}`) marker.textContent = `!${warningCount}`;
+        spinner.style.display = block.isStreaming ? '' : 'none';
+        chevron.style.display = hasDiffPreview ? '' : 'none';
+        diffContainer.dataset.fileDiffKey = diffKey;
+        diffContainer.dataset.filePath = path;
+        diffContainer.hidden = !isExpanded;
+        this.setupFileDiffToggle(block, el);
         if (hasDiffPreview && isExpanded) {
-            const diffContainer = el.querySelector('.cleanSlate-file-diff-editor') as HTMLElement | null;
-            if (didChange || !diffContainer || diffContainer.childElementCount === 0) {
-                this.mountFileDiffPreview(block, el);
-            }
+            this.mountFileDiffPreview(block, el);
+        } else if (!hasDiffPreview) {
+            this.fileDiffRenderStates.delete(diffContainer);
+            dom.clearNode(diffContainer);
         }
         const shouldAnimateDelta = block.isStreaming === true || isStreaming;
-        this.updateFileDeltaCounter(el, block.id, 'added', added, shouldAnimateDelta, didChange);
-        this.updateFileDeltaCounter(el, block.id, 'deleted', deleted, shouldAnimateDelta, didChange);
+        this.updateFileDeltaCounter(el, block.id, 'added', added, shouldAnimateDelta);
+        this.updateFileDeltaCounter(el, block.id, 'deleted', deleted, shouldAnimateDelta);
     }
 
     private hasFileDiffPreview(block: InteractionBlock): boolean {
@@ -532,21 +528,18 @@ export class CleanSlateTranscriptFileRenderer {
         return `file:${block.id}`;
     }
 
-    private getFileDiffContentSignature(block: InteractionBlock): string {
-        return [
-            typeof block.beforeContent === 'string' ? block.beforeContent.length : 0,
-            typeof block.afterContent === 'string' ? block.afterContent.length : 0,
-            typeof block.diff === 'string' ? block.diff.length : 0
-        ].join('/');
-    }
-
     private setupFileDiffToggle(block: InteractionBlock, el: HTMLElement): void {
         const toggle = el.querySelector('.cleanSlate-file-mutation-row[data-file-diff-toggle]') as HTMLButtonElement | null;
         if (!toggle) {
             return;
         }
 
-        toggle.addEventListener('click', () => {
+        // Replace this handler with the latest block rather than retaining a
+        // closure over the initial streamed diff or registering duplicate listeners.
+        toggle.onclick = () => {
+            if (toggle.disabled) {
+                return;
+            }
             const key = toggle.getAttribute('data-file-diff-toggle') || this.getFileDiffKey(block);
             const container = Array.from(el.querySelectorAll('.cleanSlate-file-diff-editor'))
                 .find(candidate => candidate.getAttribute('data-file-diff-key') === key) as HTMLElement | undefined;
@@ -568,7 +561,7 @@ export class CleanSlateTranscriptFileRenderer {
                 this.disposeFinishDiffEditor(key);
                 dom.clearNode(container);
             }
-        });
+        };
     }
 
     private mountFileDiffPreview(block: InteractionBlock, el: HTMLElement): void {
@@ -576,6 +569,13 @@ export class CleanSlateTranscriptFileRenderer {
         const container = Array.from(el.querySelectorAll('.cleanSlate-file-diff-editor'))
             .find(candidate => candidate.getAttribute('data-file-diff-key') === key) as HTMLElement | undefined;
         if (!container) {
+            return;
+        }
+
+        const previous = this.fileDiffRenderStates.get(container);
+        if (container.childElementCount > 0 && previous
+            && previous.path === block.path && previous.added === block.added && previous.deleted === block.deleted
+            && previous.beforeContent === block.beforeContent && previous.afterContent === block.afterContent && previous.diff === block.diff) {
             return;
         }
 
@@ -590,6 +590,10 @@ export class CleanSlateTranscriptFileRenderer {
             block.beforeContent,
             block.afterContent
         );
+        this.fileDiffRenderStates.set(container, {
+            path: block.path, added: block.added, deleted: block.deleted,
+            beforeContent: block.beforeContent, afterContent: block.afterContent, diff: block.diff
+        });
     }
 
     private hasReviewDiffContent(beforeContent: unknown, afterContent: unknown, diff: unknown): boolean {
@@ -652,7 +656,7 @@ export class CleanSlateTranscriptFileRenderer {
             .length;
     }
 
-    private updateFileDeltaCounter(el: HTMLElement, blockId: string, kind: CleanSlateDeltaCounterKind, targetValue: number, isStreaming: boolean, forceRestart = false): void {
+    private updateFileDeltaCounter(el: HTMLElement, blockId: string, kind: CleanSlateDeltaCounterKind, targetValue: number, isStreaming: boolean): void {
         const node = el.querySelector(`[data-delta-kind="${kind}"]`) as HTMLElement | null;
         const key = this.getFileDeltaCounterKey(blockId, kind);
         const previous = this.fileDeltaCounterStates.get(key);
@@ -664,12 +668,19 @@ export class CleanSlateTranscriptFileRenderer {
             return;
         }
 
+        const win = dom.getWindow(el);
+        if (win.matchMedia('(prefers-reduced-motion: reduce)').matches || el.closest('.monaco-reduce-motion')) {
+            this.clearFileDeltaCounterState(key, el);
+            node.textContent = `${prefix}${target}`;
+            return;
+        }
+
         if (!isStreaming && !previous) {
             node.textContent = `${prefix}${target}`;
             return;
         }
 
-        if (!forceRestart && previous?.target === target) {
+        if (previous?.target === target) {
             node.textContent = `${prefix}${previous.displayed}`;
             if (previous.frame !== undefined) {
                 if (!isStreaming) {
@@ -684,7 +695,6 @@ export class CleanSlateTranscriptFileRenderer {
             return;
         }
 
-        const win = dom.getWindow(el);
         if (previous?.frame !== undefined) {
             (previous.cancelFrame ?? win.cancelAnimationFrame.bind(win))(previous.frame);
         }
@@ -708,7 +718,7 @@ export class CleanSlateTranscriptFileRenderer {
             return;
         }
 
-        const duration = Math.min(1400, Math.max(420, distance * 20));
+        const duration = Math.min(260, 180 + distance * 2);
         const startedAt = win.performance.now();
         const step = (now: number): void => {
             const progress = Math.min(1, (now - startedAt) / duration);

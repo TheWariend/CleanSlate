@@ -157,7 +157,7 @@ try {
 		if (!entering || getComputedStyle(entering).animationName !== 'cleanSlateBlockIn') { throw new Error('First live block skipped its entrance animation'); }
 		await new Promise(resolve => setTimeout(resolve, 250));
 		restoredView.restore([submitted, ...liveCheckpoint(liveReasoning)], undefined, true);
-		if (container.querySelector('.cleanSlate-timeline-block') !== entering || entering.classList.contains('is-entering')) { throw new Error('Streaming update restarted the block entrance'); }
+		if (container.querySelector('.cleanSlate-timeline-block') !== entering || entering.classList.contains('is-entering')) { throw new Error(`Streaming update restarted the block entrance: ${JSON.stringify({ sameNode: container.querySelector('.cleanSlate-timeline-block') === entering, animations: entering.getAnimations().map(a => ({ name: a.animationName, state: a.playState, time: a.currentTime })) })}`); }
 		restoredView.clear();
 		restoredView.restore(liveCheckpoint(liveReasoning), undefined, true);
 		if (container.querySelector('.is-entering')) { throw new Error('Reopening a chat replayed live entry animations'); }

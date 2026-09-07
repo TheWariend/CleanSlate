@@ -112,12 +112,18 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             @keyframes cleanSlateBlockIn {
-                from { opacity: 0; transform: translateY(4px); }
-                to { opacity: 1; transform: none; }
+                from { opacity: 0; }
+                to { opacity: 1; }
             }
 
             .cleanSlate-timeline-block.is-entering {
                 animation: cleanSlateBlockIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+            }
+
+            /* Each committed markdown fragment has its own renderer root. Keep
+             * paragraph spacing when the tail moves into that stable prefix. */
+            .cleanSlate-stream-block {
+                margin-bottom: 10px;
             }
 
             .cleanSlate-code-widget {
@@ -214,17 +220,16 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             @keyframes cleanSlateShimmer {
-                from { background-position: 200% 0; }
-                to { background-position: -200% 0; }
+                from { background-position: 100% 0; }
+                to { background-position: 0% 0; }
             }
 
             /*
              * Reasoning "Thinking…" sheen. A dimmed base (descriptionForeground at
              * ~58% via color-mix) gives the moving highlight something to sweep
              * against, so it reads as a soft rolling sheen rather than a harsh
-             * bright stripe over already-full-brightness text. will-change promotes
-             * the label to its own paint layer, keeping the clip:text repaint off
-             * the shared layer during streaming.
+             * bright stripe over already-full-brightness text. Keep the small
+             * label on its own layer so streaming doesn't repaint a shared layer.
              */
             .cleanSlate-reasoning-block.is-streaming .cleanSlate-reasoning-label {
                 background: linear-gradient(
@@ -235,14 +240,14 @@ export const CLEANSLATE_CHAT_STYLES = `
                     color-mix(in srgb, var(--vscode-descriptionForeground) 58%, transparent) 60%,
                     color-mix(in srgb, var(--vscode-descriptionForeground) 58%, transparent) 100%
                 );
-                background-size: 220% 100%;
-                background-position: 200% 0;
+                background-size: 280% 100%;
+                background-position: 100% 0;
                 -webkit-background-clip: text;
                 background-clip: text;
                 -webkit-text-fill-color: transparent;
                 color: transparent;
-                will-change: background-position;
-                animation: cleanSlateShimmer 2.4s linear infinite;
+                will-change: transform;
+                animation: cleanSlateShimmer 2.2s linear infinite;
             }
 
             @media (prefers-reduced-motion: reduce) {
@@ -255,7 +260,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 }
             }
 
-            .cleanSlate-reasoning-block > .cleanSlate-reasoning-body.cleanSlate-message-content {
+            .cleanSlate-reasoning-block .cleanSlate-reasoning-body.cleanSlate-message-content {
                 margin-top: 8px;
                 margin-bottom: 0;
                 font-size: 14px;
@@ -269,28 +274,32 @@ export const CLEANSLATE_CHAT_STYLES = `
                 overflow: visible;
             }
 
-            /*
-             * While the thought is still streaming, soften the bottom edge so each
-             * incoming line rises up through a gentle fade instead of hard-popping
-             * against the clip boundary as the box auto-scrolls to the newest text.
-             * Only the bottom fades — the top stays crisp so a short thought's first
-             * line is never dimmed. The mask is dropped once streaming ends so the
-             * settled "Thought" reads at full contrast.
-             */
-            .cleanSlate-reasoning-block.is-streaming .cleanSlate-reasoning-body {
-                -webkit-mask-image: none;
-                mask-image: none;
+            .cleanSlate-reasoning-body-viewport {
+                display: grid;
+                grid-template-rows: 1fr;
+                opacity: 1;
+                transition: grid-template-rows 200ms cubic-bezier(0.19, 1, 0.22, 1), opacity 150ms ease;
+            }
+
+            .cleanSlate-reasoning-body-clip {
+                min-height: 0;
+                overflow: hidden;
+            }
+
+            .cleanSlate-reasoning-block.is-collapsed .cleanSlate-reasoning-body-viewport {
+                grid-template-rows: 0fr;
+                opacity: 0;
             }
 
             @media (prefers-reduced-motion: reduce) {
-                .cleanSlate-reasoning-block.is-streaming .cleanSlate-reasoning-body {
-                    -webkit-mask-image: none;
-                    mask-image: none;
+                .cleanSlate-reasoning-body-viewport,
+                .cleanSlate-reasoning-chevron {
+                    transition: none;
                 }
             }
 
-            .cleanSlate-reasoning-block.is-collapsed .cleanSlate-reasoning-body {
-                display: none;
+            .is-restoring-history .cleanSlate-reasoning-body-viewport {
+                transition: none;
             }
 
             .cleanSlate-file-analyzed {
@@ -308,10 +317,10 @@ export const CLEANSLATE_CHAT_STYLES = `
                 width: 100%;
                 min-width: 0;
                 border-radius: 8px;
+                border: 1px solid transparent;
             }
 
             .cleanSlate-file-mutation-card.has-diff-preview {
-                border: 1px solid transparent;
                 overflow: hidden;
             }
 
@@ -328,11 +337,15 @@ export const CLEANSLATE_CHAT_STYLES = `
                 font: inherit;
             }
 
-            button.cleanSlate-file-mutation-row {
+            button.cleanSlate-file-mutation-row:not(:disabled) {
                 cursor: pointer;
             }
 
-            button.cleanSlate-file-mutation-row:hover {
+            button.cleanSlate-file-mutation-row:disabled {
+                cursor: default;
+            }
+
+            button.cleanSlate-file-mutation-row:not(:disabled):hover {
                 background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
             }
 
@@ -3469,19 +3482,22 @@ export const CLEANSLATE_CHAT_STYLES = `
                     color-mix(in srgb, var(--vscode-descriptionForeground) 72%, transparent) 100%
                 );
                 background-size: 280% 100%;
-                background-position: 120% 0;
+                background-position: 100% 0;
                 -webkit-background-clip: text;
                 background-clip: text;
                 -webkit-text-fill-color: transparent;
-                animation: cleanSlate-working-sheen 2.8s ease-in-out infinite alternate;
+                will-change: transform;
+                animation: cleanSlate-working-sheen 2.2s linear infinite;
             }
 
             @keyframes cleanSlate-working-sheen {
+                /* One constant-speed pass, fully outside the letters at both
+                 * ends. Reversing/easing here made the light stall and snap back. */
                 from {
-                    background-position: 120% 0;
+                    background-position: 100% 0;
                 }
                 to {
-                    background-position: -120% 0;
+                    background-position: 0% 0;
                 }
             }
 
@@ -3494,6 +3510,19 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             @media (prefers-reduced-motion: reduce) {
+                .cleanSlate-working-label,
+                .cleanSlate-timeline-block.is-active .cleanSlate-activity-label,
+                .cleanSlate-timeline-block.is-active .cleanSlate-file-analyzed .analyzed-label,
+                .cleanSlate-timeline-block.is-active .cleanSlate-file-analyzed .file-name,
+                .cleanSlate-timeline-block.is-active .cleanSlate-tool-activity-label,
+                .cleanSlate-timeline-block.is-active .cleanSlate-tool-activity-status,
+                .cleanSlate-timeline-block.is-active .cleanSlate-web-activity-text,
+                .cleanSlate-timeline-block.is-active .cleanSlate-browser-action {
+                    background: none;
+                    -webkit-text-fill-color: currentColor;
+                    will-change: auto;
+                }
+
                 .cleanSlate-working-label,
                 .cleanSlate-timeline-block,
                 .cleanSlate-timeline-block.is-active .cleanSlate-activity-label,
@@ -5420,15 +5449,13 @@ export const CLEANSLATE_CHAT_STYLES = `
                 font-size: 0.94em;
             }
 
-            /* Mid-run narration: any assistant text block with a later one after
-               it — the last text block is the answer and stays full weight.
-               Opacity and margins transition in place, so the timeline compacts
-               smoothly as new blocks land instead of jumping. */
+            /* Older narration dims without moving any text the user is reading. */
+            .cleanSlate-timeline-block.type-assistant_text {
+                transition: opacity 200ms ease;
+            }
+
             .cleanSlate-timeline-block.type-assistant_text:has(~ .cleanSlate-timeline-block.type-assistant_text) {
                 opacity: 0.66;
-                margin-top: 1px !important;
-                margin-bottom: 1px !important;
-                transition: opacity 0.3s ease, margin 0.2s ease;
             }
 
             /* Answer heading rhythm: modest scale, tight to the content it
