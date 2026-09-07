@@ -12,7 +12,7 @@ import type { CleanSlateEditMode } from '@cleanslate/sdk/protocol/cleanSlateAI.j
 import { CleanSlateChatSettingsProvider } from '../providers/cleanSlateChatSettingsProvider.js';
 
 /**
- * Dropup listing the approval modes: Manual, Accept edits and Auto.
+ * Dropup listing approval modes supported by hosted execution.
  * Selecting an option persists it through the settings provider.
  */
 export class CleanSlateEditModeSelectorRenderer {
@@ -38,7 +38,10 @@ export class CleanSlateEditModeSelectorRenderer {
     }
 
     private show(container: HTMLElement, anchor: HTMLElement): void {
-        const currentMode = this.settingsProvider.getState().editMode;
+        const configuredMode = this.settingsProvider.getState().editMode;
+        // Hosted file edits do not yet participate in the editor pending-edit service.
+        // Preserve legacy Manual command approvals without advertising file review.
+        const currentMode = configuredMode === 'manual' ? 'accept-edits' : configuredMode;
         const overlay = dom.append(container, dom.$('.cleanSlate-mode-selector-overlay.cleanSlate-edit-mode-overlay'));
         this.overlay = overlay;
 
@@ -46,7 +49,7 @@ export class CleanSlateEditModeSelectorRenderer {
         const heading = dom.append(header, dom.$('.edit-mode-heading'));
         dom.append(heading, dom.$('span')).textContent = 'Approval mode';
 
-        for (const mode of CLEANSLATE_EDIT_MODES) {
+        for (const mode of CLEANSLATE_EDIT_MODES.filter(mode => mode !== 'manual')) {
             const option = dom.append(overlay, dom.$('button.edit-mode-option')) as HTMLButtonElement;
             option.type = 'button';
             option.classList.toggle('selected', mode === currentMode);

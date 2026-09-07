@@ -199,16 +199,13 @@ export class CleanSlateComposerView {
 	}
 
 	updateEditMode(mode: CleanSlateEditMode): void {
-		const acceptEdits = mode === 'accept-edits';
 		const auto = mode === 'auto';
-		this.editModeChipLabel.textContent = formatCleanSlateEditMode(mode);
-		this.editModeChip.classList.toggle('active', mode !== 'manual');
-		this.editModeChip.setAttribute('aria-pressed', mode !== 'manual' ? 'true' : 'false');
+		this.editModeChipLabel.textContent = formatCleanSlateEditMode(mode === 'manual' ? 'accept-edits' : mode);
+		this.editModeChip.classList.toggle('active', auto);
+		this.editModeChip.setAttribute('aria-pressed', auto ? 'true' : 'false');
 		this.editModeChip.title = auto
 			? 'File edits and commands are applied automatically. Click to change.'
-			: acceptEdits
-				? 'File edits are applied automatically, commands still wait for approval. Click to change.'
-				: 'Every file edit and command waits for your approval. Click to change.';
+			: 'File edits are applied automatically, commands still wait for approval. Click to change.';
 	}
 
 	updateContextWindowUsage(usage: ICleanSlateContextWindowUsage): void {
