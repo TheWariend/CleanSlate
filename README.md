@@ -73,10 +73,6 @@ See [packages/cleanslate-sdk](packages/cleanslate-sdk).
 | [`@cleanslate/cli`](https://www.npmjs.com/package/@cleanslate/cli) | `1.0.8` · ![npm](https://img.shields.io/npm/v/@cleanslate/cli?style=flat-square&label=npm) |
 | [`@cleanslate/sdk`](https://www.npmjs.com/package/@cleanslate/sdk) | `1.0.8` · ![npm](https://img.shields.io/npm/v/@cleanslate/sdk?style=flat-square&label=npm) |
 
-> [!NOTE]
-> The CLI and SDK follow semantic versioning. Breaking changes require a major
-> version release.
-
 ### Building from source
 
 Requires Node.js 22.21.1 (see [`.nvmrc`](vscode-fork/.nvmrc)).
