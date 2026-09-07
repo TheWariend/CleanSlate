@@ -1059,11 +1059,24 @@ export interface ICleanSlateRuntimeConfig {
 }
 
 // --- Main Process Service (IPC Proxy) ---
+export interface ICleanSlateManagedTokenRefreshResult {
+    token: string;
+    expires_at?: string;
+    expires_in?: string | number;
+}
+
+export interface ICleanSlateManagedTokenRefreshEvent extends ICleanSlateManagedTokenRefreshResult {
+    previousToken: string;
+}
+
 export interface ICleanSlateMainService {
     readonly _serviceBrand: undefined;
     readonly onDidPublishThreadSession: Subscribable<ICleanSlateThreadSessionUpdate>;
     /** A hosted runtime rotated the managed credential and the owning UI must persist it. */
-    readonly onDidRefreshManagedToken: Subscribable<string>;
+    readonly onDidRefreshManagedToken: Subscribable<ICleanSlateManagedTokenRefreshEvent>;
+
+    /** Share token rotation with every IDE window and hosted agent. */
+    refreshCleanSlateManagedToken?(rejectedToken: string): Promise<ICleanSlateManagedTokenRefreshResult>;
 
     getRuntimeConfig(): Promise<ICleanSlateRuntimeConfig>;
 

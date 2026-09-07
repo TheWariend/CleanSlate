@@ -28,6 +28,7 @@ import {
 } from '../protocol/cleanSlateAI.js';
 import { getCleanSlateContextDefaults } from '../protocol/cleanSlateModelCapabilities.js';
 import { CleanSlateService } from '../protocol/cleanSlateService.js';
+import { CleanSlateManagedTokenCoordinator, type ICleanSlateManagedTokenRefreshResponse } from '../protocol/cleanSlateManagedTokenCoordinator.js';
 import { CleanSlateTaskSessionService, ICleanSlateTaskSessionSnapshot } from '../services/cleanSlateTaskSessionService.js';
 import { ICleanSlateThreadMessage } from '../services/cleanSlateThreadService.js';
 import { CleanSlateTaskKind, CleanSlateWorkspaceShape } from '../services/cleanSlateTaskState.js';
@@ -65,6 +66,8 @@ export interface ICleanSlateNodeAgentRuntimeOptions {
 	/** Desktop hosts present artifacts in their own views instead of an external viewer. */
 	onArtifact?: (artifact: { id: string; type: string; content: string; metadata?: any }) => void;
 	onManagedTokenRefresh?: (token: string) => void | Promise<void>;
+	/** Shared authority for hosted conversations, workers and account settings. */
+	managedTokenCoordinator?: CleanSlateManagedTokenCoordinator;
 	/** Surface-specific recovery copy. CLI hosts default to the setup command. */
 	managedSessionExpiredMessage?: string;
 	fetcher?: typeof fetch;
@@ -103,34 +106,38 @@ class NodeConfigurationService implements ICleanSlateConfigurationService {
 	declare readonly _serviceBrand: undefined;
 	readonly onDidChangeConfiguration = Event.None;
 	private managedAccount: ICleanSlateManagedAccount | undefined;
-	private managedTokenFromHost: string | undefined;
+	readonly managedTokenCoordinator: CleanSlateManagedTokenCoordinator;
 
 	constructor(
 		private configuration: ICleanSlateConfiguration,
 		private readonly mainService: ICleanSlateMainService,
 		private readonly onManagedTokenRefresh?: (token: string) => void | Promise<void>,
 		private readonly managedSessionExpiredMessage = 'Your CleanSlate session expired. Run cleanslate --setup to sign in again.',
-		private readonly fetcher: typeof fetch = fetch
+		private readonly fetcher: typeof fetch = fetch,
+		managedTokenCoordinator?: CleanSlateManagedTokenCoordinator
 	) {
-		this.managedTokenFromHost = configuration.providers?.cleanslate?.apiKey;
+		this.managedTokenCoordinator = managedTokenCoordinator ?? new CleanSlateManagedTokenCoordinator(token => this.rotateManagedToken(token));
 	}
 
 	getConfiguration(): ICleanSlateConfiguration {
+		const token = this.configuration.providers?.cleanslate?.apiKey;
+		const resolved = token ? this.managedTokenCoordinator.resolve(token) : token;
+		if (resolved !== token) {
+			this.configuration = {
+				...this.configuration,
+				providers: {
+					...this.configuration.providers,
+					cleanslate: { ...this.configuration.providers?.cleanslate, apiKey: resolved }
+				}
+			};
+		}
 		return this.configuration;
 	}
 	getResolvedConfiguration(): Promise<ICleanSlateConfiguration> {
-		return Promise.resolve(this.configuration);
+		return Promise.resolve(this.getConfiguration());
 	}
 	updateConfiguration(config: Partial<ICleanSlateConfiguration>): Promise<void> {
 		const incomingManagedToken = config.providers?.cleanslate?.apiKey;
-		const currentManagedToken = this.configuration.providers?.cleanslate?.apiKey;
-		const preserveRefreshedToken = !!incomingManagedToken
-			&& incomingManagedToken === this.managedTokenFromHost
-			&& !!currentManagedToken
-			&& currentManagedToken !== incomingManagedToken;
-		if (incomingManagedToken && incomingManagedToken !== this.managedTokenFromHost) {
-			this.managedTokenFromHost = incomingManagedToken;
-		}
 		this.configuration = {
 			...this.configuration,
 			...config,
@@ -138,20 +145,25 @@ class NodeConfigurationService implements ICleanSlateConfigurationService {
 				...config.providers,
 				cleanslate: config.providers.cleanslate ? {
 					...config.providers.cleanslate,
-					apiKey: preserveRefreshedToken ? currentManagedToken : incomingManagedToken
+					apiKey: incomingManagedToken ? this.managedTokenCoordinator.resolve(incomingManagedToken) : incomingManagedToken
 				} : config.providers.cleanslate
 			} : this.configuration.providers
 		};
 		return Promise.resolve();
 	}
 	async refreshManagedToken(rejectedToken?: string): Promise<string> {
-		const current = this.configuration.providers?.cleanslate?.apiKey;
+		const current = this.getConfiguration().providers?.cleanslate?.apiKey;
 		if (!current) {
 			throw new Error('Sign in to CleanSlate again.');
 		}
 		if (rejectedToken && current !== rejectedToken) {
 			return current;
 		}
+		const response = await this.managedTokenCoordinator.refresh(current);
+		return response.token;
+	}
+
+	private async rotateManagedToken(current: string): Promise<ICleanSlateManagedTokenRefreshResponse> {
 		const runtimeConfig = await this.mainService.getRuntimeConfig();
 		const response = await this.fetcher(`${runtimeConfig.apiBaseUrl}/auth/refresh`, {
 			method: 'POST',
@@ -165,18 +177,15 @@ class NodeConfigurationService implements ICleanSlateConfigurationService {
 			throw new Error(body?.message || `Unable to refresh the CleanSlate session (${response.status}).`);
 		}
 		const token = body.token;
-		this.configuration = {
-			...this.configuration,
-			providers: {
-				...this.configuration.providers,
-				cleanslate: { ...this.configuration.providers?.cleanslate, apiKey: token }
-			}
-		};
 		await this.onManagedTokenRefresh?.(token);
-		return token;
+		return {
+			token,
+			expires_at: typeof body.expires_at === 'string' ? body.expires_at : undefined,
+			expires_in: typeof body.expires_in === 'number' || typeof body.expires_in === 'string' ? body.expires_in : undefined
+		};
 	}
 	async getManagedEntitlements(): Promise<ICleanSlateManagedEntitlements> {
-		let token = this.configuration.providers?.cleanslate?.apiKey;
+		let token = this.getConfiguration().providers?.cleanslate?.apiKey;
 		if (!token) {
 			throw new Error('Sign in to CleanSlate to view your managed models.');
 		}
@@ -235,6 +244,7 @@ export class CleanSlateNodeAgentRuntime {
 	private readonly rootPath: string;
 	private readonly mainService: ICleanSlateMainService;
 	private readonly configService: NodeConfigurationService;
+	private readonly managedTokenCoordinator: CleanSlateManagedTokenCoordinator;
 	private readonly headlessRuntime: CleanSlateHeadlessRuntime;
 	private readonly queryRunner: CleanSlateQueryRunner;
 	private readonly cleanSlateService: CleanSlateService;
@@ -253,7 +263,8 @@ export class CleanSlateNodeAgentRuntime {
 		this.rootPath = path.resolve(options.rootPath);
 		this.sessionId = options.sessionId?.trim() || `cli-${process.pid}-${Date.now()}`;
 		this.mainService = options.mainService ?? new NodeCleanSlateMainService(this.rootPath);
-		this.configService = new NodeConfigurationService(options.configuration, this.mainService, options.onManagedTokenRefresh, options.managedSessionExpiredMessage, options.fetcher);
+		this.configService = new NodeConfigurationService(options.configuration, this.mainService, options.onManagedTokenRefresh, options.managedSessionExpiredMessage, options.fetcher, options.managedTokenCoordinator);
+		this.managedTokenCoordinator = this.configService.managedTokenCoordinator;
 		const cleanSlateService = new CleanSlateService(this.configService, this.mainService, createLogger(options.logger));
 		this.cleanSlateService = cleanSlateService;
 		this.agentCoordinator = new CleanSlateAgentCoordinator(
@@ -329,9 +340,9 @@ export class CleanSlateNodeAgentRuntime {
 	}
 
 	async configureRun(configuration: ICleanSlateConfiguration, agentDefinition?: AgentDefinition): Promise<void> {
-		Object.assign(this.options.configuration, configuration);
 		this.options.agentDefinition = agentDefinition;
 		await this.configService.updateConfiguration(configuration);
+		this.options.configuration = this.configService.getConfiguration();
 	}
 
 	async *plan(task: string, signal?: AbortSignal): AsyncIterable<CleanSlateStreamPart> {
@@ -446,6 +457,8 @@ export class CleanSlateNodeAgentRuntime {
 		const parentAdditionalContext = this.options.additionalContext;
 		const runtime = new CleanSlateNodeAgentRuntime({
 			...this.options,
+			configuration: this.configService.getConfiguration(),
+			managedTokenCoordinator: this.managedTokenCoordinator,
 			sessionId: id,
 			disposeBrowserAutomationService: !this.options.browserAutomationService,
 			additionalContext: async task => {
@@ -537,6 +550,9 @@ export class CleanSlateNodeAgentRuntime {
 			void (context.browserAutomationService as { dispose?: () => Promise<void> }).dispose?.();
 		}
 		void (context.mcpClientService as { dispose?: () => Promise<void> }).dispose?.();
+		if (!this.options.managedTokenCoordinator) {
+			this.managedTokenCoordinator.clear();
+		}
 	}
 
 	listChildAgents() {
@@ -559,6 +575,8 @@ export class CleanSlateNodeAgentRuntime {
 		}
 		const child = new CleanSlateNodeAgentRuntime({
 			...this.options,
+			configuration: this.configService.getConfiguration(),
+			managedTokenCoordinator: this.managedTokenCoordinator,
 			sessionId: agentId,
 			workerDepth: workerDepth + 1,
 			disposeBrowserAutomationService: !this.options.browserAutomationService,

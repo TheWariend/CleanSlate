@@ -10,6 +10,40 @@ import { CleanSlateNodeAgentRuntime, createNodeProviderConfiguration } from '../
 import { getCleanSlateContextDefaults } from '../protocol/cleanSlateModelCapabilities.js';
 
 describe('CleanSlateNodeAgentRuntime', () => {
+	test('shares rotated credentials with simultaneous requests and existing/new side chats', async () => {
+		let refreshes = 0;
+		let valid = 'fresh-1';
+		const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+			const token = new Headers(init?.headers).get('Authorization')?.slice(7);
+			if (String(input).endsWith('/auth/refresh')) {
+				refreshes++;
+				await new Promise(resolve => setTimeout(resolve, 10));
+				if (token === 'old' && refreshes === 1 || token === 'fresh-1' && valid === 'fresh-2') {
+					return Response.json({ token: valid });
+				}
+				return Response.json({ message: 'revoked' }, { status: 401 });
+			}
+			return token === valid ? Response.json({ data: { models: [{ id: 'managed', name: 'Managed' }] } })
+				: Response.json({ message: 'expired' }, { status: 401 });
+		}) as typeof fetch;
+		const configuration = createNodeProviderConfiguration({ provider: 'cleanslate', model: 'managed', apiKey: 'old' });
+		const runtime = new CleanSlateNodeAgentRuntime({ rootPath: process.cwd(), configuration, fetcher });
+		try {
+			const existing = runtime.createSideChat({ id: 'before' }).runtime;
+			const results = await Promise.all([runtime.getModels(), runtime.getModels(), existing.getModels()]);
+			assert.deepEqual(results, [['managed'], ['managed'], ['managed']]);
+			assert.equal(refreshes, 1);
+			const later = runtime.createSideChat({ id: 'after' }).runtime;
+			assert.deepEqual(await later.getModels(), ['managed']);
+			valid = 'fresh-2';
+			await Promise.all([runtime.getModels(), existing.getModels(), later.getModels()]);
+			assert.equal(refreshes, 2);
+			await runtime.configureRun(configuration);
+			assert.deepEqual(await runtime.getModels(), ['managed']);
+			assert.equal(refreshes, 2, 'stale host configuration must resolve the whole rotation chain');
+		} finally { runtime.dispose(); }
+	});
+
 	test('uses the same model context defaults as the IDE configuration', () => {
 		const configuration = createNodeProviderConfiguration({
 			provider: 'cleanslate',
