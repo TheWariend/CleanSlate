@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -174,7 +174,7 @@ async function stopApp(child) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const appPath = path.resolve(args.app ?? '');
+const sourceAppPath = path.resolve(args.app ?? '');
 
 if (process.platform !== 'darwin') {
 	throw new Error('The packaged macOS app smoke test must run on macOS.');
@@ -183,6 +183,10 @@ if (process.platform !== 'darwin') {
 if (!args.app) {
 	throw new Error('Usage: node smoke-packaged-app.mjs --app /path/to/CleanSlate.app');
 }
+
+const isolatedRoot = await mkdtemp(path.join(os.tmpdir(), 'cleanslate-packaged-app-'));
+const appPath = path.join(isolatedRoot, path.basename(sourceAppPath));
+await cp(sourceAppPath, appPath, { recursive: true, verbatimSymlinks: true });
 
 const infoPlist = await readFile(path.join(appPath, 'Contents', 'Info.plist'), 'utf8');
 const executableName = /<key>CFBundleExecutable<\/key>\s*<string>([^<]+)<\/string>/.exec(infoPlist)?.[1];
@@ -227,4 +231,5 @@ try {
 } finally {
 	await stopApp(child);
 	await rm(userDataPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+	await rm(isolatedRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
