@@ -50,6 +50,28 @@ service.openAICompatibleChatStream = () => {
 };
 const timeout = setTimeout(() => { console.error('Hosted IPC test timed out'); process.exit(1); }, 15000);
 try {
+	// Settings windows and detached runtimes share the same rotating credential.
+	let rotations = 0;
+	service.proxyRequest = async () => {
+		rotations++;
+		await new Promise(resolve => setTimeout(resolve, 10));
+		return { res: { statusCode: 200, headers: {} }, data: JSON.stringify({ token: `rotated-${rotations}`, expires_in: 900 }) };
+	};
+	const refreshEvents = [];
+	const authSubscription = newClient().onDidRefreshManagedToken(event => refreshEvents.push(event));
+	const authResults = await Promise.all([
+		newClient().refreshCleanSlateManagedToken('old-token'),
+		newClient().refreshCleanSlateManagedToken('old-token'),
+		service.managedTokens.refresh('old-token')
+	]);
+	assert.equal(rotations, 1);
+	assert.deepEqual(authResults.map(result => result.token), ['rotated-1', 'rotated-1', 'rotated-1']);
+	assert.deepEqual(refreshEvents, [{ previousToken: 'old-token', token: 'rotated-1', expires_at: undefined, expires_in: 900 }]);
+	await service.managedTokens.refresh('rotated-1');
+	assert.equal((await newClient().refreshCleanSlateManagedToken('old-token')).token, 'rotated-2');
+	assert.equal(rotations, 2);
+	authSubscription.dispose();
+	console.log('Passed: shared Settings/host refresh through IPC, one rotation, expiry event and stale-token recovery.');
 	const before = newClient();
 	let oldViewEvents = 0;
 	const oldSubscription = before.onDidPublishThreadSession(() => oldViewEvents++);

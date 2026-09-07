@@ -76,6 +76,8 @@ export class CleanSlateConfigurationService implements ICleanSlateConfigurationS
     private readonly initialization: Promise<void>;
     private secretsLoadPromise: Promise<void> | undefined;
     private managedTokenRefresh: Promise<string> | undefined;
+    private managedTokenRevision = 0;
+    private secretsLoadRevision = 0;
 
     constructor(
         @IConfigurationService private readonly configurationService: IConfigurationService,
@@ -86,17 +88,23 @@ export class CleanSlateConfigurationService implements ICleanSlateConfigurationS
     ) {
         this.initialization = this.migrateLegacySettingsConfiguration();
         this.secretsLoadPromise = this.loadSecrets();
-        this.cleanSlateMainService.onDidRefreshManagedToken(token => {
-            const managedToken = token.trim();
-            if (!managedToken || managedToken === this.secretCache.managedToken) {
-                return;
-            }
-            // Update synchronously so a new submission cannot resend the token
-            // that the hosted runtime has just rotated.
-            this.secretCache.managedToken = managedToken;
-            void this.secretStorageService.set(SECRET_KEYS.managedToken, managedToken).then(undefined, error => {
-                this.logger.error(`Unable to persist the refreshed CleanSlate session: ${String(error)}`);
-            });
+        this.cleanSlateMainService.onDidRefreshManagedToken(event => {
+            const accept = () => {
+                const managedToken = event.token.trim();
+                // A delayed refresh from an old run must not undo sign-out or
+                // replace a different account's credentials in another window.
+                if (!managedToken || this.secretCache.managedToken !== event.previousToken) {
+                    return;
+                }
+                this.managedTokenRevision++;
+                this.secretCache.managedToken = managedToken;
+                this.updateManagedAccountExpiry(event);
+                void this.secretStorageService.set(SECRET_KEYS.managedToken, managedToken).then(undefined, error => {
+                    this.logger.error(`Unable to persist the refreshed CleanSlate session: ${String(error)}`);
+                });
+            };
+            if (this.secretCache.managedToken) { accept(); }
+            else { void this.ensureSecretsLoaded().then(accept); }
         });
         this.secretStorageService.onDidChangeSecret(key => {
             if (key === SECRET_KEYS.managedToken) {
@@ -155,24 +163,34 @@ export class CleanSlateConfigurationService implements ICleanSlateConfigurationS
             return token;
         }
 
-        const runtimeConfig = await this.cleanSlateMainService.getRuntimeConfig();
-        const response = await this.cleanSlateMainService.proxyRequest({
-            url: `${runtimeConfig.apiBaseUrl}/auth/refresh`,
-            type: 'POST',
-            headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }
-        }, CancellationToken.None);
-        const status = response.res.statusCode ?? 0;
-        const body = this.parseJson(response.data);
-        if (status === 401) {
-            throw new Error('Your CleanSlate session expired. Sign in again.');
-        }
-        if (status < 200 || status >= 300) {
-            throw new Error(body?.message || `Unable to refresh the CleanSlate session (${status}). Try again.`);
+        let body: any;
+        if (this.cleanSlateMainService.refreshCleanSlateManagedToken) {
+            body = await this.cleanSlateMainService.refreshCleanSlateManagedToken(token);
+        } else {
+            const runtimeConfig = await this.cleanSlateMainService.getRuntimeConfig();
+            const response = await this.cleanSlateMainService.proxyRequest({
+                url: `${runtimeConfig.apiBaseUrl}/auth/refresh`,
+                type: 'POST',
+                headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }
+            }, CancellationToken.None);
+            const status = response.res.statusCode ?? 0;
+            body = this.parseJson(response.data);
+            if (status === 401) {
+                throw new Error('Your CleanSlate session expired. Sign in again.');
+            }
+            if (status < 200 || status >= 300) {
+                throw new Error(body?.message || `Unable to refresh the CleanSlate session (${status}). Try again.`);
+            }
         }
         if (typeof body?.token !== 'string' || !body.token) {
             throw new Error('CleanSlate received an invalid session-refresh response. Try again.');
         }
 
+        await this.ensureSecretsLoaded();
+        const current = this.secretCache.managedToken;
+        if (!current) { throw new Error('Sign in to CleanSlate again.'); }
+        if (current !== token && current !== body.token) { return current; }
+        this.managedTokenRevision++;
         await this.writeSecretFromValue('managedToken', body.token);
         this.updateManagedAccountExpiry(body);
         this._onDidChangeConfiguration.fire(this.normalizeConfiguration(this.readStoredConfiguration(), this.secretCache));
@@ -711,12 +729,18 @@ export class CleanSlateConfigurationService implements ICleanSlateConfigurationS
     }
 
     private async loadSecrets(): Promise<void> {
+        const loadRevision = ++this.secretsLoadRevision;
+        const managedTokenRevision = this.managedTokenRevision;
         const snapshot: ISecretSnapshot = {};
         for (const [cacheKey, secretKey] of Object.entries(SECRET_KEYS) as Array<[keyof ISecretSnapshot, string]>) {
             const value = await this.secretStorageService.get(secretKey);
             if (value) {
                 snapshot[cacheKey] = value;
             }
+        }
+        if (loadRevision !== this.secretsLoadRevision) { return; }
+        if (managedTokenRevision !== this.managedTokenRevision) {
+            snapshot.managedToken = this.secretCache.managedToken;
         }
         this.secretCache = snapshot;
     }

@@ -22,6 +22,8 @@ import {
     ICleanSlateLocalEmbeddingOptions,
     ICleanSlateLocalEmbeddingResponse,
     ICleanSlateMainService,
+    ICleanSlateManagedTokenRefreshEvent,
+    ICleanSlateManagedTokenRefreshResult,
     ICleanSlateModelsDevModelMetadata,
     ICleanSlateOpenAICompatibleChatOptions,
     ICleanSlateOpenAICompatibleListModelsOptions,
@@ -78,6 +80,9 @@ export class CleanSlateMainChannel implements IServerChannel {
 				return Promise.resolve();
             case 'proxyRequest':
                 return this.service.proxyRequest(arg[0], token);
+            case 'refreshCleanSlateManagedToken':
+                if (!this.service.refreshCleanSlateManagedToken) { throw new Error('Managed token refresh is unavailable on this host.'); }
+                return this.service.refreshCleanSlateManagedToken(arg[0]);
             case 'getModelsDevModelMetadata':
                 return this.service.getModelsDevModelMetadata(arg[0], arg[1], token);
             case 'listOpenAICompatibleModels':
@@ -189,7 +194,7 @@ export class CleanSlateMainChannel implements IServerChannel {
 export class CleanSlateMainChannelClient implements ICleanSlateMainService {
     declare readonly _serviceBrand: undefined;
     readonly onDidPublishThreadSession: Event<ICleanSlateThreadSessionUpdate>;
-    readonly onDidRefreshManagedToken: Event<string>;
+    readonly onDidRefreshManagedToken: Event<ICleanSlateManagedTokenRefreshEvent>;
 
     constructor(private readonly channel: any) {
         this.onDidPublishThreadSession = this.channel.listen('onDidPublishThreadSession');
@@ -202,6 +207,10 @@ export class CleanSlateMainChannelClient implements ICleanSlateMainService {
 
     async proxyRequest(options: any, token: CancellationToken): Promise<ICleanSlateBufferedRequestResponse> {
         return this.channel.call('proxyRequest', [options], token);
+    }
+
+    refreshCleanSlateManagedToken(rejectedToken: string): Promise<ICleanSlateManagedTokenRefreshResult> {
+        return this.channel.call('refreshCleanSlateManagedToken', [rejectedToken]);
     }
 
     proxyStream(options: any, token: CancellationToken): Event<VSBuffer | string | null> {

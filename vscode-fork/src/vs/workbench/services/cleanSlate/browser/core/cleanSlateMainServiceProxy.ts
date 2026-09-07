@@ -22,6 +22,8 @@ import {
     ICleanSlateLocalEmbeddingOptions,
     ICleanSlateLocalEmbeddingResponse,
     ICleanSlateMainService,
+    ICleanSlateManagedTokenRefreshEvent,
+    ICleanSlateManagedTokenRefreshResult,
     ICleanSlateModelsDevModelMetadata,
     ICleanSlateOpenAICompatibleChatOptions,
     ICleanSlateOpenAICompatibleListModelsOptions,
@@ -49,7 +51,7 @@ export class CleanSlateMainServiceProxy extends Disposable implements ICleanSlat
     readonly _serviceBrand: undefined;
     private readonly channel: IChannel;
     readonly onDidPublishThreadSession: Event<ICleanSlateThreadSessionUpdate>;
-    readonly onDidRefreshManagedToken: Event<string>;
+    readonly onDidRefreshManagedToken: Event<ICleanSlateManagedTokenRefreshEvent>;
 
     constructor(
         @ICleanSlateChannelService channelService: ICleanSlateChannelService
@@ -66,6 +68,10 @@ export class CleanSlateMainServiceProxy extends Disposable implements ICleanSlat
 
     async proxyRequest(options: IRequestOptions, token: CancellationToken): Promise<ICleanSlateBufferedRequestResponse> {
         return this.channel.call('proxyRequest', [options], token);
+    }
+
+    refreshCleanSlateManagedToken(rejectedToken: string): Promise<ICleanSlateManagedTokenRefreshResult> {
+        return this.channel.call('refreshCleanSlateManagedToken', [rejectedToken]);
     }
 
     proxyStream(options: IRequestOptions, token: CancellationToken): Event<VSBuffer | string | null> {

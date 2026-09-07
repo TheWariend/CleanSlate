@@ -10,6 +10,7 @@ import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import { CleanSlateHostedAgentRuntime } from '@cleanslate/sdk/node/cleanSlateHostedAgentRuntime.js';
 import { CleanSlateNodeAgentRuntime } from '@cleanslate/sdk/node/cleanSlateNodeAgentRuntime.js';
+import { CleanSlateManagedTokenCoordinator } from '@cleanslate/sdk/protocol/cleanSlateManagedTokenCoordinator.js';
 import { CleanSlateNodeBrowserAutomation, type ICleanSlateNodeBrowserAutomationOptions } from '@cleanslate/sdk/node/cleanSlateNodeBrowserAutomation.js';
 import { randomUUID } from 'crypto';
 import type { ICleanSlateHostedAgentRunRequest } from '@cleanslate/sdk/protocol/cleanSlateAI.js';
@@ -30,6 +31,8 @@ import {
     ICleanSlateLocalEmbeddingOptions,
     ICleanSlateLocalEmbeddingResponse,
     ICleanSlateMainService,
+    ICleanSlateManagedTokenRefreshEvent,
+    ICleanSlateManagedTokenRefreshResult,
     ICleanSlateModelsDevModelMetadata,
     ICleanSlateBufferedRequestResponse,
     ICleanSlateOpenAICompatibleChatOptions,
@@ -115,8 +118,31 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
     private readonly anthropicMessageAdapter = new CleanSlateAnthropicMessageAdapter(this.providerSchemaNormalizer);
     private readonly _onDidPublishThreadSession = this._register(new Emitter<ICleanSlateThreadSessionUpdate>());
     readonly onDidPublishThreadSession: Event<ICleanSlateThreadSessionUpdate> = this._onDidPublishThreadSession.event;
-    private readonly _onDidRefreshManagedToken = this._register(new Emitter<string>());
-    readonly onDidRefreshManagedToken: Event<string> = this._onDidRefreshManagedToken.event;
+    private readonly _onDidRefreshManagedToken = this._register(new Emitter<ICleanSlateManagedTokenRefreshEvent>());
+    readonly onDidRefreshManagedToken = this._onDidRefreshManagedToken.event;
+    private readonly managedTokens = new CleanSlateManagedTokenCoordinator(async previousToken => {
+        const runtimeConfig = await this.getRuntimeConfig();
+        const response = await this.proxyRequest({
+            url: `${runtimeConfig.apiBaseUrl}/auth/refresh`, type: 'POST',
+            headers: { Authorization: `Bearer ${previousToken}`, Accept: 'application/json' }
+        }, CancellationToken.None);
+        const status = response.res.statusCode ?? 0;
+        let body: any;
+        try { body = JSON.parse(response.data || '{}'); } catch { body = {}; }
+        if (status === 401) {
+            throw new Error('Your CleanSlate session expired. Sign in again.');
+        }
+        if (status < 200 || status >= 300 || typeof body.token !== 'string' || !body.token.trim()) {
+            throw new Error(body.message || `Unable to refresh the CleanSlate session (${status}). Try again.`);
+        }
+        const result: ICleanSlateManagedTokenRefreshResult = {
+            token: body.token.trim(),
+            expires_at: typeof body.expires_at === 'string' ? body.expires_at : undefined,
+            expires_in: typeof body.expires_in === 'number' || typeof body.expires_in === 'string' ? body.expires_in : undefined
+        };
+        this._onDidRefreshManagedToken.fire({ ...result, previousToken });
+        return result;
+    });
     private readonly webRetrievalService: CleanSlateWebRetrievalService;
     private readonly threadPersistenceStore: CleanSlateThreadPersistenceStore;
     private readonly localEmbeddingService: CleanSlateLocalEmbeddingService;
@@ -125,6 +151,10 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
 
     configureHostedBrowserViews(views: NonNullable<NodeCleanSlateMainService['hostedBrowserViews']>): void {
         this.hostedBrowserViews = views;
+    }
+
+    refreshCleanSlateManagedToken(rejectedToken: string): Promise<ICleanSlateManagedTokenRefreshResult> {
+        return this.managedTokens.refresh(rejectedToken);
     }
     private cleanSlateEnvCache: Map<string, string> | undefined;
     private modelsDevCatalogCache: { expiresAt: number; value: Record<string, any> } | undefined;
@@ -136,6 +166,7 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
         @ILogService private readonly logService: ILogService
     ) {
         super();
+        this._register({ dispose: () => this.managedTokens.clear() });
         this.browserService = this._register(new CleanSlatePlaywrightBrowserService(this.environmentService.userDataPath, this.logService));
         this.webRetrievalService = new CleanSlateWebRetrievalService(this.requestService, this.logService);
         this.threadPersistenceStore = this._register(new CleanSlateThreadPersistenceStore(this.environmentService, this.logService));
@@ -153,7 +184,7 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
             return new CleanSlateNodeAgentRuntime({
                 rootPath, workspaceStorageHome: storageHome, sessionId: request.session.id,
                 mainService: this, configuration: { ...request.configuration },
-                onManagedTokenRefresh: token => this._onDidRefreshManagedToken.fire(token),
+                managedTokenCoordinator: this.managedTokens,
                 managedSessionExpiredMessage: 'Your CleanSlate session expired. Sign in again.',
                 agentDefinition: request.session.agent as AgentDefinition | undefined, approveCommand: hooks.approveCommand,
                 onArtifact: hooks.onArtifact,
