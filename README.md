@@ -8,9 +8,11 @@
 <p align="center"><b>CleanSlate</b></p>
 <p align="center">The open source coding agent.</p>
 <p align="center">
-  <a href="vscode-fork/LICENSE.txt"><img alt="License" src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
-  <a href="https://github.com/TheWariend/CleanSlate-Releases/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/TheWariend/CleanSlate-Releases?display_name=tag&style=flat-square&label=release" /></a>
-  <img alt="Built on VS Code" src="https://img.shields.io/badge/built%20on-VS%20Code-007ACC?style=flat-square" />
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
+  <a href="https://github.com/TheWariend/CleanSlate-Releases/releases/latest"><img alt="Latest CleanSlate IDE release" src="https://img.shields.io/github/v/release/TheWariend/CleanSlate-Releases?display_name=tag&style=flat-square&label=IDE" /></a>
+  <a href="https://github.com/microsoft/vscode"><img alt="IDE built on VS Code" src="https://img.shields.io/badge/built%20on-VS%20Code-007ACC?style=flat-square" /></a>
+  <a href="https://www.npmjs.com/package/@cleanslate/sdk"><img alt="CleanSlate SDK npm version" src="https://img.shields.io/npm/v/@cleanslate/sdk?style=flat-square&label=SDK" /></a>
+  <a href="https://www.npmjs.com/package/@cleanslate/cli"><img alt="CleanSlate CLI npm version" src="https://img.shields.io/npm/v/@cleanslate/cli?style=flat-square&label=CLI" /></a>
 </p>
 
 ![CleanSlate](assets/screenshot.png)
