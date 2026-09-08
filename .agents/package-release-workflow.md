@@ -78,7 +78,7 @@ two packages and the IDE do not collide in one tag space.
 ## Rules
 
 - Never name another product in a commit message, tag, or changelog entry. The
-  repository is public and its history was deliberately scrubbed of such
+  repository is public and its history was deliberately cleaned of such
   references. Describe what the change does. Credit genuinely borrowed code in
   `NOTICE` and reference that file, not the source by name.
 - `dist/` is gitignored, and npm publishes from disk. Never publish without a
