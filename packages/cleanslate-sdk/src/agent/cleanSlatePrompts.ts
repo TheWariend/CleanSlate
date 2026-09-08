@@ -5,7 +5,7 @@
 
 import { IChatMessagePart } from '../protocol/cleanSlateAI.js';
 import { composePrompt } from '../composer/promptComposer.js';
-import { AgentDefinition } from '../composer/registry/agentSchema.js'; // NEW
+import { AgentDefinition } from '../composer/registry/agentSchema.js';
 import { SLASH_COMMANDS as COMMAND_REGISTRY } from '../composer/commands/slashCommands.js';
 import { PLANNING_MODE_INSTRUCTION } from '../composer/modes/planning.mode.js';
 import { EXECUTION_MODE_INSTRUCTION } from '../composer/modes/execution.mode.js';

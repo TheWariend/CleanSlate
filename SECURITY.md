@@ -19,7 +19,7 @@ CleanSlate is an AI code editor that runs locally. The agent has access to power
 
 CleanSlate does **not** sandbox the agent. There are safeguards, and they are real, but they are correctness and awareness features rather than a security boundary:
 
-- **Plan mode** removes mutation tools and `execute_command` from the tool list and blocks them again at the call site, so a plan-mode turn cannot modify the workspace.
+- **Plan mode** removes mutation tools and `execute_command` from the tool list and blocks them again at the call site. These restrictions are not an isolation boundary.
 - **Command approval** — `execute_command` requests user approval before running, and a declined command returns as cancelled.
 - **Shell-edit blocking** — source edits attempted through shell redirection, `sed -i`, or heredocs are refused and redirected to the edit tools.
 
@@ -27,8 +27,8 @@ In execution mode, an approved command runs with your full user privileges. If y
 
 ### Your keys and your code
 
-- API keys are stored in the OS secret store, not in workspace files.
-- Code indexing and semantic search run entirely on-device using a bundled embedding model. Nothing is sent anywhere for retrieval.
+- Credential storage depends on the host. The CLI stores credentials in `~/.cleanslate/auth.json` and sets owner-only file permissions; SDK hosts manage their own storage.
+- The editor includes a local embedding model. Hosts can also configure remote embedding services, which receive the content being embedded. Check your host's configuration before indexing sensitive code.
 - Prompts and file context you send to a provider are governed by that provider's policies.
 
 ### Out of scope

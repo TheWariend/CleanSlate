@@ -3,10 +3,10 @@
 // params are dropped and any DI-registered service written to out/ is left
 // broken (injected fields become undefined at runtime).
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { pathToFileURL } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import path from 'path';
 
-const FORK = '/Users/mohammedmazin/WARIEND/CleanSlate/vscode-fork';
+const FORK = fileURLToPath(new URL('../../', import.meta.url));
 const ts = (await import(pathToFileURL(path.join(FORK, 'node_modules/typescript/lib/typescript.js')).href)).default;
 
 const files = process.argv.slice(2);

@@ -16,7 +16,7 @@ The endpoint must return:
 
 Release flow:
 
-1. GitHub Actions builds the macOS zip/DMG and Windows installer/archive.
+1. GitHub Actions builds the macOS release assets. The Windows build job is currently disabled.
 2. `create-update-manifest.mjs` writes `cleanslate-update.json` with the latest commit, version, asset names, and SHA-256 hashes.
 3. The release job uploads all assets plus `cleanslate-update.json` to the public `TheWariend/CleanSlate-Releases` GitHub release.
 4. The update endpoint reads that public release and serves the correct update response for the requesting platform.

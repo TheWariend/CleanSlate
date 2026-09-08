@@ -11,9 +11,9 @@ Copyright (c) 2015 - present Microsoft Corporation
 Licensed under the MIT License.
 https://github.com/microsoft/vscode
 
-CleanSlate is a fork of Visual Studio Code. The full license text is retained
-in vscode-fork/LICENSE.txt. CleanSlate is not affiliated with, endorsed by, or
-sponsored by Microsoft.
+The CleanSlate desktop editor is based on Visual Studio Code. The full license
+text is retained in vscode-fork/LICENSE.txt. CleanSlate is not affiliated with,
+endorsed by, or sponsored by Microsoft.
 
 @cleanslate/sdk additionally vendors a set of base modules from Visual Studio Code
 into packages/cleanslate-sdk/src/core/, so that the runtime can be consumed without

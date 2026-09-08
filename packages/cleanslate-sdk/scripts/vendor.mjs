@@ -3,9 +3,10 @@
 // package can build with isolatedModules on.
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'node:url';
 
-const SRC = '/Users/mohammedmazin/WARIEND/CleanSlate/vscode-fork/src';
-const DEST = '/Users/mohammedmazin/WARIEND/CleanSlate/packages/cleanslate-sdk/src/core';
+const SRC = fileURLToPath(new URL('../../../vscode-fork/src/', import.meta.url));
+const DEST = fileURLToPath(new URL('../src/core/', import.meta.url));
 
 // vs path -> destination file inside core/
 const FILES = {

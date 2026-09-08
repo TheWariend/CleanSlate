@@ -12,7 +12,7 @@ We want to make it easy for you to contribute. These are the kinds of changes th
 UI and core agent-behavior changes should go through a design conversation before implementation. If you're unsure whether a change would be accepted, open an issue and ask first.
 
 > [!NOTE]
-> CleanSlate is a fork of Visual Studio Code. Bugs in the editor itself — not in CleanSlate's AI features — usually belong [upstream](https://github.com/microsoft/vscode/issues).
+> CleanSlate's desktop editor is based on Visual Studio Code. Bugs inherited from the editor — not in CleanSlate's AI features — usually belong [upstream](https://github.com/microsoft/vscode/issues).
 
 ## Developing CleanSlate
 
@@ -29,7 +29,7 @@ npm run watch
 
 ### Repository layout
 
-Everything ships from `vscode-fork/`. CleanSlate's own code lives in four places:
+The desktop editor lives in `vscode-fork/`. The following paths are relative to that directory:
 
 | Path | Contents |
 | ---- | -------- |
@@ -38,7 +38,9 @@ Everything ships from `vscode-fork/`. CleanSlate's own code lives in four places
 | `src/vs/editor/browser/cleanSlate/` | Inline edit widget and edit parsing |
 | `resources/cleanslate/` | Bundled local embedding model |
 
-Everything else is upstream VS Code.
+The shared runtime lives in `packages/cleanslate-sdk/` and the terminal application
+in `packages/cleanslate-cli/`, relative to the repository root. Much of the editor
+tree is inherited from upstream VS Code.
 
 ### Touching upstream files
 

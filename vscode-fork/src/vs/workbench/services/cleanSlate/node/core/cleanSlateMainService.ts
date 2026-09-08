@@ -427,11 +427,8 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
                     }
                 }
 
-                // The managed "CleanSlate Pro" provider streams like every other
-                // OpenAI-compatible host (the backend proxies Azure's SSE straight
-                // through). It used to force stream:false and buffer the whole
-                // completion, which made long agentic turns idle out into a bare
-                // 502 at the gateway; streaming keeps bytes flowing so it doesn't.
+                // Stream responses so long completions can deliver progress
+                // without waiting for the entire response to be buffered.
                 abort = this.createProviderAbortController(token, NodeCleanSlateMainService.PROVIDER_STREAM_IDLE_TIMEOUT_MS);
                 const stream = await client.chat.completions.create(body, { signal: abort.signal });
                 const toolCalls = new Map<number, { id?: string; name: string; argumentsJson: string }>();

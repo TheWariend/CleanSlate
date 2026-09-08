@@ -10,7 +10,7 @@
 
 ---
 
-This directory holds the CleanSlate product — the editor fork, workbench UI, agent loop, model routing, and tools. It's the whole application; there is no separate server stack in this repository.
+This directory holds the CleanSlate desktop editor and its workbench integrations. The shared SDK and CLI live in [`../packages/`](../packages/).
 
 **Documentation lives at the repository root:**
 
@@ -38,8 +38,8 @@ npm run watch
 | `src/vs/editor/browser/cleanSlate/` | Inline edit widget and edit parsing |
 | `resources/cleanslate/` | Bundled local embedding model |
 
-Everything else is upstream [Visual Studio Code](https://github.com/microsoft/vscode).
+Much of this tree is inherited from [Visual Studio Code](https://github.com/microsoft/vscode).
 
 ## License
 
-MIT — see [LICENSE.txt](LICENSE.txt). CleanSlate is a fork of Visual Studio Code (MIT, © Microsoft Corporation) and is not affiliated with, endorsed by, or sponsored by Microsoft.
+MIT — see [LICENSE.txt](LICENSE.txt). This desktop editor is based on Visual Studio Code (MIT, © Microsoft Corporation). CleanSlate is not affiliated with, endorsed by, or sponsored by Microsoft.

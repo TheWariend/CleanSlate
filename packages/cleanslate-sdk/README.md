@@ -21,7 +21,7 @@ Node 20 or later.
 
 - **The execution loop** — turn management, budgets, an evidence ledger, and the
   completion boundary that decides when a task is actually finished.
-- **60 tools**, listed below.
+- Tools for file editing, search, commands, browsing, and host integrations, listed below.
 - **The edit engine** — exact-string matching with anchors, version guards and
   atomic multi-file application.
 - **A Node host** — filesystem-backed text models and child-process commands, so
@@ -124,6 +124,37 @@ const context = createNodeHost({
 A host implements as much as it can and leaves the rest undefined. Tools that
 need an absent capability report it as unavailable instead of failing the run —
 so a terminal without a browser view simply has no browser tools.
+
+### CleanSlate Managed AI
+
+Node hosts can authenticate with CleanSlate's browser device flow, then pass the
+returned account token to the built-in `cleanslate` provider.
+
+```js
+import {
+  authenticateCleanSlateInBrowser,
+  CleanSlateNodeAgentRuntime,
+  createNodeProviderConfiguration
+} from '@cleanslate/sdk/node';
+
+const { token, entitlements } = await authenticateCleanSlateInBrowser();
+const model = entitlements.models?.[0]?.id;
+if (!model) throw new Error('This account has no managed models.');
+
+const runtime = new CleanSlateNodeAgentRuntime({
+  rootPath: process.cwd(),
+  configuration: createNodeProviderConfiguration({
+    provider: 'cleanslate',
+    model,
+    apiKey: token
+  }),
+  approveCommand: async () => false
+});
+
+for await (const event of runtime.run('Inspect this project')) {
+  console.log(event);
+}
+```
 
 ## Host capabilities
 

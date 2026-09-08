@@ -2,11 +2,11 @@
 // Loads the already-compiled tests from out/ and drives them through mocha's
 // tdd interface, with the minimal DOM shims the browser-layer modules touch.
 import { readdirSync } from 'fs';
-import { pathToFileURL } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import path from 'path';
 
-const FORK = '/Users/mohammedmazin/WARIEND/CleanSlate/vscode-fork';
-// Resolve mocha out of the fork's node_modules — this runner lives outside it.
+const FORK = fileURLToPath(new URL('../../', import.meta.url));
+// Resolve mocha from the fork's dependencies.
 const Mocha = (await import(pathToFileURL(path.join(FORK, 'node_modules/mocha/index.js')).href)).default;
 const TESTDIR = path.join(FORK, 'out/vs/workbench/contrib/cleanSlate/test/common');
 

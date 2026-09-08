@@ -61,7 +61,7 @@ The engine behind both surfaces is published on its own:
 npm install @cleanslate/sdk
 ```
 
-It carries the execution loop, all 60 tools, the edit engine and a Node host,
+It carries the execution loop, the tool registry, the edit engine and a Node host,
 with no editor dependency. A surface supplies host capabilities — a filesystem,
 a way to run commands, optionally diagnostics and a browser — and the runtime
 drives the loop.
@@ -108,7 +108,7 @@ Or sign in to **CleanSlate Pro** for managed models, higher limits, and pay-as-y
 - Search and fetch from the web
 - Call any MCP server you configure
 
-Code search runs on your machine. Indexing and embeddings use a bundled model, so your code is never sent anywhere to be searched.
+The editor includes a bundled model for local embeddings. The CLI and SDK can use configured embedding services; remote services receive the content being embedded.
 
 ### Extensions
 
@@ -124,4 +124,4 @@ To report a security issue, see [SECURITY.md](SECURITY.md).
 
 CleanSlate is MIT licensed.
 
-It is a fork of [Visual Studio Code](https://github.com/microsoft/vscode) (MIT, © Microsoft Corporation) — see [LICENSE.txt](vscode-fork/LICENSE.txt). CleanSlate is not affiliated with, endorsed by, or sponsored by Microsoft.
+The CleanSlate desktop editor is based on [Visual Studio Code](https://github.com/microsoft/vscode) (MIT, © Microsoft Corporation) — see [LICENSE.txt](vscode-fork/LICENSE.txt). CleanSlate is not affiliated with, endorsed by, or sponsored by Microsoft.

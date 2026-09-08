@@ -102,9 +102,8 @@ export class CleanSlateService implements ICleanSlateService {
 		const managedModels = (entitlements.models || []).filter(model => !!model.id?.trim());
 		for (const model of managedModels) {
 			const id = model.id.trim();
-			// The backend is authoritative for managed model limits (e.g. DeepSeek
-			// V4 Flash's 1M-token window). Seed the metadata cache so capability
-			// resolution prefers these over client-side family defaults.
+			// Prefer limits returned by the managed-model catalog over
+			// client-side model-family defaults.
 			const seeded: NonNullable<Awaited<ReturnType<ICleanSlateMainService['getModelsDevModelMetadata']>>> = {
 				id,
 				provider: 'cleanslate',
@@ -1205,8 +1204,7 @@ export class CleanSlateService implements ICleanSlateService {
 
 				if ((isRateLimit || isRetryableError) && i < maxRetries) {
 					// Honor the provider's Retry-After duration when present.
-					// Short retries within the same Azure TPM window only repeat
-					// the 429 and look like an endless reconnect loop.
+					// Retrying before the rate-limit window resets can repeat the 429.
 					const providerDelay = isRateLimit ? this.providerRetryDelayMs(errorMessage) : undefined;
 					const baseDelay = isRateLimit ? 3000 : 1000;
 					const delay = providerDelay ?? Math.min(60000, Math.pow(2, i) * baseDelay + Math.random() * 1000);
