@@ -845,6 +845,10 @@ export function formatHeaderModeLabel(mode: CliInteractiveMode): string {
 	}
 }
 
+export function formatModelStatus(provider: string, model: string | undefined, reasoningLevel: ICliArguments['reasoningLevel']): string {
+	return `${provider}/${model ?? 'no model'} · ${reasoningLevel}`;
+}
+
 export function nextInteractiveMode(mode: CliInteractiveMode): CliInteractiveMode {
 	switch (mode) {
 		case 'planning': return 'auto';
@@ -2524,7 +2528,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			{/* Active model remains visible above the prompt; it is intentionally omitted only from the banner. */}
 			{!approval && !editApproval && !planApproval && !showSessions && !showProviders && !showPermissions && !models && !modelTermination && !diffReviews && (
 				<Box paddingX={1} justifyContent="flex-end">
-					<Text color={COLORS.muted} wrap="truncate-middle">{args.provider}/{args.model}</Text>
+					<Text color={COLORS.muted} wrap="truncate-middle">{formatModelStatus(args.provider, args.model, args.reasoningLevel)}</Text>
 				</Box>
 			)}
 

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToString } from 'ink';
 import { test } from 'node:test';
-import { commandPaletteSelection, estimateCliContextWindowUsage, executionInteractiveMode, formatActivityStatus, formatHeaderModeLabel, formatModelTerminationMessage, formatToolNameForDisplay, ModelTerminationNotice, nextInteractiveMode, runtimeModeForInteractiveMode, SHIMMER_FRAME_COUNT, shimmerSegments } from '../tui.js';
+import { commandPaletteSelection, estimateCliContextWindowUsage, executionInteractiveMode, formatActivityStatus, formatHeaderModeLabel, formatModelStatus, formatModelTerminationMessage, formatToolNameForDisplay, ModelTerminationNotice, nextInteractiveMode, runtimeModeForInteractiveMode, SHIMMER_FRAME_COUNT, shimmerSegments } from '../tui.js';
 
 test('TUI activity status stays concise and hides internal turn details', () => {
 	assert.equal(formatActivityStatus('thinking'), 'Thinking');
@@ -51,6 +51,10 @@ test('TUI header exposes the active interactive mode', () => {
 	assert.equal(formatHeaderModeLabel('planning'), 'PLAN');
 	assert.equal(formatHeaderModeLabel('auto'), 'AUTO');
 	assert.equal(formatHeaderModeLabel('manual'), 'MANUAL');
+});
+
+test('TUI model status includes the active reasoning effort', () => {
+	assert.equal(formatModelStatus('cleanslate', 'glm5.2', 'high'), 'cleanslate/glm5.2 · high');
 });
 
 test('CLI context usage follows the IDE composer calculation', () => {
