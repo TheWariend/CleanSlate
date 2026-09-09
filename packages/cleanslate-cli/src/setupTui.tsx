@@ -3,7 +3,7 @@
  * Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import { CliProvider, SUPPORTED_PROVIDERS } from './argv.js';
@@ -49,7 +49,7 @@ const PROVIDER_LABELS: Record<CliProvider, string> = {
 
 const CREDENTIAL_STORAGE_DESCRIPTION = '~/.cleanslate/auth.json with owner-only permissions';
 
-function fieldsFor(provider: CliProvider): ISetupField[] {
+function fieldsFor(provider: CliProvider, hasSavedCredential = false, saved?: Partial<ICliSetupResult>): ISetupField[] {
 	if (provider === 'bedrock') {
 		return [
 			{ key: 'bedrockRegion', label: 'AWS region', placeholder: 'us-east-1' },
@@ -57,10 +57,13 @@ function fieldsFor(provider: CliProvider): ISetupField[] {
 		];
 	}
 	if (provider === 'azureOpenAI') {
+		if (saved?.azureEndpoint && hasSavedCredential) {
+			return [];
+		}
 		return [
 			{ key: 'azureEndpoint', label: 'Azure endpoint', placeholder: 'https://resource.openai.azure.com' },
 			{ key: 'azureApiVersion', label: 'API version', placeholder: 'leave blank for default', optional: true },
-			{ key: 'apiKey', label: 'Azure API key', placeholder: `stored in ${CREDENTIAL_STORAGE_DESCRIPTION}`, secret: true }
+			...hasSavedCredential ? [] : [{ key: 'apiKey' as const, label: 'Azure API key', placeholder: `stored in ${CREDENTIAL_STORAGE_DESCRIPTION}`, secret: true }]
 		];
 	}
 	if (provider === 'custom') {
@@ -69,28 +72,42 @@ function fieldsFor(provider: CliProvider): ISetupField[] {
 			{ key: 'apiKey', label: 'API key', placeholder: 'optional', secret: true, optional: true }
 		];
 	}
-	return [
+	return hasSavedCredential ? [] : [
 		{ key: 'apiKey', label: `${PROVIDER_LABELS[provider]} API key`, placeholder: `stored in ${CREDENTIAL_STORAGE_DESCRIPTION}`, secret: true }
 	];
 }
 
-export function providerSetupFieldKeys(provider: CliProvider): Array<keyof ICliSetupResult> {
-	return fieldsFor(provider).map(field => field.key);
+export function providerSetupFieldKeys(provider: CliProvider, hasSavedCredential = false, saved?: Partial<ICliSetupResult>): Array<keyof ICliSetupResult> {
+	return fieldsFor(provider, hasSavedCredential, saved).map(field => field.key);
 }
 
-export function CleanSlateSetupTui({ initialProvider, onComplete, onCancel }: {
+export function CleanSlateSetupTui({ initialProvider, providerSelected = false, hasCredential, savedSetup, onComplete, onCancel }: {
 	initialProvider: CliProvider;
+	providerSelected?: boolean;
+	hasCredential?: (provider: CliProvider) => boolean;
+	savedSetup?: (provider: CliProvider) => Partial<ICliSetupResult>;
 	onComplete: (result: ICliSetupResult) => void;
 	onCancel: () => void;
 }) {
 	const { exit } = useApp();
 	const initialIndex = Math.max(0, SUPPORTED_PROVIDERS.indexOf(initialProvider));
 	const [providerIndex, setProviderIndex] = useState(initialIndex);
-	const [provider, setProvider] = useState<CliProvider | undefined>();
+	const initialSaved = savedSetup?.(initialProvider) ?? {};
+	const [provider, setProvider] = useState<CliProvider | undefined>(providerSelected ? initialProvider : undefined);
 	const [fieldIndex, setFieldIndex] = useState(0);
 	const [value, setValue] = useState('');
-	const [values, setValues] = useState<Partial<ICliSetupResult>>({});
+	const [values, setValues] = useState<Partial<ICliSetupResult>>(providerSelected ? initialSaved : {});
 	const [error, setError] = useState<string>();
+
+	useEffect(() => {
+		if (!providerSelected || !provider) {
+			return;
+		}
+		if (provider === 'cleanslate' || fieldsFor(provider, hasCredential?.(provider) ?? false, initialSaved).length === 0) {
+			onComplete({ provider, model: '', ...initialSaved });
+			exit();
+		}
+	}, []);
 
 	const cancel = () => {
 		onCancel();
@@ -109,10 +126,12 @@ export function CleanSlateSetupTui({ initialProvider, onComplete, onCancel }: {
 				setProviderIndex(index => Math.min(SUPPORTED_PROVIDERS.length - 1, index + 1));
 			} else if (key.return) {
 				const selectedProvider = SUPPORTED_PROVIDERS[providerIndex];
-				if (selectedProvider === 'cleanslate') {
-					onComplete({ provider: 'cleanslate', model: '' });
+				const saved = savedSetup?.(selectedProvider) ?? {};
+				if (selectedProvider === 'cleanslate' || fieldsFor(selectedProvider, hasCredential?.(selectedProvider) ?? false, saved).length === 0) {
+					onComplete({ provider: selectedProvider, model: '', ...saved });
 					exit();
 				} else {
+					setValues(saved);
 					setProvider(selectedProvider);
 				}
 			} else if (key.escape) {
@@ -125,7 +144,7 @@ export function CleanSlateSetupTui({ initialProvider, onComplete, onCancel }: {
 		if (!provider) {
 			return;
 		}
-		const fields = fieldsFor(provider);
+		const fields = fieldsFor(provider, hasCredential?.(provider) ?? false, savedSetup?.(provider));
 		const field = fields[fieldIndex];
 		const normalized = raw.trim();
 		if (!normalized && !field.optional) {
@@ -153,7 +172,7 @@ export function CleanSlateSetupTui({ initialProvider, onComplete, onCancel }: {
 		exit();
 	};
 
-	const activeField = provider ? fieldsFor(provider)[fieldIndex] : undefined;
+	const activeField = provider ? fieldsFor(provider, hasCredential?.(provider) ?? false, savedSetup?.(provider))[fieldIndex] : undefined;
 	return (
 		<Box flexDirection="column">
 			<Box borderStyle="round" borderColor={COLORS.accent} paddingX={1} alignItems="center">
@@ -178,19 +197,19 @@ export function CleanSlateSetupTui({ initialProvider, onComplete, onCancel }: {
 				) : (
 					<Box flexDirection="column" marginTop={1}>
 						<Text color={COLORS.success}>✓ {PROVIDER_LABELS[provider]}</Text>
-						{fieldsFor(provider).slice(0, fieldIndex).map(field => (
+						{fieldsFor(provider, hasCredential?.(provider) ?? false, savedSetup?.(provider)).slice(0, fieldIndex).map(field => (
 							<Text key={field.key} color={COLORS.muted}>✓ {field.label}</Text>
 						))}
-						<Box marginTop={1}>
-							<Text color={COLORS.accent}>{activeField!.label}  </Text>
+						{activeField && <Box marginTop={1}>
+							<Text color={COLORS.accent}>{activeField.label}  </Text>
 							<TextInput
 								value={value}
 								onChange={setValue}
 								onSubmit={submitField}
-								placeholder={activeField!.placeholder}
-								mask={activeField!.secret ? '•' : undefined}
+								placeholder={activeField.placeholder}
+								mask={activeField.secret ? '•' : undefined}
 							/>
-						</Box>
+						</Box>}
 						{error && <Text color="red">{error}</Text>}
 						<Text color={COLORS.muted}>enter continue · ctrl-c cancel</Text>
 					</Box>

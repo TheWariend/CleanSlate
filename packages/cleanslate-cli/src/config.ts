@@ -13,6 +13,7 @@ export interface ICliConfig {
 	version: 1;
 	provider?: CliProvider;
 	model?: string;
+	models?: Partial<Record<CliProvider, string>>;
 	baseUrl?: string;
 	reasoningLevel?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 	maxTurns?: number;
@@ -55,9 +56,47 @@ export class CliConfigStore {
 	}
 
 	save(config: ICliConfig): void {
+		const existing = this.load();
+		const models = { ...existing.models, ...config.models };
+		if (config.provider && config.model) {
+			models[config.provider] = config.model;
+		}
+		const persisted = {
+			...existing,
+			...config,
+			models,
+			azureEndpoint: config.azureEndpoint ?? existing.azureEndpoint,
+			azureApiVersion: config.azureApiVersion ?? existing.azureApiVersion,
+			version: 1 as const
+		};
 		fs.mkdirSync(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
 		const temporary = `${this.filePath}.${process.pid}.tmp`;
-		fs.writeFileSync(temporary, `${JSON.stringify({ ...config, version: 1 }, null, 2)}\n`, { mode: 0o600 });
+		fs.writeFileSync(temporary, `${JSON.stringify(persisted, null, 2)}\n`, { mode: 0o600 });
+		fs.renameSync(temporary, this.filePath);
+	}
+
+	removeProvider(provider: CliProvider): void {
+		const config = this.load();
+		if (config.models) {
+			delete config.models[provider];
+		}
+		if (config.provider === provider) {
+			delete config.model;
+		}
+		if (provider === 'azureOpenAI') {
+			delete config.azureEndpoint;
+			delete config.azureApiVersion;
+		}
+		if (provider === 'custom') {
+			delete config.baseUrl;
+		}
+		if (provider === 'bedrock') {
+			delete config.bedrockRegion;
+			delete config.bedrockProfile;
+		}
+		fs.mkdirSync(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
+		const temporary = `${this.filePath}.${process.pid}.tmp`;
+		fs.writeFileSync(temporary, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
 		fs.renameSync(temporary, this.filePath);
 	}
 }
@@ -121,6 +160,22 @@ export class CliCredentialStore {
 		if (credentialSpecified && explicitCredential) {
 			this.set(provider, explicitCredential);
 			return explicitCredential;
+		}
+		return this.get(provider) ?? apiKeyFromEnvironment(provider, env);
+	}
+
+	resolveForSetup(
+		provider: CliProvider,
+		enteredCredential: string | undefined,
+		forceCredential: boolean,
+		env: NodeJS.ProcessEnv = process.env
+	): string | undefined {
+		if (enteredCredential?.trim()) {
+			this.set(provider, enteredCredential);
+			return enteredCredential;
+		}
+		if (forceCredential) {
+			return undefined;
 		}
 		return this.get(provider) ?? apiKeyFromEnvironment(provider, env);
 	}

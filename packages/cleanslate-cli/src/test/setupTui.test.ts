@@ -19,3 +19,9 @@ test('provider setup loads a model picker after collecting provider configuratio
 	assert.deepEqual(providerSetupFieldKeys('nvidia'), ['apiKey']);
 	assert.deepEqual(providerSetupFieldKeys('azureOpenAI'), ['azureEndpoint', 'azureApiVersion', 'apiKey']);
 });
+
+test('provider setup skips credentials that are already saved', () => {
+	assert.deepEqual(providerSetupFieldKeys('anthropic', true), []);
+	assert.deepEqual(providerSetupFieldKeys('azureOpenAI', true), ['azureEndpoint', 'azureApiVersion']);
+	assert.deepEqual(providerSetupFieldKeys('azureOpenAI', true, { azureEndpoint: 'https://example.openai.azure.com' }), []);
+});

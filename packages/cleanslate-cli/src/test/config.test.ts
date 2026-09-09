@@ -78,3 +78,52 @@ test('explicit command-line credentials are saved and restored on the next run',
 		fs.rmSync(home, { recursive: true, force: true });
 	}
 });
+
+test('setup uses environment credentials without silently saving them', () => {
+	const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cleanslate-setup-credential-test-'));
+	try {
+		const credentials = new CliCredentialStore(home);
+		assert.equal(credentials.resolveForSetup('openai', undefined, false, { OPENAI_API_KEY: 'environment-only' }), 'environment-only');
+		assert.equal(credentials.get('openai'), undefined);
+		assert.equal(credentials.resolveForSetup('openai', undefined, true, { OPENAI_API_KEY: 'ignored-after-reset' }), undefined);
+		assert.equal(credentials.resolveForSetup('openai', 'newly-entered', true, { OPENAI_API_KEY: 'ignored-after-reset' }), 'newly-entered');
+		assert.equal(credentials.get('openai'), 'newly-entered');
+	} finally {
+		fs.rmSync(home, { recursive: true, force: true });
+	}
+});
+
+test('configuration remembers models and Azure connection details across provider switches', () => {
+	const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cleanslate-provider-config-test-'));
+	try {
+		const config = new CliConfigStore(home);
+		config.save({ version: 1, provider: 'azureOpenAI', model: 'deployment-one', azureEndpoint: 'https://example.openai.azure.com', azureApiVersion: '2025-04-01-preview' });
+		config.save({ version: 1, provider: 'anthropic', model: 'model-two' });
+		assert.deepEqual(config.load(), {
+			version: 1,
+			provider: 'anthropic',
+			model: 'model-two',
+			models: { azureOpenAI: 'deployment-one', anthropic: 'model-two' },
+			azureEndpoint: 'https://example.openai.azure.com',
+			azureApiVersion: '2025-04-01-preview'
+		});
+	} finally {
+		fs.rmSync(home, { recursive: true, force: true });
+	}
+});
+
+test('provider reset clears only that provider profile', () => {
+	const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cleanslate-provider-reset-test-'));
+	try {
+		const config = new CliConfigStore(home);
+		config.save({ version: 1, provider: 'azureOpenAI', model: 'deployment-one', azureEndpoint: 'https://example.openai.azure.com', models: { anthropic: 'model-two' } });
+		config.removeProvider('azureOpenAI');
+		assert.deepEqual(config.load(), {
+			version: 1,
+			provider: 'azureOpenAI',
+			models: { anthropic: 'model-two' }
+		});
+	} finally {
+		fs.rmSync(home, { recursive: true, force: true });
+	}
+});
