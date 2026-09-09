@@ -34,7 +34,7 @@ import {
 	UpdatePromptChoice
 } from './updatePrompt.js';
 
-export const VERSION = '1.0.8';
+export const VERSION = '1.0.9';
 let activeApprovalPrompt: readline.Interface | undefined;
 
 export async function requestCommandApproval(
