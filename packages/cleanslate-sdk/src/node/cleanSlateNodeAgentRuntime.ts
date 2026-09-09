@@ -498,6 +498,10 @@ export class CleanSlateNodeAgentRuntime {
 		return this.cleanSlateService.getModels();
 	}
 
+	getManagedEntitlements(): Promise<ICleanSlateManagedEntitlements> {
+		return this.configService.getManagedEntitlements();
+	}
+
 	private async *runMessages(
 		messages: ReturnType<CleanSlateAgentSession['getMutableMessages']>,
 		objective: string,

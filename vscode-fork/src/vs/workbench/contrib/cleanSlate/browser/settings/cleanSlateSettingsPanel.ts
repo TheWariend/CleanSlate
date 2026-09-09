@@ -747,18 +747,8 @@ export class CleanSlateSettingsPanel {
 	}
 
 	private usedBudgetPercent(usage: ICleanSlateManagedEntitlements): number {
-		const limitMicros = Number(usage.limits?.monthly_budget_micros)
-			|| (Number(usage.limits?.monthly_budget_cents) * 10_000);
-		if (!Number.isFinite(limitMicros) || limitMicros <= 0) {
-			return 0;
-		}
-		const remainingMicros = usage.limits?.remaining_budget_micros !== undefined
-			? Number(usage.limits.remaining_budget_micros)
-			: Number(usage.limits?.remaining_budget_cents) * 10_000;
-		if (!Number.isFinite(remainingMicros)) {
-			return 0;
-		}
-		return Math.min(100, Math.max(0, Math.round(((limitMicros - remainingMicros) / limitMicros) * 100)));
+		const percent = Number(usage.usage?.monthly_used_percent);
+		return Number.isFinite(percent) ? Math.min(100, Math.max(0, Math.round(percent))) : 0;
 	}
 
 	private renderOpenAIModelSettings(config: ICleanSlateConfiguration): void {

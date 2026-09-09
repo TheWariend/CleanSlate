@@ -557,18 +557,13 @@ export interface ICleanSlateManagedEntitlements {
         readonly weekly_requests?: number;
         readonly requests?: number;
         readonly total_tokens?: number;
-        readonly cost_cents?: number;
-        readonly estimated_cost_micros?: number;
+        readonly monthly_used_percent?: number;
     };
     readonly limits?: {
         readonly daily_action_limit?: number;
         readonly weekly_action_limit?: number;
         readonly monthly_action_limit?: number;
-        readonly monthly_budget_cents?: number;
-        readonly monthly_budget_micros?: number;
         readonly monthly_token_limit?: number;
-        readonly remaining_budget_cents?: number;
-        readonly remaining_budget_micros?: number;
         readonly remaining_tokens?: number;
         readonly remaining_daily_actions?: number;
         readonly remaining_weekly_actions?: number;
