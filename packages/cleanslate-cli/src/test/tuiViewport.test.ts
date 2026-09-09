@@ -200,9 +200,9 @@ test('TUI collapses blank-line runs inside a turn to one paragraph break', () =>
 });
 
 test('TUI shows Working while tools run and Thinking otherwise', () => {
-	assert.equal(formatActivityStatus('running apply_edit'), 'Working…');
-	assert.equal(formatActivityStatus('running write_file'), 'Working…');
-	assert.equal(formatActivityStatus('running read_file'), 'Working…');
+	assert.equal(formatActivityStatus('running apply_edit'), 'Working');
+	assert.equal(formatActivityStatus('running write_file'), 'Working');
+	assert.equal(formatActivityStatus('running read_file'), 'Working');
 });
 
 test('TUI viewport never renders more rows than its content budget', () => {

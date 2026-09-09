@@ -136,6 +136,9 @@ Run `cleanslate` in a terminal to open the TUI. Useful commands:
 - `/clear` — clear the visible transcript
 - `/context` — inspect loaded project instructions and context usage
 - `/changes` — inspect the Git branch and working tree
+- `/workers` — browse workers and open their live transcripts; Ctrl+W also opens this view during a turn. Enter opens the selected worker, Esc goes back, and x cancels the selected worker.
+- `/workers cancel <number>` — cancel a worker using its number in the worker list.
+- `/usage` — show managed plan limits, reset times, and usage credits for the signed-in CleanSlate account.
 - `/diff` — open the colored diff viewer for current changes and individual agent turns
 - `/doctor` — validate the CLI, provider, workspace, Git, and MCP configuration
 - `/logout` — remove the active provider credential

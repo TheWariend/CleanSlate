@@ -15,7 +15,7 @@ import {
 	CleanSlateNodeAgentRuntime,
 	createNodeProviderConfiguration
 } from '@cleanslate/sdk/node';
-import { HELP_TEXT, ICliArguments, parseArguments } from './argv.js';
+import { apiKeyFromEnvironment, HELP_TEXT, ICliArguments, parseArguments } from './argv.js';
 import { CliConfigStore, CliCredentialStore, getCleanSlateWorkspaceStorageHome, ICliConfig } from './config.js';
 import { authenticateCleanSlateInBrowser } from './managedAuth.js';
 import { CliSessionStore, ICliSession, transcriptEntry } from './sessions.js';
@@ -25,6 +25,7 @@ import { CleanSlateTui } from './tui.js';
 import { CliProjectContext } from './projectContext.js';
 import { cliDoctorReport } from './doctor.js';
 import { CliPermissionPolicy } from './permissions.js';
+import { formatManagedUsage } from './usage.js';
 import {
 	CleanSlateUpdatePrompt,
 	installLatestCli,
@@ -104,11 +105,20 @@ export function providerSetupRequired(args: ICliArguments): boolean {
 		|| (args.provider === 'azureOpenAI' && !args.azureEndpoint);
 }
 
-async function runInteractiveSetup(initialProvider: ICliArguments['provider']): Promise<ICliSetupResult | undefined> {
+async function runInteractiveSetup(initialProvider: ICliArguments['provider'], credentialStore: CliCredentialStore, config: ICliConfig, providerSelected = false, forceCredential = false): Promise<ICliSetupResult | undefined> {
 	let result: ICliSetupResult | undefined;
 	clearInteractiveScreen();
 	const app = render(createElement(CleanSlateSetupTui, {
 		initialProvider,
+		providerSelected,
+		hasCredential: provider => forceCredential && provider === initialProvider
+			? false
+			: !!(credentialStore.get(provider) ?? apiKeyFromEnvironment(provider, process.env)),
+		savedSetup: provider => ({
+			model: config.models?.[provider] ?? (config.provider === provider ? config.model : undefined),
+			azureEndpoint: provider === 'azureOpenAI' ? config.azureEndpoint : undefined,
+			azureApiVersion: provider === 'azureOpenAI' ? config.azureApiVersion : undefined
+		}),
 		onComplete: value => { result = value; },
 		onCancel: () => { result = undefined; }
 	}), { exitOnCtrlC: false });
@@ -192,7 +202,7 @@ async function completeManagedSetup(args: ICliArguments, setup: ICliSetupResult,
 	return models.map(model => model.id);
 }
 
-async function loadProviderModels(args: ICliArguments, setup: ICliSetupResult): Promise<string[]> {
+async function loadProviderModels(args: ICliArguments, setup: ICliSetupResult, credentialStore: CliCredentialStore): Promise<string[]> {
 	if (setup.provider === 'azureOpenAI') {
 		return [];
 	}
@@ -222,11 +232,19 @@ async function loadProviderModels(args: ICliArguments, setup: ICliSetupResult): 
 			azureEmbeddingApiVersion: args.azureEmbeddingApiVersion,
 			azureEmbeddingDeploymentName: args.azureEmbeddingDeploymentName
 		}),
+		onManagedTokenRefresh: token => {
+			credentialStore.set('cleanslate', token);
+			setup.apiKey = token;
+			args.apiKey = token;
+		},
 		approveCommand: async () => false
 	});
 	try {
 		return await runtime.getModels();
 	} catch (error) {
+		if (setup.provider === 'cleanslate') {
+			throw error;
+		}
 		process.stderr.write(`Could not load the provider catalog: ${error instanceof Error ? error.message : String(error)}\n`);
 		return [];
 	} finally {
@@ -238,18 +256,17 @@ async function completeInteractiveSetup(
 	args: ICliArguments,
 	setup: ICliSetupResult,
 	credentialStore: CliCredentialStore,
-	configStore: CliConfigStore
+	configStore: CliConfigStore,
+	forceCredential = false
 ): Promise<boolean> {
-	const previousModel = args.provider === setup.provider ? args.model : undefined;
+	const previousModel = args.provider === setup.provider ? args.model : setup.model || undefined;
 	setup.model = previousModel ?? setup.model;
+	setup.apiKey = credentialStore.resolveForSetup(setup.provider, setup.apiKey, forceCredential);
 	applySetupResult(args, setup);
-	if (setup.apiKey) {
-		credentialStore.set(setup.provider, setup.apiKey);
-	}
 	configStore.save(configFromArguments(args));
-	const models = setup.provider === 'cleanslate'
+	const models = setup.provider === 'cleanslate' && !setup.apiKey
 		? await completeManagedSetup(args, setup, credentialStore)
-		: await loadProviderModels(args, setup);
+		: await loadProviderModels(args, setup, credentialStore);
 	const model = await runModelSetup(setup.provider, models, previousModel);
 	if (!model) {
 		return false;
@@ -262,6 +279,31 @@ async function completeInteractiveSetup(
 function validateOneShot(args: ICliArguments): void {
 	if (!args.task) {
 		throw new Error('A task is required. Run cleanslate --help for usage.');
+	}
+}
+
+async function managedUsageReport(args: ICliArguments, credentialStore: CliCredentialStore, configStore: CliConfigStore): Promise<string> {
+	const token = credentialStore.get('cleanslate') ?? apiKeyFromEnvironment('cleanslate', process.env);
+	if (!token) {
+		throw new Error('Sign in to CleanSlate with /setup to view usage.');
+	}
+	const config = configStore.load();
+	const runtime = new CleanSlateNodeAgentRuntime({
+		rootPath: args.cwd,
+		workspaceStorageHome: getCleanSlateWorkspaceStorageHome(),
+		sessionId: `usage-${Date.now().toString(36)}`,
+		configuration: createNodeProviderConfiguration({
+			provider: 'cleanslate',
+			model: config.models?.cleanslate ?? (config.provider === 'cleanslate' ? config.model : undefined) ?? '',
+			apiKey: token
+		}),
+		onManagedTokenRefresh: refreshed => credentialStore.set('cleanslate', refreshed),
+		approveCommand: async () => false
+	});
+	try {
+		return formatManagedUsage(await runtime.getManagedEntitlements());
+	} finally {
+		runtime.dispose();
 	}
 }
 
@@ -366,7 +408,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 	if (useTui && (args.setup || providerSetupRequired(args))) {
 		const leaveSetupScreen = enterInteractiveScreen();
 		try {
-			const setup = await runInteractiveSetup(args.provider);
+			const setup = await runInteractiveSetup(args.provider, credentialStore, configStore.load());
 			if (!setup) {
 				return 130;
 			}
@@ -386,7 +428,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 	if (useTui) {
 		let pendingInitialTask = args.task;
 		while (true) {
-			let setupRequested = false;
+			const setupRequest: { value?: { provider?: ICliArguments['provider']; forceCredential?: boolean } } = {};
 			// No alternate screen: CleanSlateTui flushes settled turns once through Ink's
 			// <Static>, so finished conversation lands in the terminal's own scrollback and
 			// stays reachable with the wheel and scrollbar. The alternate screen has no
@@ -403,10 +445,19 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 				initialTask: pendingInitialTask,
 				onConfigurationChange: changed => configStore.save(configFromArguments(changed)),
 				getCredential: provider => credentialStore.get(provider),
+				getConfiguredModel: provider => {
+					const configured = configStore.load();
+					return configured.models?.[provider] ?? (configured.provider === provider ? configured.model : undefined);
+				},
 				onCredentialChange: (provider, credential) => credentialStore.set(provider, credential),
 				onCredentialRemove: provider => credentialStore.remove(provider),
+				onProviderReset: provider => {
+					credentialStore.remove(provider);
+					configStore.removeProvider(provider);
+				},
 				onDoctor: () => cliDoctorReport(args, credentialStore),
-				onRequestSetup: () => { setupRequested = true; }
+				onUsage: () => managedUsageReport(args, credentialStore, configStore),
+				onRequestSetup: (provider, forceCredential) => { setupRequest.value = { provider, forceCredential }; }
 			}), { exitOnCtrlC: false });
 			// MUST come after render(): Ink's `patchConsole` (on by default) replaces the console
 			// methods when its instance is constructed and re-renders whatever it captures ABOVE
@@ -419,6 +470,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 			app.clear();
 			restoreEngineLogs();
 			pendingInitialTask = undefined;
+			const setupRequested = setupRequest.value;
 			if (!setupRequested) {
 				return 0;
 			}
@@ -426,12 +478,18 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 			const leaveSetupScreen = enterInteractiveScreen();
 			let setup: ICliSetupResult | undefined;
 			try {
-				setup = await runInteractiveSetup(args.provider);
+				setup = await runInteractiveSetup(
+					setupRequested.provider ?? args.provider,
+					credentialStore,
+					configStore.load(),
+					setupRequested.provider !== undefined,
+					setupRequested.forceCredential === true
+				);
 			} finally {
 				leaveSetupScreen();
 			}
 			if (setup) {
-				if (!await completeInteractiveSetup(args, setup, credentialStore, configStore)) {
+				if (!await completeInteractiveSetup(args, setup, credentialStore, configStore, setupRequested.forceCredential === true)) {
 					continue;
 				}
 				validateProvider(args);
@@ -450,8 +508,8 @@ function applyStoredConfig(args: ICliArguments, config: ICliConfig): void {
 	if (!args.providerSpecified && config.provider) {
 		args.provider = config.provider;
 	}
-	if (!args.modelSpecified && !args.model && config.model) {
-		args.model = config.model;
+	if (!args.modelSpecified && !args.model) {
+		args.model = config.models?.[args.provider] ?? (config.provider === args.provider ? config.model : undefined);
 	}
 	if (!args.baseUrl && config.baseUrl) {
 		args.baseUrl = config.baseUrl;

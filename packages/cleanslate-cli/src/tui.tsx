@@ -9,9 +9,11 @@ import {
 	CleanSlateNodeAgentRuntime,
 	createNodeProviderConfiguration
 } from '@cleanslate/sdk/node';
-import { apiKeyFromEnvironment, ICliArguments, SUPPORTED_PROVIDERS } from './argv.js';
+import { apiKeyFromEnvironment, CliProvider, ICliArguments, SUPPORTED_PROVIDERS } from './argv.js';
 import { CleanSlateTerminalLogo } from './brand.js';
 import { LiveTurnBuffer } from './liveTurn.js';
+import { ApprovalQueue } from './approvalQueue.js';
+import { updateWorkers, type CliWorker } from './workers.js';
 import { CleanSlateStreamReveal, REVEAL_TICK_MS } from '@cleanslate/sdk/agent/cleanSlateStreamReveal.js';
 import { sanitizeToolResultForRenderer } from '@cleanslate/sdk/agent/cleanSlateToolResultPromptSerializer.js';
 import { getCleanSlateContextDefaults, resolveCleanSlateReasoningLevelOptions } from '@cleanslate/sdk/protocol/cleanSlateModelCapabilities.js';
@@ -28,7 +30,7 @@ import {
 import { createEditPreview, ICliEditPreview } from './editPreview.js';
 import { CliPermissionMode, CliPermissionPolicy } from './permissions.js';
 import { getCleanSlateWorkspaceStorageHome } from './config.js';
-import { isTerminalMouseEvent, terminalMouseEvent, terminalMouseWheelDirection } from './terminalScreen.js';
+import { clearInteractiveScreen, isTerminalMouseEvent, terminalMouseEvent, terminalMouseWheelDirection } from './terminalScreen.js';
 import { displayPath } from './displayPath.js';
 import { useTerminalSize } from './useTerminalSize.js';
 import {
@@ -45,10 +47,13 @@ interface ITuiProps {
 	initialTask?: string;
 	onConfigurationChange?: (args: ICliArguments) => void;
 	getCredential?: (provider: ICliArguments['provider']) => string | undefined;
+	getConfiguredModel?: (provider: ICliArguments['provider']) => string | undefined;
 	onCredentialChange?: (provider: ICliArguments['provider'], credential: string) => void;
 	onCredentialRemove?: (provider: ICliArguments['provider']) => boolean;
+	onProviderReset?: (provider: ICliArguments['provider']) => void;
 	onDoctor?: () => string;
-	onRequestSetup?: () => void;
+	onUsage?: () => Promise<string>;
+	onRequestSetup?: (provider?: CliProvider, forceCredential?: boolean) => void;
 }
 
 interface IApprovalRequest {
@@ -59,13 +64,11 @@ interface IApprovalRequest {
 
 interface IPendingApproval {
 	request: IApprovalRequest;
-	resolve: (approved: boolean) => void;
 }
 
 interface IPendingEditApproval {
 	request: { toolName: string; category?: string; input: unknown };
 	preview?: ICliEditPreview;
-	resolve: (approved: boolean) => void;
 }
 
 interface IModelTerminationNotice {
@@ -189,13 +192,16 @@ const COMMAND_PALETTE_ITEMS: readonly ICommandPaletteItem[] = [
 	{ id: '/setup', label: 'Provider setup', description: 'Change provider, credentials, and model' },
 	{ id: '/models', label: 'Models', description: 'Browse models for the active provider' },
 	{ id: '/model', label: 'Set model', description: 'Switch directly to a model ID', requiresArguments: true },
-	{ id: '/provider', label: 'Set provider', description: 'Switch using a saved credential', requiresArguments: true },
+	{ id: '/provider', label: 'Provider', description: 'Choose a configured provider' },
+	{ id: '/provider reset', label: 'Reset provider', description: 'Clear the active provider configuration' },
 	{ id: '/reasoning', label: 'Reasoning', description: 'Choose reasoning effort' },
-	{ id: '/permissions', label: 'Permissions', description: 'Switch read-only, default, or full mode', requiresArguments: true },
+	{ id: '/permissions', label: 'Permissions', description: 'Choose read-only, default, or full mode' },
 	{ id: '/new', label: 'New session', description: 'Start a clean session' },
 	{ id: '/sessions', label: 'Sessions', description: 'Browse saved sessions' },
+	{ id: '/workers', label: 'Workers', description: 'Inspect background workers and their output' },
 	{ id: '/resume', label: 'Resume', description: 'Resume a session by ID', requiresArguments: true },
 	{ id: '/status', label: 'Status', description: 'Show provider and execution status' },
+	{ id: '/usage', label: 'Usage', description: 'Show managed plan limits and credits' },
 	{ id: '/context', label: 'Context', description: 'Show loaded project instructions and attached files' },
 	{ id: '/changes', label: 'Changes', description: 'Show the current Git working tree' },
 	{ id: '/diff', label: 'Diff', description: 'Review current and per-turn changes' },
@@ -764,10 +770,10 @@ export function padTranscriptViewportLines(
 }
 
 export function formatActivityStatus(status: string): string {
-	// “Thinking…” while the model reasons between tool calls, “Working…” while a tool runs.
+	// “Thinking” while the model reasons between tool calls, “Working” while a tool runs.
 	const runningMatch = /^running (.+)$/.exec(status);
 	if (runningMatch) {
-		return 'Working…';
+		return 'Working';
 	}
 	switch (status) {
 		case 'cancelling':
@@ -777,7 +783,7 @@ export function formatActivityStatus(status: string): string {
 		case 'waiting for answer':
 			return 'Waiting for answer…';
 		default:
-			return 'Thinking…';
+			return 'Thinking';
 	}
 }
 
@@ -792,13 +798,14 @@ export function formatToolNameForDisplay(toolName: string): string {
 
 // IDE parity with cleanSlate-working-sheen: a narrow highlight band sweeps across the working
 // label while a turn streams, instead of leaving static text under the spinner.
-export const SHIMMER_FRAME_COUNT = 16;
-export const SHIMMER_TICK_MS = 90;
+export const SHIMMER_FRAME_COUNT = 40;
+export const SHIMMER_TICK_MS = 50;
 const SHIMMER_BAND = 7;
 
 export interface IShimmerSegment {
 	text: string;
 	lit: boolean;
+	color: string;
 }
 
 export function shimmerSegments(label: string, frame: number): IShimmerSegment[] {
@@ -808,18 +815,21 @@ export function shimmerSegments(label: string, frame: number): IShimmerSegment[]
 	const cycle = ((frame % SHIMMER_FRAME_COUNT) + SHIMMER_FRAME_COUNT) % SHIMMER_FRAME_COUNT;
 	// The band center sweeps across the label itself, so part of the highlight is always
 	// visible instead of starting each sweep with a fully unlit placeholder.
-	const center = Math.round((cycle / (SHIMMER_FRAME_COUNT - 1)) * (label.length - 1));
-	return [...label].map((char, index) => ({
-		text: char,
-		lit: Math.abs(index - center) * 2 < SHIMMER_BAND
-	}));
+	const characters = [...label];
+	const center = (cycle / SHIMMER_FRAME_COUNT) * (characters.length + SHIMMER_BAND) - SHIMMER_BAND / 2;
+	return characters.map((char, index) => {
+		const proximity = Math.max(0, 1 - Math.abs(index - center) / SHIMMER_BAND);
+		const brightness = proximity * proximity * (3 - 2 * proximity);
+		const channel = Math.round(125 + brightness * 125).toString(16).padStart(2, '0');
+		return { text: char, lit: brightness > 0.2, color: `#${channel}${channel}${channel}` };
+	});
 }
 
 function ShimmerLabel({ label, frame }: { label: string; frame: number }): React.JSX.Element {
 	return (
 		<Text>
 			{shimmerSegments(label, frame).map((segment, index) => (
-				<Text key={index} color={segment.lit ? COLORS.shimmer : COLORS.muted}>{segment.text}</Text>
+				<Text key={index} color={segment.color}>{segment.text}</Text>
 			))}
 		</Text>
 	);
@@ -973,7 +983,7 @@ function TranscriptViewportLine({ line, width }: { line: ITranscriptViewportLine
 		case 'blank':
 			return <Text>{text}</Text>;
 		case 'user':
-			return <Text color={COLORS.accent} bold>{text}</Text>;
+			return <Text color="#f4f4f5" backgroundColor="#303038" bold>{text}</Text>;
 		case 'assistant':
 			return line.text.startsWith('↳ ')
 				? <MarkdownText text={line.text.slice(2)} width={width} prefix={<Text color={COLORS.success} bold>↳ </Text>} />
@@ -1290,7 +1300,89 @@ function ModelPicker({ models, current, onSelect, onCancel }: {
 	);
 }
 
-export function CleanSlateTui({ args, store, initialSession, initialTask, onConfigurationChange, getCredential, onCredentialChange, onCredentialRemove, onDoctor, onRequestSetup }: ITuiProps) {
+const CLI_PROVIDER_LABELS: Record<CliProvider, string> = {
+	cleanslate: 'CleanSlate',
+	openai: 'OpenAI',
+	azureOpenAI: 'Azure OpenAI',
+	anthropic: 'Anthropic',
+	gemini: 'Google Gemini',
+	grok: 'xAI Grok',
+	nvidia: 'NVIDIA',
+	openrouter: 'OpenRouter',
+	custom: 'Custom OpenAI-compatible',
+	bedrock: 'AWS Bedrock'
+};
+
+function ProviderPicker({ current, getModel, reset = false, onSelect, onCancel }: {
+	current: CliProvider;
+	getModel: (provider: CliProvider) => string | undefined;
+	reset?: boolean;
+	onSelect: (provider: CliProvider) => void;
+	onCancel: () => void;
+}) {
+	const [selected, setSelected] = useState(Math.max(0, SUPPORTED_PROVIDERS.indexOf(current)));
+	useInput((_input, key) => {
+		if (key.upArrow) {
+			setSelected(value => Math.max(0, value - 1));
+		} else if (key.downArrow) {
+			setSelected(value => Math.min(SUPPORTED_PROVIDERS.length - 1, value + 1));
+		} else if (key.return) {
+			onSelect(SUPPORTED_PROVIDERS[selected]);
+		} else if (key.escape) {
+			onCancel();
+		}
+	});
+	return (
+		<Box borderStyle="round" borderColor={COLORS.accent} flexDirection="column" paddingX={1} marginTop={1}>
+			<Text bold>{reset ? 'Reset provider' : 'Providers'}</Text>
+			{SUPPORTED_PROVIDERS.map((provider, index) => {
+				const model = getModel(provider);
+				return <Text key={provider} inverse={selected === index}>
+					{selected === index ? '› ' : '  '}{CLI_PROVIDER_LABELS[provider]}{provider === current ? '  ✓' : model ? `  · ${model}` : '  · setup required'}
+				</Text>;
+			})}
+			<Text color={COLORS.muted}>↑/↓ select · enter {reset ? 'reset' : 'switch'} · esc close</Text>
+		</Box>
+	);
+}
+
+const PERMISSION_OPTIONS: ReadonlyArray<{ mode: CliPermissionMode; description: string }> = [
+	{ mode: 'read-only', description: 'inspect without changing files or running commands' },
+	{ mode: 'default', description: 'ask before commands and edits' },
+	{ mode: 'full', description: 'allow commands and edits for this session' }
+];
+
+function PermissionPicker({ current, onSelect, onCancel }: {
+	current: CliPermissionMode;
+	onSelect: (mode: CliPermissionMode) => void;
+	onCancel: () => void;
+}) {
+	const [selected, setSelected] = useState(Math.max(0, PERMISSION_OPTIONS.findIndex(option => option.mode === current)));
+	useInput((_input, key) => {
+		if (key.upArrow) {
+			setSelected(value => Math.max(0, value - 1));
+		} else if (key.downArrow) {
+			setSelected(value => Math.min(PERMISSION_OPTIONS.length - 1, value + 1));
+		} else if (key.return) {
+			onSelect(PERMISSION_OPTIONS[selected].mode);
+		} else if (key.escape) {
+			onCancel();
+		}
+	});
+	return (
+		<Box borderStyle="round" borderColor={COLORS.accent} flexDirection="column" paddingX={1} marginTop={1}>
+			<Text bold>Permissions</Text>
+			{PERMISSION_OPTIONS.map((option, index) => (
+				<Text key={option.mode} inverse={selected === index}>
+					{selected === index ? '› ' : '  '}{option.mode}{option.mode === current ? '  ✓' : ''}  <Text color={COLORS.muted}>· {option.description}</Text>
+				</Text>
+			))}
+			<Text color={COLORS.muted}>↑/↓ select · enter apply · esc close</Text>
+		</Box>
+	);
+}
+
+export function CleanSlateTui({ args, store, initialSession, initialTask, onConfigurationChange, getCredential, getConfiguredModel, onCredentialChange, onCredentialRemove, onProviderReset, onDoctor, onUsage, onRequestSetup }: ITuiProps) {
 	const { exit } = useApp();
 	const { stdout } = useStdout();
 	const terminalSize = useTerminalSize(stdout);
@@ -1325,11 +1417,27 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	}, [running]);
 	const [approval, setApproval] = useState<IPendingApproval | undefined>();
 	const [editApproval, setEditApproval] = useState<IPendingEditApproval | undefined>();
+	const approvalQueue = useMemo(() => new ApprovalQueue<
+		{ kind: 'command'; request: IApprovalRequest } |
+		{ kind: 'edit'; request: IPendingEditApproval['request']; preview?: ICliEditPreview }
+	>(pending => {
+		setApproval(pending?.kind === 'command' ? { request: pending.request } : undefined);
+		setEditApproval(pending?.kind === 'edit' ? { request: pending.request, preview: pending.preview } : undefined);
+	}), []);
 	const [modelTermination, setModelTermination] = useState<IModelTerminationNotice | undefined>();
 	const [planApproval, setPlanApproval] = useState<IPlanApprovalNotice | undefined>();
 	const [allowCommandsForSession, setAllowCommandsForSession] = useState(false);
 	const allowCommandsRef = useRef(false);
 	const [showSessions, setShowSessions] = useState(false);
+	const [showProviders, setShowProviders] = useState(false);
+	const [resetProviderSelection, setResetProviderSelection] = useState(false);
+	const [showPermissions, setShowPermissions] = useState(false);
+	const [workers, setWorkers] = useState<CliWorker[]>([]);
+	const [workersOpen, setWorkersOpen] = useState(false);
+	const [workerSelection, setWorkerSelection] = useState(0);
+	const [workerDetail, setWorkerDetail] = useState(false);
+	const [workerScroll, setWorkerScroll] = useState(0);
+	const [workerToolsExpanded, setWorkerToolsExpanded] = useState(false);
 	const [models, setModels] = useState<string[] | undefined>();
 	const [reasoningOptions, setReasoningOptions] = useState<ICliReasoningOption[] | undefined>();
 	const initialInteractiveMode: CliInteractiveMode = executionInteractiveMode(args.permissionMode);
@@ -1463,6 +1571,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	};
 
 	const createRuntime = (targetSession: ICliSession, activePermissionMode: CliPermissionMode = permissionMode) => {
+		approvalQueue.cancel();
 		runtimeRef.current?.dispose();
 		const permissionPolicy = new CliPermissionPolicy(activePermissionMode);
 		const runtime = new CleanSlateNodeAgentRuntime({
@@ -1491,8 +1600,16 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				azureEmbeddingApiVersion: args.azureEmbeddingApiVersion,
 				azureEmbeddingDeploymentName: args.azureEmbeddingDeploymentName
 			}),
-			onManagedTokenRefresh: token => onCredentialChange?.('cleanslate', token),
+			onManagedTokenRefresh: token => {
+				args.apiKey = token;
+				onCredentialChange?.('cleanslate', token);
+			},
 			additionalContext: task => projectContext.build(task),
+			onAgentEvent: event => {
+				if (event.type === 'child_agent') {
+					setWorkers(previous => updateWorkers(previous, { type: event.eventType, agent: event.agent, streamPart: event.streamPart, delta: event.delta }));
+				}
+			},
 			resolveAttachments: task => projectContext.imageAttachments(task).map(attachment => ({
 				type: 'image_url',
 				image_url: { url: attachment.dataUrl }
@@ -1521,19 +1638,20 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 					// Approval remains available with the structured tool input when a
 					// local preview cannot be computed safely.
 				}
-				return new Promise<boolean>(resolve => setEditApproval({
+				return approvalQueue.request({
+					kind: 'edit',
 					request,
-					preview,
-					resolve
-				}));
+					preview
+				}, abortRef.current?.signal);
 			},
 			approveCommand: request => {
 				if (permissionPolicy.allowsCommandWithoutPrompt() || allowCommandsRef.current) {
 					return Promise.resolve(true);
 				}
-				return new Promise<boolean>(resolve => setApproval({ request, resolve }));
+				return approvalQueue.request({ kind: 'command', request }, abortRef.current?.signal);
 			},
 			onProgress: event => {
+				if (event.agentId) { return; }
 				if (event.type === 'command_output' && typeof event.chunk === 'string') {
 					replaceTranscript(entries => {
 						const index = entries.findLastIndex(entry => entry.kind === 'tool' && entry.status === 'running');
@@ -1558,7 +1676,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			initialTaskStarted.current = true;
 			void submit(initialTask);
 		}
-		return () => runtimeRef.current?.dispose();
+		return () => { approvalQueue.cancel(); runtimeRef.current?.dispose(); };
 	}, []);
 
 	const decideApproval = (approved: boolean, forSession = false) => {
@@ -1566,18 +1684,14 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			allowCommandsRef.current = true;
 			setAllowCommandsForSession(true);
 		}
-		const pending = approval;
-		setApproval(undefined);
-		pending?.resolve(approved);
+		approvalQueue.decide(approved);
 	};
 
 	const decideEditApproval = (approved: boolean, forSession = false) => {
 		if (forSession && approved) {
 			selectInteractiveMode('auto');
 		}
-		const pending = editApproval;
-		setEditApproval(undefined);
-		pending?.resolve(approved);
+		approvalQueue.decide(approved);
 	};
 
 	const runStream = async (stream: AsyncIterable<any>, streamMode: 'execution' | 'planning') => {
@@ -1754,7 +1868,10 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	};
 
 	const switchSession = (next: ICliSession) => {
+		setWorkers([]);
+		setWorkersOpen(false);
 		persist();
+		clearInteractiveScreen(stdout);
 		sessionRef.current = next;
 		setSession(next);
 		setTranscript(next.transcript);
@@ -1795,6 +1912,19 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		append(transcriptEntry('system', `Reasoning level set to ${level}.`));
 	};
 
+	const applyPermissionMode = (requested: CliPermissionMode) => {
+		setShowPermissions(false);
+		setPermissionMode(requested);
+		selectInteractiveMode(executionInteractiveMode(requested));
+		setAllowCommandsForSession(false);
+		allowCommandsRef.current = false;
+		args.permissionMode = requested;
+		args.permissionSpecified = true;
+		createRuntime(sessionRef.current, requested);
+		onConfigurationChange?.(args);
+		append(transcriptEntry('system', `Permission mode set to ${requested}.`));
+	};
+
 	const switchModel = (model: string) => {
 		persist();
 		args.model = model;
@@ -1804,6 +1934,62 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		createRuntime(sessionRef.current);
 		onConfigurationChange?.(args);
 		append(transcriptEntry('system', `Switched to ${args.provider}/${model}.`));
+	};
+
+	const switchProvider = (provider: CliProvider, model: string) => {
+		persist();
+		const apiKey = getCredential?.(provider) ?? apiKeyFromEnvironment(provider, process.env);
+		args.provider = provider;
+		args.model = model;
+		args.apiKey = apiKey;
+		sessionRef.current.provider = provider;
+		sessionRef.current.model = model;
+		setSession({ ...sessionRef.current });
+		setShowProviders(false);
+		createRuntime(sessionRef.current);
+		onConfigurationChange?.(args);
+		append(transcriptEntry('system', `Switched to ${provider}/${model}.`));
+	};
+
+	const selectProvider = (provider: CliProvider) => {
+		const model = getConfiguredModel?.(provider) ?? (provider === args.provider ? args.model : undefined);
+		const credential = getCredential?.(provider);
+		const needsCredential = provider !== 'bedrock' && provider !== 'custom' && !credential;
+		const needsProviderSettings = provider === 'azureOpenAI' && !args.azureEndpoint
+			|| provider === 'custom' && !args.baseUrl
+			|| provider === 'bedrock' && !args.bedrockRegion;
+		if (!model || needsCredential || needsProviderSettings) {
+			persist();
+			args.provider = provider;
+			args.model = model;
+			args.apiKey = credential;
+			setShowProviders(false);
+			onRequestSetup?.(provider, needsCredential);
+			exit();
+			return;
+		}
+		switchProvider(provider, model);
+	};
+
+	const resetProvider = (provider: CliProvider) => {
+		persist();
+		onProviderReset?.(provider);
+		args.provider = provider;
+		args.apiKey = undefined;
+		args.model = undefined;
+		if (provider === 'azureOpenAI') {
+			args.azureEndpoint = undefined;
+			args.azureApiVersion = undefined;
+		} else if (provider === 'custom') {
+			args.baseUrl = undefined;
+		} else if (provider === 'bedrock') {
+			args.bedrockRegion = undefined;
+			args.bedrockProfile = undefined;
+		}
+		setShowProviders(false);
+		setResetProviderSelection(false);
+		onRequestSetup?.(provider, true);
+		exit();
 	};
 
 	const loadModels = async () => {
@@ -1826,6 +2012,18 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		// A cleared palette query must not keep the old highlight: the next '/' would otherwise
 		// land on a stale index instead of reopening the list from the top.
 		setCommandSelection(0);
+		if (value === '/workers' && !approval && !editApproval) {
+			setWorkersOpen(true);
+			setWorkerDetail(false);
+			return;
+		}
+		if (value.startsWith('/workers cancel ') && !approval && !editApproval) {
+			const selected = Number(value.slice('/workers cancel '.length));
+			const worker = Number.isInteger(selected) ? workers[selected - 1] : undefined;
+			if (worker) { runtimeRef.current?.cancelChildAgent(worker.agent.id); }
+			else { append(transcriptEntry('error', 'Choose a worker number from /workers.')); }
+			return;
+		}
 		if (running || approval || editApproval) {
 			return;
 		}
@@ -1853,8 +2051,13 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			exit();
 			return;
 		}
+		if (value === '/provider') {
+			setResetProviderSelection(false);
+			setShowProviders(true);
+			return;
+		}
 		if (value === '/help') {
-			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /models · /model <id> · /provider <name> <model> · /reasoning <level> · /plan · /auto · /manual · shift+tab mode · /permissions read-only|default|full · /context · /changes · /diff · /details · /doctor · /logout · /clear · /exit'));
+			append(transcriptEntry('system', '/setup · /new · /sessions · /resume <id> · /models · /model <id> · /provider <name> <model> · /provider reset · /reasoning <level> · /plan · /auto · /manual · shift+tab mode · /permissions read-only|default|full · /context · /changes · /diff · /details · /usage · /doctor · /logout · /clear · /exit'));
 			return;
 		}
 		if (value === '/details') {
@@ -1882,6 +2085,11 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			switchModel(value.slice('/model '.length).trim());
 			return;
 		}
+		if (value === '/provider reset') {
+			setResetProviderSelection(true);
+			setShowProviders(true);
+			return;
+		}
 		if (value.startsWith('/provider ')) {
 			const [providerName, ...modelParts] = value.slice('/provider '.length).trim().split(/\s+/);
 			const provider = providerName?.toLowerCase() === 'azure' || providerName?.toLowerCase() === 'azureopenai'
@@ -1897,16 +2105,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				append(transcriptEntry('error', `No saved credential for ${provider}. Run cleanslate --setup to connect it.`));
 				return;
 			}
-			persist();
-			args.provider = provider as any;
-			args.model = model;
-			args.apiKey = apiKey;
-			sessionRef.current.provider = provider;
-			sessionRef.current.model = model;
-			setSession({ ...sessionRef.current });
-			createRuntime(sessionRef.current);
-			onConfigurationChange?.(args);
-			append(transcriptEntry('system', `Switched to ${provider}/${model}.`));
+			switchProvider(provider as CliProvider, model);
 			return;
 		}
 		if (value.startsWith('/reasoning ')) {
@@ -1943,7 +2142,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			return;
 		}
 		if (value === '/permissions') {
-			append(transcriptEntry('system', `Permission mode: ${permissionMode}. Use /permissions read-only|default|full.`));
+			setShowPermissions(true);
 			return;
 		}
 		if (value.startsWith('/permissions ')) {
@@ -1952,15 +2151,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				append(transcriptEntry('error', 'Use /permissions read-only|default|full.'));
 				return;
 			}
-			setPermissionMode(requested);
-			selectInteractiveMode(executionInteractiveMode(requested));
-			setAllowCommandsForSession(false);
-			allowCommandsRef.current = false;
-			args.permissionMode = requested;
-			args.permissionSpecified = true;
-			createRuntime(sessionRef.current, requested);
-			onConfigurationChange?.(args);
-			append(transcriptEntry('system', `Permission mode set to ${requested}.`));
+			applyPermissionMode(requested);
 			return;
 		}
 		if (value === '/plan') {
@@ -2019,6 +2210,17 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			append(transcriptEntry('system', onDoctor?.() ?? 'Doctor is unavailable.'));
 			return;
 		}
+		if (value === '/usage') {
+			setStatus('loading usage');
+			try {
+				append(transcriptEntry('system', await onUsage?.() ?? 'Usage is unavailable.'));
+				setStatus('ready');
+			} catch (error) {
+				append(transcriptEntry('error', `Could not load usage: ${error instanceof Error ? error.message : String(error)}`));
+				setStatus('error');
+			}
+			return;
+		}
 		if (value === '/logout') {
 			const removed = onCredentialRemove?.(args.provider) ?? false;
 			args.apiKey = undefined;
@@ -2038,6 +2240,23 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	};
 
 	useInput((inputValue, key) => {
+		if (key.ctrl && inputValue === 'w' && !approval && !editApproval) {
+			setWorkersOpen(value => !value);
+			return;
+		}
+		if (workersOpen && !approval && !editApproval) {
+			if (key.ctrl && inputValue === 'o') { setWorkerToolsExpanded(value => !value); return; }
+			if (key.ctrl && inputValue === 'c') { setWorkersOpen(false); }
+			else if (key.escape) { workerDetail ? setWorkerDetail(false) : setWorkersOpen(false); }
+			else if (key.return) { setWorkerDetail(true); setWorkerScroll(0); }
+			else if (key.upArrow) { workerDetail ? setWorkerScroll(value => value + 1) : setWorkerSelection(value => Math.max(0, value - 1)); }
+			else if (key.downArrow) { workerDetail ? setWorkerScroll(value => Math.max(0, value - 1)) : setWorkerSelection(value => Math.min(Math.max(0, workers.length - 1), value + 1)); }
+			else if (inputValue === 'x') { const worker = workers[workerSelection]; if (worker) { runtimeRef.current?.cancelChildAgent(worker.agent.id); } }
+			return;
+		}
+		if (showProviders || showPermissions) {
+			return;
+		}
 		const mouse = terminalMouseEvent(inputValue);
 		const wheelDirection = terminalMouseWheelDirection(inputValue);
 		if (planApproval || isAwaitingPlanApproval()) {
@@ -2172,7 +2391,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const footerRows = Math.max(1, Math.ceil(FOOTER_HELP.length / viewportColumns));
 	// The streaming activity row above the composer is fixed chrome, so the live transcript
 	// area gives up a row for it instead of pushing the prompt frame off-screen.
-	const activityVisible = running && !approval && !editApproval && !showSessions && !modelTermination && !diffReviews;
+	const activityVisible = running && !approval && !editApproval && !showSessions && !showProviders && !showPermissions && !modelTermination && !diffReviews;
 	const contentRows = Math.max(1, viewportRows - 9 - footerRows - overlayRows - (modelTermination ? 1 : 0) - (activityVisible ? 1 : 0));
 	// Settled turns: safe to flush once into the terminal's real scrollback and never repaint.
 	// While a turn runs, entries at/after turnStartIndexRef are still mutating and stay out.
@@ -2254,7 +2473,18 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			</Static>
 
 			<Box flexDirection="column" paddingX={1}>
-				{activeDiffReview && diffReviews
+				{workersOpen ? <>
+					<Text bold>Workers</Text>
+					{workers.length === 0 && <Text color={COLORS.muted}>No workers in this session.</Text>}
+					{workerDetail && workers[workerSelection]
+						? <>
+							<Text>{workers[workerSelection].agent.description} · {workers[workerSelection].agent.status}</Text>
+							{visibleTranscriptLines(workers[workerSelection].transcript, contentWidth, Math.max(3, contentRows - 4), workerScroll, workerToolsExpanded).map(line => <TranscriptViewportLine key={line.key} line={line} width={contentWidth} />)}
+							{!workers[workerSelection].transcript.some(entry => entry.kind === 'assistant') && <Text color={COLORS.muted}>{workers[workerSelection].agent.status === 'running' ? 'Worker is still running; no reply text received yet.' : 'No reply text returned.'}</Text>}
+						</>
+						: workers.slice(Math.max(0, workerSelection - 5), Math.max(0, workerSelection - 5) + Math.max(1, contentRows - 3)).map(worker => <Text key={worker.agent.id} inverse={workers[workerSelection]?.agent.id === worker.agent.id}>{workers.indexOf(worker) + 1}. {worker.agent.description} · {worker.agent.kind} · {worker.agent.status} · {Math.floor(((worker.agent.completedAt ?? Date.now()) - worker.agent.createdAt) / 1000)}s</Text>)}
+					<Text color={COLORS.muted}>↑/↓ {workerDetail ? 'scroll' : 'select'} · Enter open · Ctrl+O tool details · x cancel worker · Esc back</Text>
+				</> : activeDiffReview && diffReviews
 					? <DiffViewer
 						review={activeDiffReview}
 						reviewIndex={diffReviewIndex}
@@ -2279,18 +2509,20 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			{editApproval && <EditApprovalBox approval={editApproval} decide={decideEditApproval} maxDiffRows={editPreviewRows} topRow={TRANSCRIPT_FIRST_ROW + contentRows} />}
 			{planApproval && <PlanApprovalNotice message={planApproval.message} />}
 			{showSessions && <SessionPicker sessions={store.list()} onSelect={switchSession} onDelete={deleteSessionFromPicker} onCancel={() => setShowSessions(false)} />}
+			{showProviders && <ProviderPicker current={args.provider} reset={resetProviderSelection} getModel={provider => getConfiguredModel?.(provider) ?? (provider === args.provider ? args.model : undefined)} onSelect={resetProviderSelection ? resetProvider : selectProvider} onCancel={() => { setShowProviders(false); setResetProviderSelection(false); }} />}
+			{showPermissions && <PermissionPicker current={permissionMode} onSelect={applyPermissionMode} onCancel={() => setShowPermissions(false)} />}
 			{models && <ModelPicker models={models} current={args.model} onSelect={switchModel} onCancel={() => setModels(undefined)} />}
 			{reasoningOptions && <ReasoningPicker options={reasoningOptions} current={args.reasoningLevel} onSelect={applyReasoningLevel} onCancel={() => setReasoningOptions(undefined)} />}
-			{!approval && !editApproval && !planApproval && !showSessions && !models && !modelTermination && !diffReviews && commandItems.length > 0 && (
+			{!approval && !editApproval && !planApproval && !showSessions && !showProviders && !showPermissions && !models && !modelTermination && !diffReviews && commandItems.length > 0 && (
 				<CommandPalette items={commandItems} selected={visibleCommandSelection} />
 			)}
 
-			{!approval && !editApproval && !planApproval && !showSessions && !models && modelTermination && (
+			{!approval && !editApproval && !planApproval && !showSessions && !showProviders && !showPermissions && !models && modelTermination && (
 				<ModelTerminationNotice message={modelTermination.message} />
 			)}
 
 			{/* Active model remains visible above the prompt; it is intentionally omitted only from the banner. */}
-			{!approval && !editApproval && !planApproval && !showSessions && !models && !modelTermination && !diffReviews && (
+			{!approval && !editApproval && !planApproval && !showSessions && !showProviders && !showPermissions && !models && !modelTermination && !diffReviews && (
 				<Box paddingX={1} justifyContent="flex-end">
 					<Text color={COLORS.muted} wrap="truncate-middle">{args.provider}/{args.model}</Text>
 				</Box>
@@ -2301,11 +2533,11 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 			{activityVisible && (
 				<Box paddingX={1}>
 					<Text color={COLORS.warning}><ShimmerLabel label={formatActivityStatus(status)} frame={shimmerFrame} /></Text>
-					<Text color={COLORS.muted}> · Esc to cancel</Text>
+					<Text color={COLORS.muted}> · Esc to cancel · {workers.filter(worker => worker.agent.status === 'running').length} workers running · Ctrl+W workers</Text>
 				</Box>
 			)}
 
-			{!approval && !editApproval && !showSessions && !models && !modelTermination && (
+			{!approval && !editApproval && !showSessions && !showProviders && !showPermissions && !models && !modelTermination && (
 				<Box borderStyle="round" borderColor={running ? COLORS.muted : COLORS.accent} paddingX={1} justifyContent="space-between">
 					<Box flexGrow={1} flexShrink={1}>
 					{diffReviews
@@ -2316,7 +2548,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 							<Text color={running ? COLORS.muted : COLORS.accent}>❯ </Text>
 							<PromptInput
 								value={input}
-								focus={!diffReviews && !running}
+								focus={!diffReviews && !running && !workersOpen && !showProviders && !showPermissions}
 								onChange={value => {
 									setInput(value);
 									if (!value) {

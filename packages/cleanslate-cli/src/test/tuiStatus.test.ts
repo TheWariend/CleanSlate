@@ -10,19 +10,19 @@ import { test } from 'node:test';
 import { commandPaletteSelection, estimateCliContextWindowUsage, executionInteractiveMode, formatActivityStatus, formatHeaderModeLabel, formatModelTerminationMessage, formatToolNameForDisplay, ModelTerminationNotice, nextInteractiveMode, runtimeModeForInteractiveMode, SHIMMER_FRAME_COUNT, shimmerSegments } from '../tui.js';
 
 test('TUI activity status stays concise and hides internal turn details', () => {
-	assert.equal(formatActivityStatus('thinking'), 'Thinking…');
-	assert.equal(formatActivityStatus('running terminal.execute'), 'Working…');
-	assert.equal(formatActivityStatus('provider'), 'Thinking…');
+	assert.equal(formatActivityStatus('thinking'), 'Thinking');
+	assert.equal(formatActivityStatus('running terminal.execute'), 'Working');
+	assert.equal(formatActivityStatus('provider'), 'Thinking');
 	assert.equal(formatActivityStatus('cancelling'), 'Cancelling…');
 	assert.doesNotMatch(formatActivityStatus('thinking'), /turn|context/i);
 });
 
 test('TUI activity labels mirror the IDE working placeholder', () => {
 	// Same formatting rules as the IDE's getWorkingPlaceholderLabel: mcp_ becomes “MCP”,
-	// snake/kebab segments become title-cased words, and running tools read “Working…”.
+	// snake/kebab segments become title-cased words, and running tools read “Working”.
 	assert.equal(formatToolNameForDisplay('mcp_github_search'), 'MCP Github Search');
 	assert.equal(formatToolNameForDisplay('read_file_range'), 'Read File Range');
-	assert.equal(formatActivityStatus('running apply_edit'), 'Working…');
+	assert.equal(formatActivityStatus('running apply_edit'), 'Working');
 });
 
 test('working label shimmers like the IDE placeholder while a turn streams', () => {
