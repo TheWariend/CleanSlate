@@ -53,7 +53,9 @@ describe('SDK boundary', () => {
 		for (const file of files) {
 			for (const m of codeOf(file).matchAll(/from\s+'([^']+)'/g)) {
 				const spec = m[1];
-				if (spec.includes('vscode-fork') || /(^|\/)vs\//.test(spec) || spec.includes('../../../')) {
+				const relativeTarget = spec.startsWith('.') ? path.relative(SRC, path.resolve(path.dirname(file), spec)) : undefined;
+				const escapesSource = relativeTarget !== undefined && (relativeTarget === '..' || relativeTarget.startsWith(`..${path.sep}`) || path.isAbsolute(relativeTarget));
+				if (spec.includes('vscode-fork') || /(^|\/)vs\//.test(spec) || escapesSource) {
 					offenders.push(`${path.relative(SRC, file)}: ${spec}`);
 				}
 			}

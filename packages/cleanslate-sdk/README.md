@@ -17,6 +17,44 @@ npm install @cleanslate/sdk
 
 Node 20 or later.
 
+## External agents over ACP
+
+The workspace version exposes portable contracts and conversation handoff through
+`@cleanslate/sdk/acp`, and the local process runtime through
+`@cleanslate/sdk/node/acp`. The Node runtime discovers installed agents, persists
+custom registrations, manages sessions and permissions, streams responses, and
+reads model and control choices advertised by each agent.
+
+```ts
+import { ExternalAgentService } from '@cleanslate/sdk/node/acp';
+
+const agents = new ExternalAgentService();
+const available = agents.listAgents().filter(agent => agent.available);
+const selected = available[0];
+if (!selected) throw new Error('Install or register an ACP agent first.');
+const subscription = agents.onDidEmitEvent(event => console.log(event));
+try {
+  await agents.startSession({
+    cleanSlateSessionId: 'my-chat',
+    config: { transport: 'acp', agentId: selected.id },
+    cwd: process.cwd(),
+  });
+  await agents.prompt({ cleanSlateSessionId: 'my-chat', prompt: 'Explain this project.' });
+} finally {
+  await agents.closeSession('my-chat');
+  subscription.dispose();
+  agents.dispose();
+}
+```
+
+Hosts handle permission events with `respondToPermission`, and render their own
+pickers, logos, and transcripts. Agent executables and optional ACP adapters must
+be installed by the host; this SDK does not install them automatically. Hosts
+that bundle adapters can supply a module resolver to `ExternalAgentRegistry` and
+are responsible for satisfying the adapter, agent, authentication, and trademark
+terms that apply to their distribution.
+Usage windows are optional; unsupported account usage is reported explicitly.
+
 ## What is in it
 
 - **The execution loop** — turn management, budgets, an evidence ledger, and the

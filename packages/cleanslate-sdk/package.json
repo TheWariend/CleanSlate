@@ -7,6 +7,14 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./acp": {
+      "types": "./dist/externalAgents/index.d.ts",
+      "default": "./dist/externalAgents/index.js"
+    },
+    "./node/acp": {
+      "types": "./dist/node/externalAgents/index.d.ts",
+      "default": "./dist/node/externalAgents/index.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
@@ -42,6 +50,7 @@
     "prepublishOnly": "npm run clean && npm run build && npm test"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
     "@anthropic-ai/sdk": "^0.96.0",
     "@aws-sdk/client-bedrock": "^3.1096.0",
     "@aws-sdk/client-bedrock-runtime": "^3.1096.0",
