@@ -62,7 +62,7 @@ export class CleanSlateSettingsEditor extends EditorPane {
 			upgradeToPro: () => openCleanSlateProCheckout(this.openerService, this.notificationService, this.cleanSlateMainService),
 			signOut: () => clearCleanSlateAuthAccount(this.secretStorageService, this.storageService),
 			manageAccount: () => openCleanSlateAccount(this.openerService, this.notificationService, this.cleanSlateMainService)
-		});
+		}, this.cleanSlateMainService);
 		this.panel.mount(this.body);
 
 		this.injectStyles();

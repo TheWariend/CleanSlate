@@ -17,11 +17,13 @@ import {
 	ICleanSlateProviderConfigurations,
 	ICleanSlateService
 } from '../../../../services/cleanSlate/common/core/cleanSlateAI.js';
+import { ICleanSlateMainService } from '../../../../services/cleanSlate/common/core/cleanSlateAI.js';
+import { FileAccess } from '../../../../../base/common/network.js';
 import { setCleanSlateProviderLogo } from '../chat/providers/cleanSlateProviderLogos.js';
 import { CLEANSLATE_ACTION_BUTTON_STYLES, createCleanSlateActionButton } from '../cleanSlateActionButton.js';
 
 type FieldType = 'text' | 'password' | 'number';
-type SettingSectionId = 'general' | 'usage' | 'models' | 'apiKeys' | 'verification' | 'indexing';
+type SettingSectionId = 'general' | 'usage' | 'agents' | 'models' | 'apiKeys' | 'verification' | 'indexing';
 
 interface ITextRowOptions {
 	readonly label: string;
@@ -98,6 +100,7 @@ export class CleanSlateSettingsPanel {
 		private readonly configService: ICleanSlateConfigurationService,
 		private readonly cleanSlateService: ICleanSlateService,
 		private readonly accountActions?: ICleanSlateSettingsAccountActions,
+		private readonly agentService?: Pick<ICleanSlateMainService, 'listExternalAgents' | 'getExternalAgentUsage' | 'registerExternalAgent'>,
 	) { }
 
 	/**
@@ -190,6 +193,7 @@ export class CleanSlateSettingsPanel {
 		const sections: readonly { id: SettingSectionId; label: string; icon: ThemeIcon }[] = [
 			{ id: 'general', label: 'General', icon: Codicon.settingsGear },
 			{ id: 'usage', label: 'Usage', icon: Codicon.graph },
+			...(this.agentService ? [{ id: 'agents' as const, label: 'Agents', icon: Codicon.hubot }] : []),
 			{ id: 'models', label: 'Models', icon: Codicon.symbolClass },
 			{ id: 'apiKeys', label: 'API Keys', icon: Codicon.key },
 			{ id: 'verification', label: 'Verification', icon: Codicon.checklist },
@@ -217,6 +221,7 @@ export class CleanSlateSettingsPanel {
 		switch (this.activeSection) {
 			case 'general': this.renderSection('general', 'General', () => this.renderGeneral(usage, account)); break;
 			case 'usage': this.renderSection('usage', 'Plan usage limits', () => this.renderUsage(usage)); break;
+			case 'agents': this.renderSection('agents', 'Agents', () => this.renderAgents()); break;
 			case 'models': this.renderSection('models', 'Models', () => this.renderModels(config, managedAccess)); break;
 			case 'apiKeys': this.renderSection('apiKeys', 'API Keys', () => this.renderApiKeys(config)); break;
 			case 'verification': this.renderSection('verification', 'Verification', () => this.renderVerification(config)); break;
@@ -232,6 +237,87 @@ export class CleanSlateSettingsPanel {
 		this.sectionRoot = section;
 		render();
 		this.sectionRoot = previousRoot;
+	}
+
+	private renderAgents(): void {
+		const group = this.createGroup();
+		this.createGeneralRow(group, 'Connected agents', 'Use an installed agent in any chat. Manage sign-in through its CLI.', { label: 'Refresh', leadingIcon: 'refresh', variant: 'secondary', reRender: false, action: () => this.render() });
+		const agentList = dom.append(group, dom.$('div'));
+		const custom = dom.append(group, dom.$('section'));
+		custom.style.cssText = 'padding:20px 24px;border-top:1px solid var(--vscode-widget-border,rgba(128,128,128,.18))';
+		const connection = dom.$('div');
+		connection.style.cssText = 'display:none;padding-top:20px';
+		const trigger = this.createSettingsActionButton(custom, { label: 'Add custom agent', leadingIcon: 'add', variant: 'secondary', reRender: false, action: async () => {
+			const open = connection.style.display === 'none';
+			connection.style.display = open ? 'block' : 'none';
+			trigger.setAttribute('aria-expanded', String(open));
+			if (open) { fields.get('name')?.focus(); }
+		} });
+		trigger.setAttribute('aria-expanded', 'false');
+		trigger.style.cssText = 'display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;border:1px solid var(--vscode-widget-border,rgba(128,128,128,.25));background:transparent;color:var(--vscode-foreground);font:inherit;cursor:pointer';
+		custom.append(connection);
+		const configurationHelp = dom.append(connection, dom.$('p.cleanSlate-settings-description'));
+		configurationHelp.style.cssText = 'margin:0 0 18px;line-height:1.5';
+		configurationHelp.textContent = 'For ACP-compatible tools not listed above. Use a trusted local executable; sign-in stays with the agent.';
+		const fields = new Map<string, HTMLInputElement>();
+		for (const [key, label, placeholder] of [['id', 'Agent ID', 'my-agent'], ['name', 'Display name', 'My agent'], ['command', 'Executable', '/absolute/path/to/agent'], ['args', 'Arguments (JSON array)', '["acp"]']]) {
+			const row = dom.append(connection, dom.$('label'));
+			row.style.cssText = 'display:grid;gap:8px;margin-bottom:16px;font-size:12px;font-weight:500';
+			dom.append(row, dom.$('span')).textContent = label;
+			const input = dom.append(row, dom.$('input.cleanSlate-settings-control')) as HTMLInputElement;
+			input.type = 'text'; input.placeholder = placeholder; input.spellcheck = false;
+			input.autocomplete = 'off'; input.setAttribute('aria-label', label);
+			input.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--vscode-input-border,var(--vscode-widget-border,rgba(128,128,128,.25)));background:var(--vscode-input-background);color:var(--vscode-input-foreground);font:inherit;font-weight:400';
+			if (key === 'args') { input.value = '[]'; }
+			fields.set(key, input);
+		}
+		const status = dom.append(connection, dom.$('p.cleanSlate-settings-description'));
+		status.setAttribute('role', 'status');
+		const actions = dom.append(connection, dom.$('div'));
+		actions.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:16px';
+		const cancel = this.createSettingsActionButton(actions, { label: 'Cancel', variant: 'secondary', reRender: false, action: async () => { connection.style.display = 'none'; trigger.setAttribute('aria-expanded', 'false'); trigger.focus(); } });
+		cancel.style.cssText = trigger.style.cssText;
+		const save = this.createSettingsActionButton(actions, { label: 'Add agent', variant: 'primary', reRender: false, action: async () => {
+			try {
+				const args: unknown = JSON.parse(fields.get('args')!.value);
+				if (!Array.isArray(args) || !args.every(arg => typeof arg === 'string')) { throw new Error('Arguments must be a JSON array of strings.'); }
+				await this.agentService!.registerExternalAgent({ id: fields.get('id')!.value.trim(), name: fields.get('name')!.value.trim(), command: fields.get('command')!.value.trim(), args });
+				this.render();
+			} catch (error) { status.textContent = error instanceof Error ? error.message : 'Unable to connect agent.'; }
+		} });
+		save.style.cssText = 'display:inline-flex;align-items:center;padding:8px 14px;border-radius:8px;border:1px solid transparent;background:var(--vscode-button-background);color:var(--vscode-button-foreground);font:inherit;cursor:pointer';
+		void this.agentService?.listExternalAgents().then(agents => {
+			if (!group.isConnected) { return; }
+			for (const agent of agents) {
+				const card = dom.append(agentList, dom.$('section'));
+				card.style.cssText = 'padding:22px 24px;border-top:1px solid var(--vscode-widget-border, rgba(128,128,128,.18))';
+				const heading = dom.append(card, dom.$('h3'));
+				heading.style.cssText = 'display:flex;align-items:center;gap:10px;margin:0 0 14px;font-size:14px;font-weight:600';
+				if (agent.iconPath) {
+					const logo = dom.append(heading, dom.$('span'));
+					const url = FileAccess.asBrowserUri(agent.iconPath as Parameters<typeof FileAccess.asBrowserUri>[0]).toString(true);
+					logo.style.cssText = 'display:inline-block;width:20px;height:20px';
+					if (agent.monochromeIcon) { logo.style.mask = `url("${url}") center / contain no-repeat`; logo.style.background = 'currentColor'; }
+					else { logo.style.background = `url("${url}") center / contain no-repeat`; }
+				}
+				dom.append(heading, dom.$('span')).textContent = agent.name;
+				const status = dom.append(heading, dom.$('span.cleanSlate-settings-description'));
+				status.textContent = agent.available ? 'Ready' : agent.installed ? 'Adapter required' : 'Not installed';
+				status.style.cssText = 'margin-left:auto;font-size:12px;font-weight:400';
+				const usage = dom.append(card, dom.$('div.cleanSlate-settings-description'));
+				usage.textContent = agent.available ? 'Loading account usage…' : agent.unavailableReason ?? 'Install the agent CLI, then refresh.';
+				if (agent.available) {
+					void this.agentService!.getExternalAgentUsage(agent.id).then(result => {
+						if (!usage.isConnected) { return; }
+						dom.clearNode(usage);
+						if (!result.windows.length) { usage.textContent = result.detail; return; }
+						usage.className = 'cleanSlate-usage-limits';
+						for (const window of result.windows) { this.createUsageLimitRow(usage, window.label, window.usedPercent, 100, window.resetsAt ? new Date(window.resetsAt * 1000).toISOString() : undefined); }
+						this.startResetCountdown();
+					}, () => { if (usage.isConnected) { usage.textContent = 'Usage is temporarily unavailable.'; } });
+				}
+			}
+		}, () => { if (group.isConnected) { dom.append(group, dom.$('p')).textContent = 'Unable to load agents. Try refreshing.'; } });
 	}
 
 	private renderGeneral(usage?: ICleanSlateManagedEntitlements, account?: ICleanSlateManagedAccount): void {
@@ -461,6 +547,7 @@ export class CleanSlateSettingsPanel {
 	}
 
 	private startResetCountdown(): void {
+		if (this.resetCountdownHandle !== undefined) { return; }
 		const win = this.content?.ownerDocument.defaultView;
 		if (!win || this.resetCountdownTargets.length === 0) {
 			return;

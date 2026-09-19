@@ -46,6 +46,7 @@ import { CleanSlatePendingEditsRenderer } from '../renderers/cleanSlatePendingEd
 import { CleanSlateReviewRenderer } from '../renderers/cleanSlateReviewRenderer.js';
 import { collectSCMReviewChanges, mergeCleanSlateReviewChanges, type ICleanSlateReviewChange } from '../renderers/cleanSlateReviewModel.js';
 import { CleanSlateModelSelectorRenderer } from '../renderers/cleanSlateModelSelectorRenderer.js';
+import { CleanSlateAgentSelectorRenderer } from '../renderers/cleanSlateAgentSelectorRenderer.js';
 import { CleanSlateReasoningSelectorRenderer } from '../renderers/cleanSlateModeSelectorRenderer.js';
 import { CleanSlateEditModeSelectorRenderer } from '../renderers/cleanSlateEditModeSelectorRenderer.js';
 import { CleanSlateHistoryOverlayRenderer } from '../renderers/cleanSlateHistoryOverlayRenderer.js';
@@ -66,6 +67,7 @@ import { CleanSlateTranscriptView } from './sections/cleanSlateTranscriptView.js
 import { CleanSlateChatTitleController } from './sections/cleanSlateChatTitleController.js';
 import { openCleanSlateSettingsWindow } from '../../settings/cleanSlateSettingsLauncher.js';
 import { openCleanSlateProCheckout } from '../../auth/cleanSlateAuth.contribution.js';
+import type { IExternalAgentDescriptor, IExternalAgentSessionInfo } from '../../../../../services/cleanSlate/common/externalAgents/externalAgentTypes.js';
 
 export class CleanSlateChatViewPane extends ViewPane implements IResponseRenderer {
     static readonly ID = 'workbench.view.cleanSlateChat';
@@ -82,6 +84,7 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
     private readonly pendingEditsRenderer: CleanSlatePendingEditsRenderer;
     private readonly reviewRenderer = new CleanSlateReviewRenderer();
     private readonly modelSelectorRenderer: CleanSlateModelSelectorRenderer;
+    private readonly agentSelectorRenderer: CleanSlateAgentSelectorRenderer;
     private readonly reasoningSelectorRenderer: CleanSlateReasoningSelectorRenderer;
     private readonly editModeSelectorRenderer: CleanSlateEditModeSelectorRenderer;
     private readonly historyOverlayRenderer: CleanSlateHistoryOverlayRenderer;
@@ -102,6 +105,10 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
     private readonly titleController: CleanSlateChatTitleController;
     private activeComposerSessionId: string | undefined;
     private readonly composerDrafts = new Map<string, string>();
+    private readonly agentDescriptors = new Map<string, IExternalAgentDescriptor>();
+    private readonly agentSessions = new Map<string, IExternalAgentSessionInfo>();
+    private readonly agentRequests = new Map<string, Promise<IExternalAgentSessionInfo>>();
+    private readonly agentErrors = new Set<string>();
 
     constructor(
         options: IViewletViewOptions,
@@ -172,6 +179,28 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
         }, () => {
             void openCleanSlateProCheckout(this.openerService, this.notificationService, this.cleanSlateMainService);
         });
+		this.agentSelectorRenderer = new CleanSlateAgentSelectorRenderer(
+			() => this.sidebarViewModel.getCurrentSessionSnapshot().externalAgent?.agentId ?? 'native',
+			async () => {
+				const agents = await this.cleanSlateMainService.listExternalAgents();
+				agents.forEach(agent => this.agentDescriptors.set(agent.id, agent));
+				return [{ id: 'native', name: 'CleanSlate', available: true }, ...agents];
+			},
+			async id => {
+				const snapshot = this.sidebarViewModel.getCurrentSessionSnapshot();
+				await this.sessionProvider.handoffAgent(id === 'native' ? undefined : { transport: 'acp', agentId: id }, this.agentDescriptors.get(id)?.name ?? 'CleanSlate');
+				this.agentSessions.delete(snapshot.id);
+				this.agentRequests.delete(snapshot.id);
+				this.agentErrors.delete(snapshot.id);
+				this.restoreCurrentSessionView();
+			}
+		);
+        this._register(this.cleanSlateMainService.onDidEmitExternalAgentEvent(event => {
+            if (event.type !== 'controls') { return; }
+            const info = this.agentSessions.get(event.cleanSlateSessionId);
+            if (info) { this.agentSessions.set(event.cleanSlateSessionId, { ...info, controls: event.controls, models: event.models }); }
+            if (this.sidebarViewModel.getActiveSessionId() === event.cleanSlateSessionId) { this.updateModelDropdownState(); }
+        }));
         this.reasoningSelectorRenderer = new CleanSlateReasoningSelectorRenderer(this.settingsProvider, this.modelProvider);
         this.editModeSelectorRenderer = new CleanSlateEditModeSelectorRenderer(this.settingsProvider);
         this.historyOverlayRenderer = new CleanSlateHistoryOverlayRenderer(this.contextViewService);
@@ -477,6 +506,7 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
             onModelSelector: (anchor) => {
                 void this.modelSelectorRenderer.toggle(this.container, anchor);
             },
+			onAgentSelector: anchor => void this.agentSelectorRenderer.toggle(this.container, anchor),
             onDeleteAnnotations: (annotations) => {
                 void this.annotationController.deleteVisible(annotations);
             },
@@ -681,11 +711,89 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
     }
 
     private updateModelDropdownState(): void {
+        if (!this.composerView) { return; }
+        const snapshot = this.sidebarViewModel.getCurrentSessionSnapshot();
+        if (snapshot.externalAgent) {
+            const descriptor = this.agentDescriptors.get(snapshot.externalAgent.agentId);
+			this.composerView.updateAgent(descriptor?.name ?? snapshot.externalAgent.agentId, descriptor?.iconPath as Parameters<CleanSlateComposerView['updateAgent']>[1], descriptor?.monochromeIcon);
+            const cached = this.agentSessions.get(snapshot.id);
+            const info = cached?.config.agentId === snapshot.externalAgent.agentId ? cached : undefined;
+            const label = info?.models?.options.find(option => option.value === info.models?.current)?.name ?? info?.models?.current ?? descriptor?.name ?? snapshot.externalAgent.agentId;
+            this.composerView.setExternalRuntime(label, descriptor?.iconPath as Parameters<CleanSlateComposerView['setExternalRuntime']>[1], anchor => {
+                void this.modelSelectorRenderer.toggleExternal(this.container, anchor, descriptor?.name ?? snapshot.externalAgent!.agentId,
+                    async () => {
+                        if (this.sidebarViewModel.getActiveSessionId() !== snapshot.id) { throw new Error('The active chat changed. Reopen the picker.'); }
+                        return (await this.loadEditorAgent()).models ?? { current: '', options: [] };
+                    },
+                    async value => {
+                        this.assertEditorAgentCurrent(snapshot.id);
+                        const current = await this.loadEditorAgent();
+                        if (!current.models) { throw new Error('This agent does not expose model choices.'); }
+                        await this.configureEditorAgent(snapshot.id, current.models.configId, value);
+                    });
+            }, descriptor?.monochromeIcon);
+            this.composerView.setExternalControls(info?.controls ?? [], (anchor, configId) => {
+                const control = this.agentSessions.get(snapshot.id)?.controls?.find(item => item.configId === configId);
+                if (!control) { return; }
+                if (control.category === 'thought_level') {
+                    this.reasoningSelectorRenderer.toggleAgentChoices(this.container, anchor, control, this.agentSessions.get(snapshot.id)?.controls ?? [], (id, value) => this.configureEditorAgent(snapshot.id, id, value));
+                } else {
+                    this.editModeSelectorRenderer.toggleChoices(this.container, anchor, control, value => this.configureEditorAgent(snapshot.id, configId, value));
+                }
+            });
+            if (!info && !this.agentRequests.has(snapshot.id) && !this.agentErrors.has(snapshot.id)) {
+                void this.loadEditorAgent().catch(error => {
+                    this.agentErrors.add(snapshot.id);
+                    this.notificationService.warn(String(error));
+                });
+            }
+            return;
+        }
+		this.composerView.updateAgent('CleanSlate');
+        this.composerView.setExternalRuntime(undefined);
         const state = this.sidebarViewModel.getState().model;
         this.composerView?.updateModel(state.label, state.warning, state.provider, state.model);
     }
 
+    private assertEditorAgentCurrent(id: string): void {
+        if (this.sidebarViewModel.getActiveSessionId() !== id || this.sidebarViewModel.getIsGenerating()) {
+            throw new Error('Stop the response and keep this chat selected before changing agent settings.');
+        }
+    }
+
+    private loadEditorAgent(): Promise<IExternalAgentSessionInfo> {
+        const snapshot = this.sidebarViewModel.getCurrentSessionSnapshot();
+        if (!snapshot.externalAgent) { return Promise.reject(new Error('No external agent selected.')); }
+        const existing = this.agentRequests.get(snapshot.id);
+        if (existing) { return existing; }
+        const pending = (async () => {
+            const agents = await this.cleanSlateMainService.listExternalAgents();
+            agents.forEach(agent => this.agentDescriptors.set(agent.id, agent));
+            const info = await this.cleanSlateMainService.startExternalAgentSession({ cleanSlateSessionId: snapshot.id, config: snapshot.externalAgent!, cwd: snapshot.workDir || snapshot.projectRoot, externalSessionId: snapshot.externalAgentSessionId });
+            if (this.sidebarViewModel.getCurrentSessionSnapshot().externalAgent?.agentId === snapshot.externalAgent!.agentId && this.sidebarViewModel.getActiveSessionId() === snapshot.id) {
+                this.agentSessions.set(snapshot.id, info);
+                this.agentErrors.delete(snapshot.id);
+                this.updateModelDropdownState();
+            }
+            return info;
+        })().finally(() => { if (this.agentRequests.get(snapshot.id) === pending) { this.agentRequests.delete(snapshot.id); } });
+        this.agentRequests.set(snapshot.id, pending);
+        return pending;
+    }
+
+    private async configureEditorAgent(id: string, configId: string, value: string): Promise<void> {
+        this.assertEditorAgentCurrent(id);
+        const snapshot = this.sidebarViewModel.getCurrentSessionSnapshot();
+        if (!snapshot.externalAgent) { throw new Error('No external agent selected.'); }
+        const info = await this.cleanSlateMainService.startExternalAgentSession({ cleanSlateSessionId: id, config: snapshot.externalAgent, cwd: snapshot.workDir || snapshot.projectRoot, externalSessionId: snapshot.externalAgentSessionId, modelSelection: { configId, value } });
+        if (this.sidebarViewModel.getActiveSessionId() === id && this.sidebarViewModel.getCurrentSessionSnapshot().externalAgent?.agentId === snapshot.externalAgent.agentId) {
+            this.agentSessions.set(id, info);
+            this.updateModelDropdownState();
+        }
+    }
+
     private updateReasoningDropdownState(): void {
+        if (this.sidebarViewModel.getCurrentSessionSnapshot().externalAgent) { return; }
         const state = this.sidebarViewModel.getState().settings;
         const reasoningState = this.modelProvider.getReasoningSelectorState();
         const activeOption = reasoningState.options.find(option => option.level === state.reasoningLevel);
@@ -703,6 +811,7 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
     }
 
     private updateEditModeState(): void {
+        if (this.sidebarViewModel.getCurrentSessionSnapshot().externalAgent) { return; }
         this.composerView?.updateEditMode(this.sidebarViewModel.getState().settings.editMode);
     }
 
@@ -764,6 +873,11 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
 
     private updateContextWindowUsage(): void {
         const state = this.sidebarViewModel.getState();
+		const external = this.sidebarViewModel.getExternalContextUsage();
+		if (external !== undefined) {
+			this.composerView?.updateContextWindowUsage(external ? { ...external, percent: external.usedTokens / external.maxTokens * 100, isGenerating: state.isGenerating } : null);
+			return;
+		}
         const maxTokens = Math.max(1, state.settings.contextWindow || CLEANSLATE_FALLBACK_CONTEXT_WINDOW_TOKENS);
         const usedTokens = this.estimateCurrentContextTokens();
         this.composerView?.updateContextWindowUsage({

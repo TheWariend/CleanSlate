@@ -11,6 +11,8 @@ import { getCleanSlateEditModeDescription } from '@cleanslate/sdk/protocol/clean
 import type { CleanSlateEditMode } from '@cleanslate/sdk/protocol/cleanSlateAI.js';
 import { CleanSlateChatSettingsProvider } from '../providers/cleanSlateChatSettingsProvider.js';
 
+import { isFullAccessMode, renderApprovalIcon } from './cleanSlateApprovalIcons.js';
+
 /**
  * Dropup listing approval modes supported by hosted execution.
  * Selecting an option persists it through the settings provider.
@@ -20,6 +22,11 @@ export class CleanSlateEditModeSelectorRenderer {
     private outsideClickListener: IDisposable | undefined;
 
     constructor(private readonly settingsProvider: CleanSlateChatSettingsProvider) { }
+
+	toggleChoices(container: HTMLElement, anchor: HTMLElement, choices: { name: string; current: string; options: readonly { value: string; name: string; description?: string; kind?: string }[] }, select: (value: string) => Promise<void>): void {
+		if (this.overlay) { this.hide(); return; }
+		this.show(container, anchor, { ...choices, select });
+	}
 
     toggle(container: HTMLElement, anchor: HTMLElement): void {
         if (this.overlay) {
@@ -37,34 +44,48 @@ export class CleanSlateEditModeSelectorRenderer {
         this.outsideClickListener = undefined;
     }
 
-    private show(container: HTMLElement, anchor: HTMLElement): void {
+    private show(container: HTMLElement, anchor: HTMLElement, choices?: { name: string; current: string; options: readonly { value: string; name: string; description?: string; kind?: string }[]; select: (value: string) => Promise<void> }): void {
         const configuredMode = this.settingsProvider.getState().editMode;
         // Hosted file edits do not yet participate in the editor pending-edit service.
         // Preserve legacy Manual command approvals without advertising file review.
-        const currentMode = configuredMode === 'manual' ? 'accept-edits' : configuredMode;
+        const currentMode = choices?.current ?? (configuredMode === 'manual' ? 'accept-edits' : configuredMode);
         const overlay = dom.append(container, dom.$('.cleanSlate-mode-selector-overlay.cleanSlate-edit-mode-overlay'));
         this.overlay = overlay;
 
         const header = dom.append(overlay, dom.$('.edit-mode-header'));
         const heading = dom.append(header, dom.$('.edit-mode-heading'));
-        dom.append(heading, dom.$('span')).textContent = 'Approval mode';
+        dom.append(heading, dom.$('span')).textContent = choices?.name ?? 'Approval mode';
 
-        for (const mode of CLEANSLATE_EDIT_MODES.filter(mode => mode !== 'manual')) {
+        for (const entry of choices?.options ?? CLEANSLATE_EDIT_MODES.filter(mode => mode !== 'manual').map(mode => ({ value: mode, name: formatCleanSlateEditMode(mode), description: getCleanSlateEditModeDescription(mode) }))) {
+			const mode = entry.value;
             const option = dom.append(overlay, dom.$('button.edit-mode-option')) as HTMLButtonElement;
             option.type = 'button';
+			const kind = choices ? ('kind' in entry ? entry.kind : undefined) : mode === 'auto' ? 'automatic-review' : 'approval-required';
+			option.classList.toggle('full-access', isFullAccessMode(kind ?? ''));
             option.classList.toggle('selected', mode === currentMode);
             option.setAttribute('aria-pressed', mode === currentMode ? 'true' : 'false');
+			const icon = dom.append(option, dom.$('span'));
+			renderApprovalIcon(icon, kind);
+			icon.setAttribute('aria-hidden', 'true');
+			icon.style.cssText = 'font-size:16px;flex:0 0 18px;margin-top:2px;color:inherit';
 
             const textColumn = dom.append(option, dom.$('.edit-mode-option-text'));
-            dom.append(textColumn, dom.$('.edit-mode-option-label')).textContent = formatCleanSlateEditMode(mode);
-            dom.append(textColumn, dom.$('.edit-mode-option-description')).textContent = getCleanSlateEditModeDescription(mode);
+            dom.append(textColumn, dom.$('.edit-mode-option-label')).textContent = entry.name;
+            if (entry.description) { dom.append(textColumn, dom.$('.edit-mode-option-description')).textContent = entry.description; }
             if (mode === currentMode) {
                 dom.append(option, dom.$('i.codicon.codicon-check.edit-mode-option-check'));
             }
 
-            option.onclick = () => {
-                void this.settingsProvider.updateEditMode(mode as CleanSlateEditMode);
-                this.hide();
+            option.onclick = async () => {
+				option.disabled = true;
+				try {
+					if (choices) { await choices.select(mode); } else { await this.settingsProvider.updateEditMode(mode as CleanSlateEditMode); }
+					this.hide();
+				} catch (error) {
+					let status = overlay.querySelector<HTMLElement>('.edit-mode-error');
+					if (!status) { status = dom.append(overlay, dom.$('.edit-mode-error')); status.setAttribute('role', 'status'); }
+					status.textContent = error instanceof Error ? error.message : 'Unable to change setting.';
+				} finally { option.disabled = false; }
             };
         }
 
@@ -82,7 +103,7 @@ export class CleanSlateEditModeSelectorRenderer {
         const containerRect = container.getBoundingClientRect();
         const margin = 10;
         const width = Math.min(
-            260,
+            360,
             Math.max(220, containerRect.width - (margin * 2)),
             Math.max(220, window.innerWidth - (margin * 2))
         );

@@ -4,6 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as dom from '../../../../../../../base/browser/dom.js';
+import { isFastModeControl } from '../../renderers/cleanSlateModeSelectorRenderer.js';
+import { renderApprovalIcon, isFullAccessMode } from '../../renderers/cleanSlateApprovalIcons.js';
+import { asCSSUrl } from '../../../../../../../base/browser/cssValue.js';
+import { FileAccess } from '../../../../../../../base/common/network.js';
 import type { ICleanSlateBrowserAnnotation } from '../../../core/cleanSlateBrowserAutomationService.js';
 import { policy } from '../../runtime/cleanSlateChatController.js';
 import { SLASH_COMMANDS } from '@cleanslate/sdk/composer/commands/slashCommands.js';
@@ -39,6 +43,7 @@ export interface ICleanSlateComposerViewOptions {
 	/** Opens the edit-approval mode picker anchored to the given element. */
 	readonly onEditModeSelector?: (anchor: HTMLElement) => void;
 	readonly onModelSelector: (anchor: HTMLElement) => void;
+	readonly onAgentSelector?: (anchor: HTMLElement) => void;
 	readonly onDeleteAnnotations: (annotations: readonly ICleanSlateBrowserAnnotation[]) => void;
 	readonly onRemoveSelectionReference: (index: number) => void;
 	readonly onDidInputChange?: () => void;
@@ -73,12 +78,43 @@ export class CleanSlateComposerView {
 	private editModeChip!: HTMLElement;
 	private editModeChipLabel!: HTMLElement;
 	private modelDropdown!: HTMLElement;
+	private agentDropdown: HTMLButtonElement | undefined;
+	private externalControls: HTMLElement | undefined;
+
+	setExternalControls(controls: readonly { configId: string; name: string; category?: string; current: string; options: readonly { value: string; name: string; kind?: string }[] }[], onOpen: (anchor: HTMLElement, configId: string) => void): void {
+		this.externalControls?.remove();
+		this.externalControls = undefined;
+		const hasReasoning = controls.some(control => control.category === 'thought_level' && control.options.length > 0);
+		const available = controls.filter(control => (control.category === 'thought_level' || control.category === 'mode' || (!hasReasoning && isFastModeControl(control))) && control.options.length > 0);
+		if (!available.length) { return; }
+		const host = this.externalControls = dom.$('span.cleanSlate-external-controls');
+		host.style.cssText = 'display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap';
+		this.modelDropdown.after(host);
+		for (const control of available) {
+			const button = control.category === 'thought_level' ? this.reasoningDropdown : control.category === 'mode' ? this.editModeChip : dom.append(host, dom.$('button.cleanSlate-dropdown'));
+			button.style.display = '';
+			button.title = control.name;
+			if (isFastModeControl(control)) { dom.append(button, dom.$('i.codicon.codicon-zap')); }
+			if (control.category === 'mode') {
+				const kind = control.options.find(option => option.value === control.current)?.kind;
+				button.classList.toggle('full-access', isFullAccessMode(kind ?? ''));
+				const icon = button.querySelector<HTMLElement>('.approval-mode-icon');
+				if (icon) { renderApprovalIcon(icon, kind); }
+			}
+			button.setAttribute('aria-label', control.name);
+			let label = button.querySelector<HTMLElement>('.dropdown-label');
+			if (!label) { label = dom.append(button, dom.$('span.dropdown-label')); dom.append(button, dom.$('i.codicon.codicon-chevron-down')); }
+			label.textContent = control.options.find(option => option.value === control.current)?.name ?? control.current;
+			button.onclick = () => onOpen(button, control.configId);
+		}
+	}
 	private modelProviderLogo!: HTMLElement;
 	private contextWindowButton!: HTMLElement;
 	private contextWindowTooltip!: HTMLElement;
 	private contextWindowPercent!: HTMLElement;
 	private contextWindowTokenLine!: HTMLElement;
 	private fileInput!: HTMLInputElement;
+	private readonly composerHeader: HTMLElement;
 	private workspaceLabel!: HTMLElement;
 	private workspaceLabelText!: HTMLElement;
 	private workspaceLabelChevron: HTMLElement | undefined;
@@ -90,8 +126,10 @@ export class CleanSlateComposerView {
 		this.inputContainer = dom.append(container, dom.$('.cleanSlate-chat-input-container'));
 		this.inputContainer.classList.toggle('compact', options.compact === true);
 		this.commandPopup = dom.append(this.inputContainer, dom.$('.cleanSlate-agent-popup'));
+		this.composerHeader = dom.append(this.inputContainer, dom.$('.cleanSlate-composer-header'));
 
 		this.renderWorkspaceLabel();
+		this.buildAgentSelector();
 
 		this.inputBox = dom.append(this.inputContainer, dom.$('.cleanSlate-input-box'));
 		this.imagePreviewContainer = dom.append(this.inputBox, dom.$('.cleanSlate-image-preview-container'));
@@ -183,7 +221,60 @@ export class CleanSlateComposerView {
 		setCleanSlateProviderLogo(this.modelProviderLogo, provider, model);
 	}
 
+	updateAgent(name: string, iconPath?: Parameters<typeof FileAccess.asBrowserUri>[0], monochromeIcon = false): void {
+		if (!this.agentDropdown) { return; }
+		const logo = this.agentDropdown.querySelector<HTMLElement>('.cleanSlate-agent-logo');
+		const label = this.agentDropdown.querySelector<HTMLElement>('.cleanSlate-agent-label');
+		if (!logo || !label) { return; }
+		label.textContent = name;
+		logo.classList.toggle('is-cleanslate', !iconPath && name === 'CleanSlate');
+		this.agentDropdown.title = `Agent: ${name}`;
+		this.agentDropdown.setAttribute('aria-label', `Agent: ${name}`);
+		const path = iconPath ?? 'vs/workbench/contrib/cleanSlate/browser/media/logo.png';
+		const logoUrl = asCSSUrl(FileAccess.asBrowserUri(path));
+		logo.style.maskImage = monochromeIcon ? logoUrl : '';
+		logo.style.webkitMaskImage = monochromeIcon ? logoUrl : '';
+		logo.style.backgroundImage = monochromeIcon ? '' : logoUrl;
+		logo.style.backgroundColor = monochromeIcon ? 'currentColor' : 'transparent';
+	}
+
+	setExternalRuntime(agentName: string | undefined, logoPath?: Parameters<typeof FileAccess.asBrowserUri>[0], onModelSelect?: (anchor: HTMLElement) => void, monochromeLogo = false): void {
+		const external = !!agentName;
+		if (!external) { this.externalControls?.remove(); this.externalControls = undefined; }
+		if (!external) {
+			this.reasoningDropdown.onclick = () => this.options.onReasoningSelector(this.reasoningDropdown);
+			this.editModeChip.onclick = () => this.options.onEditModeSelector?.(this.editModeChip);
+		}
+		this.reasoningDropdown.style.display = external ? 'none' : '';
+		this.editModeChip.style.display = external ? 'none' : '';
+		this.contextWindowButton.style.display = '';
+		this.planModeChip.style.display = 'none';
+		this.modelDropdown.classList.toggle('external-runtime', external);
+		this.modelDropdown.onclick = external ? (onModelSelect ? () => onModelSelect(this.modelDropdown) : null) : () => this.options.onModelSelector(this.modelDropdown);
+		const label = this.modelDropdown.querySelector('.dropdown-label') as HTMLElement | null;
+		const chevron = this.modelDropdown.querySelector('.codicon-chevron-down') as HTMLElement | null;
+		if (external && label) { label.textContent = agentName; }
+		if (external) {
+			const logoUrl = logoPath ? asCSSUrl(FileAccess.asBrowserUri(logoPath)) : '';
+			this.modelProviderLogo.style.display = logoPath ? '' : 'none';
+			this.modelProviderLogo.style.maskImage = monochromeLogo ? logoUrl : '';
+			this.modelProviderLogo.style.webkitMaskImage = monochromeLogo ? logoUrl : '';
+			this.modelProviderLogo.style.backgroundImage = monochromeLogo ? '' : logoUrl;
+			this.modelProviderLogo.style.backgroundSize = 'contain';
+			this.modelProviderLogo.style.backgroundRepeat = 'no-repeat';
+			this.modelProviderLogo.style.backgroundColor = monochromeLogo ? '' : 'transparent';
+		} else {
+			this.modelProviderLogo.style.maskImage = '';
+			this.modelProviderLogo.style.webkitMaskImage = '';
+			this.modelProviderLogo.style.backgroundImage = '';
+			this.modelProviderLogo.style.backgroundColor = '';
+		}
+		if (chevron) { chevron.style.display = external && !onModelSelect ? 'none' : ''; }
+		this.modelDropdown.title = external ? `Model: ${agentName}` : this.modelDropdown.title;
+	}
+
 	updateReasoning(label: string): void {
+		if (this.modelDropdown.classList.contains('external-runtime')) { return; }
 		const labelElement = this.reasoningDropdown.querySelector('.dropdown-label') as HTMLElement | null;
 		if (labelElement) {
 			labelElement.textContent = label;
@@ -192,6 +283,7 @@ export class CleanSlateComposerView {
 	}
 
 	updatePlanMode(isActive: boolean): void {
+		if (this.modelDropdown?.classList.contains('external-runtime')) { this.planModeChip.style.display = 'none'; return; }
 		this.planModeChip.classList.toggle('active', isActive);
 		this.planModeChip.style.display = isActive ? 'inline-flex' : 'none';
 		this.planModeChip.setAttribute('aria-pressed', isActive ? 'true' : 'false');
@@ -199,7 +291,11 @@ export class CleanSlateComposerView {
 	}
 
 	updateEditMode(mode: CleanSlateEditMode): void {
+		if (this.modelDropdown.classList.contains('external-runtime')) { return; }
 		const auto = mode === 'auto';
+		this.editModeChip.classList.remove('full-access');
+		const icon = this.editModeChip.querySelector<HTMLElement>('.approval-mode-icon');
+		if (icon) { renderApprovalIcon(icon, auto ? 'automatic-review' : 'approval-required'); }
 		this.editModeChipLabel.textContent = formatCleanSlateEditMode(mode === 'manual' ? 'accept-edits' : mode);
 		this.editModeChip.classList.toggle('active', auto);
 		this.editModeChip.setAttribute('aria-pressed', auto ? 'true' : 'false');
@@ -208,7 +304,14 @@ export class CleanSlateComposerView {
 			: 'File edits are applied automatically, commands still wait for approval. Click to change.';
 	}
 
-	updateContextWindowUsage(usage: ICleanSlateContextWindowUsage): void {
+	updateContextWindowUsage(usage: ICleanSlateContextWindowUsage | null): void {
+		if (!usage) {
+			this.contextWindowButton.style.setProperty('--cleanSlate-context-window-used', '0%');
+			this.contextWindowButton.setAttribute('aria-label', 'Context window: waiting for agent usage');
+			this.contextWindowPercent.textContent = 'Waiting for agent usage';
+			this.contextWindowTokenLine.textContent = 'Updates when the agent reports token usage.';
+			return;
+		}
 		const maxTokens = Math.max(1, Math.floor(usage.maxTokens));
 		const usedTokens = Math.max(0, Math.floor(usage.usedTokens));
 		const percent = Math.max(0, Math.min(100, Math.round(usage.percent)));
@@ -218,7 +321,6 @@ export class CleanSlateComposerView {
 		const label = `Context window: ${percentLine}, ${tokenLine}`;
 
 		this.contextWindowButton.style.setProperty('--cleanSlate-context-window-used', `${percent}%`);
-		this.contextWindowButton.classList.toggle('is-generating', usage.isGenerating);
 		this.contextWindowButton.setAttribute('aria-label', label);
 		this.contextWindowPercent.textContent = percentLine;
 		this.contextWindowTokenLine.textContent = tokenLine;
@@ -229,7 +331,9 @@ export class CleanSlateComposerView {
 		if (!this.workspaceLabel || !this.workspaceLabelText) {
 			return;
 		}
-		this.workspaceLabel.style.display = this.options.compact ? 'none' : (label ? 'flex' : 'none');
+		const visible = !this.options.compact && !!label;
+		this.workspaceLabel.style.display = visible ? 'flex' : 'none';
+		this.inputContainer.classList.toggle('has-workspace-label', visible);
 		this.workspaceLabelText.textContent = label ?? '';
 	}
 
@@ -421,6 +525,7 @@ export class CleanSlateComposerView {
 
 		this.editModeChip = dom.append(leftFooter, dom.$('button.cleanSlate-edit-mode-chip')) as HTMLButtonElement;
 		(this.editModeChip as HTMLButtonElement).type = 'button';
+		dom.append(this.editModeChip, dom.$('i.codicon.codicon-shield.approval-mode-icon'));
 		this.editModeChipLabel = dom.append(this.editModeChip, dom.$('span.dropdown-label'));
 		dom.append(this.editModeChip, dom.$('i.codicon.codicon-chevron-down'));
 		this.editModeChip.onclick = () => this.options.onEditModeSelector?.(this.editModeChip);
@@ -431,7 +536,7 @@ export class CleanSlateComposerView {
 
 	private renderWorkspaceLabel(): void {
 		const workspaceName = this.options.workspaceName?.trim();
-		this.workspaceLabel = dom.append(this.inputContainer, dom.$(this.options.onWorkspaceSelector ? 'button.cleanSlate-workspace-label' : '.cleanSlate-workspace-label'));
+		this.workspaceLabel = dom.append(this.composerHeader, dom.$(this.options.onWorkspaceSelector ? 'button.cleanSlate-workspace-label' : '.cleanSlate-workspace-label'));
 		if (this.workspaceLabel instanceof HTMLButtonElement) {
 			this.workspaceLabel.type = 'button';
 		}
@@ -439,6 +544,7 @@ export class CleanSlateComposerView {
 		this.workspaceLabelText = dom.append(this.workspaceLabel, dom.$('span'));
 		if (this.options.onWorkspaceSelector) {
 			this.workspaceLabelChevron = dom.append(this.workspaceLabel, dom.$('i.codicon.codicon-chevron-down'));
+			this.workspaceLabelChevron.style.display = 'none';
 			this.workspaceLabel.onclick = () => this.options.onWorkspaceSelector?.(this.workspaceLabel);
 		}
 		this.updateWorkspaceLabel(workspaceName);
@@ -457,6 +563,19 @@ export class CleanSlateComposerView {
 				this.options.onSubmit();
 			}
 		};
+	}
+
+	private buildAgentSelector(): void {
+		if (this.options.onAgentSelector) {
+			const row = dom.append(this.composerHeader, dom.$('.cleanSlate-agent-selector-row'));
+			this.agentDropdown = dom.append(row, dom.$('button.cleanSlate-agent-dropdown')) as HTMLButtonElement;
+			this.agentDropdown.type = 'button';
+			dom.append(this.agentDropdown, dom.$('span.cleanSlate-agent-logo'));
+			dom.append(this.agentDropdown, dom.$('span.cleanSlate-agent-label'));
+			dom.append(this.agentDropdown, dom.$('i.codicon.codicon-chevron-down'));
+			this.agentDropdown.onclick = () => this.options.onAgentSelector?.(this.agentDropdown!);
+			this.updateAgent('CleanSlate');
+		}
 	}
 
 	private buildContextWindowIndicator(parent: HTMLElement): void {

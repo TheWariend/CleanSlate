@@ -17,7 +17,7 @@ export class CleanSlateModelSelectorRenderer {
     constructor(
         private readonly modelProvider: CleanSlateChatModelProvider,
         private readonly openSettings: () => void,
-        private readonly upgradeToPro?: () => void
+		private readonly upgradeToPro?: () => void
     ) { }
 
     async toggle(container: HTMLElement, anchor: HTMLElement): Promise<void> {
@@ -28,6 +28,74 @@ export class CleanSlateModelSelectorRenderer {
 
         await this.show(container, anchor);
     }
+
+	async toggleExternal(
+		container: HTMLElement,
+		anchor: HTMLElement,
+		agentName: string,
+		load: () => Promise<{ readonly current: string; readonly options: readonly { readonly value: string; readonly name: string }[] }>,
+		select: (value: string) => Promise<void>
+	): Promise<void> {
+		if (this.overlay) {
+			this.hide();
+			return;
+		}
+
+		const overlay = dom.append(container, dom.$('.cleanSlate-model-selector-overlay'));
+		this.overlay = overlay;
+		const modelListContainer = dom.append(overlay, dom.$('.model-list-container.status'));
+		const loadingItem = dom.append(modelListContainer, dom.$('.model-status-item.is-loading'));
+		dom.append(loadingItem, dom.$('.model-status-icon.codicon.codicon-loading.codicon-modifier-spin'));
+		dom.append(loadingItem, dom.$('.model-status-title')).textContent = 'Loading Models';
+		this.positionOverlay(overlay, anchor, container);
+		this.installOutsideClickListener(anchor);
+
+		try {
+			const state = await load();
+			if (this.overlay !== overlay) {
+				return;
+			}
+			dom.clearNode(modelListContainer);
+			modelListContainer.classList.remove('status');
+			if (!state.options.length) {
+				modelListContainer.classList.add('status');
+				const statusItem = dom.append(modelListContainer, dom.$('.model-status-item'));
+				dom.append(statusItem, dom.$('.model-status-icon.codicon.codicon-plug'));
+				dom.append(statusItem, dom.$('.model-status-title')).textContent = 'No Models Found';
+				dom.append(statusItem, dom.$('.model-status-description')).textContent = 'This agent did not provide model choices for the current session.';
+			} else {
+				for (const option of state.options) {
+					const item = dom.append(modelListContainer, dom.$('.model-item'));
+					dom.append(item, dom.$('.model-item-label')).textContent = option.name;
+					item.title = option.name;
+					if (option.value === state.current) {
+						item.classList.add('active');
+					}
+					item.onclick = async () => {
+						item.classList.add('active');
+						try {
+							await select(option.value);
+							this.hide();
+						} catch (error) {
+							item.classList.remove('active');
+							item.title = error instanceof Error ? error.message : String(error);
+						}
+					};
+				}
+			}
+			this.positionOverlay(overlay, anchor, container);
+		} catch (error) {
+			if (this.overlay !== overlay) {
+				return;
+			}
+			dom.clearNode(modelListContainer);
+			const statusItem = dom.append(modelListContainer, dom.$('.model-status-item'));
+			dom.append(statusItem, dom.$('.model-status-icon.codicon.codicon-warning'));
+			dom.append(statusItem, dom.$('.model-status-title')).textContent = 'Model List Unavailable';
+			dom.append(statusItem, dom.$('.model-status-description')).textContent = error instanceof Error ? error.message : 'Unable to load models. Try again.';
+			this.positionOverlay(overlay, anchor, container);
+		}
+	}
 
     hide(): void {
         this.overlay?.remove();
@@ -226,13 +294,17 @@ export class CleanSlateModelSelectorRenderer {
 
         this.positionOverlay(overlay, anchor, container);
 
-        this.outsideClickListener?.dispose();
-        this.outsideClickListener = dom.addDisposableListener(document, 'mousedown', (event) => {
+		this.installOutsideClickListener(anchor);
+    }
+
+	private installOutsideClickListener(anchor: HTMLElement): void {
+		this.outsideClickListener?.dispose();
+		this.outsideClickListener = dom.addDisposableListener(document, 'mousedown', (event) => {
             if (!this.overlay?.contains(event.target as Node) && !anchor.contains(event.target as Node)) {
                 this.hide();
             }
         });
-    }
+	}
 
     private positionOverlay(overlay: HTMLElement, anchor: HTMLElement, container: HTMLElement): void {
         const containerRect = container.getBoundingClientRect();

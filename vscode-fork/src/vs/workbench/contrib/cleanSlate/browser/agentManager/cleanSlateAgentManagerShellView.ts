@@ -30,6 +30,7 @@ export interface ICleanSlateAgentManagerShellBuildOptions {
 
 export interface ICleanSlateAgentManagerShellParts {
 	readonly leftNav: HTMLElement;
+	readonly newChatButton: HTMLButtonElement;
 	readonly leftNavToggleButton?: HTMLButtonElement;
 	readonly searchInput: HTMLInputElement;
 	readonly workspaceList: HTMLElement;
@@ -94,6 +95,7 @@ export class CleanSlateAgentManagerShellView {
 
 		return {
 			leftNav,
+			newChatButton: navParts.newChatButton,
 			leftNavToggleButton,
 			searchInput: navParts.searchInput,
 			workspaceList: navParts.workspaceList,
@@ -182,10 +184,23 @@ export class CleanSlateAgentManagerShellView {
 		return navToggle;
 	}
 
-	private buildLeftNav(leftNav: HTMLElement, options: ICleanSlateAgentManagerShellBuildOptions): { readonly searchInput: HTMLInputElement; readonly workspaceList: HTMLElement; readonly accountButton: HTMLButtonElement; readonly accountAvatar: HTMLElement; readonly accountName: HTMLElement; readonly accountPopover: HTMLElement; readonly accountPopoverAvatar: HTMLElement; readonly accountPopoverName: HTMLElement; readonly accountPopoverEmail: HTMLElement; readonly accountSignedIn: HTMLElement; readonly accountSignedOut: HTMLElement; readonly updateMenuItem: HTMLButtonElement; readonly updateBadge: HTMLElement } {
+	private buildLeftNav(leftNav: HTMLElement, options: ICleanSlateAgentManagerShellBuildOptions): { readonly newChatButton: HTMLButtonElement; readonly searchInput: HTMLInputElement; readonly workspaceList: HTMLElement; readonly accountButton: HTMLButtonElement; readonly accountAvatar: HTMLElement; readonly accountName: HTMLElement; readonly accountPopover: HTMLElement; readonly accountPopoverAvatar: HTMLElement; readonly accountPopoverName: HTMLElement; readonly accountPopoverEmail: HTMLElement; readonly accountSignedIn: HTMLElement; readonly accountSignedOut: HTMLElement; readonly updateMenuItem: HTMLButtonElement; readonly updateBadge: HTMLElement } {
 		const newChat = dom.append(leftNav, dom.$('button.cleanSlate-agent-manager-nav-button.cleanSlate-agent-manager-new-chat')) as HTMLButtonElement;
 		newChat.type = 'button';
-		dom.append(newChat, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.edit)}`));
+		const composeIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		composeIcon.setAttribute('viewBox', '0 0 24 24');
+		composeIcon.setAttribute('width', '18');
+		composeIcon.setAttribute('height', '18');
+		composeIcon.setAttribute('fill', 'none');
+		composeIcon.setAttribute('stroke', 'currentColor');
+		composeIcon.setAttribute('stroke-width', '1.7');
+		composeIcon.setAttribute('stroke-linecap', 'round');
+		composeIcon.setAttribute('stroke-linejoin', 'round');
+		composeIcon.setAttribute('aria-hidden', 'true');
+		const composePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+		composePath.setAttribute('d', 'M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4 M10 14l1-4L18 3l3 3-7 7-4 1Z M16 5l3 3');
+		composeIcon.append(composePath);
+		newChat.append(composeIcon);
 		dom.append(newChat, dom.$('span')).textContent = localize('cleanSlate.agentManager.newChat', 'New chat');
 		newChat.onclick = options.onNewChat;
 
@@ -330,7 +345,7 @@ export class CleanSlateAgentManagerShellView {
 			options.onOpenSettings();
 		};
 
-		return { searchInput, workspaceList, accountButton, accountAvatar, accountName, accountPopover, accountPopoverAvatar, accountPopoverName, accountPopoverEmail, accountSignedIn, accountSignedOut, updateMenuItem, updateBadge };
+		return { newChatButton: newChat, searchInput, workspaceList, accountButton, accountAvatar, accountName, accountPopover, accountPopoverAvatar, accountPopoverName, accountPopoverEmail, accountSignedIn, accountSignedOut, updateMenuItem, updateBadge };
 	}
 
 	private buildHeader(

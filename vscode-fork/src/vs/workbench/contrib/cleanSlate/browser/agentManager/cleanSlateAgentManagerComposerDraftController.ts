@@ -64,6 +64,11 @@ export class CleanSlateAgentManagerComposerDraftController {
 
 	updateContextWindowUsage(): void {
 		const state = this.sidebarViewModel.getState();
+		const external = this.sidebarViewModel.getExternalContextUsage();
+		if (external !== undefined) {
+			this.getComposerView()?.updateContextWindowUsage(external ? { ...external, percent: external.usedTokens / external.maxTokens * 100, isGenerating: state.isGenerating } : null);
+			return;
+		}
 		const maxTokens = Math.max(1, state.settings.contextWindow || CLEANSLATE_FALLBACK_CONTEXT_WINDOW_TOKENS);
 		const usedTokens = this.estimateCurrentContextTokens();
 		this.getComposerView()?.updateContextWindowUsage({ usedTokens, maxTokens, percent: (usedTokens / maxTokens) * 100, isGenerating: state.isGenerating });

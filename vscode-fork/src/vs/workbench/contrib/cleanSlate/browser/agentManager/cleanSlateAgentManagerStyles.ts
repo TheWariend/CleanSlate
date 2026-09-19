@@ -2708,6 +2708,126 @@ registerThemingParticipant((_theme, collector) => {
 			padding: 8px;
 		}
 
+		.cleanSlate-agent-manager-agent-carousel {
+			position: absolute;
+			left: 50%;
+			bottom: calc(var(--cleanSlate-agent-manager-bottom-height, 150px) + 34px);
+			transform: translateX(-50%);
+			z-index: 1000001;
+			width: 216px;
+			display: grid;
+			justify-items: center;
+			padding: 0;
+			box-sizing: border-box;
+			border: 0;
+			background: transparent;
+			color: var(--vscode-dropdown-foreground);
+			font-family: var(--vscode-font-family);
+		}
+
+		.agent-carousel-hint {
+			margin-bottom: 5px;
+			color: var(--vscode-descriptionForeground);
+			font-size: 11px;
+			font-style: italic;
+		}
+
+		.agent-carousel-viewport {
+			width: 200px;
+			height: 64px;
+			display: flex;
+			gap: 20px;
+			padding: 6px 74px;
+			box-sizing: border-box;
+			overflow-x: auto;
+			overscroll-behavior-x: contain;
+			scroll-padding-inline: 74px;
+			scroll-snap-type: x mandatory;
+			scrollbar-width: none;
+			touch-action: pan-x;
+		}
+
+		.agent-carousel-viewport::-webkit-scrollbar { display: none; }
+
+		.agent-carousel-item {
+			width: 52px;
+			height: 52px;
+			flex: 0 0 52px;
+			display: grid;
+			place-items: center;
+			padding: 0;
+			border: 0;
+			border-radius: 50%;
+			background: transparent;
+			color: var(--vscode-foreground);
+			scroll-snap-align: center;
+			scroll-snap-stop: always;
+			opacity: .55;
+			transform: scale(.88);
+			transition: opacity 140ms ease, transform 140ms ease, filter 140ms ease;
+			cursor: pointer;
+		}
+
+		.agent-carousel-item[aria-selected='true'] {
+			opacity: 1;
+			transform: scale(1);
+			filter: drop-shadow(0 8px 13px rgba(0, 0, 0, .45));
+		}
+
+		.agent-carousel-item:disabled {
+			opacity: .22;
+			cursor: not-allowed;
+		}
+
+		.agent-carousel-item:focus-visible {
+			outline: 1px solid var(--vscode-focusBorder);
+			outline-offset: 2px;
+		}
+
+		.agent-carousel-mark {
+			width: 48px;
+			height: 48px;
+			display: grid;
+			place-items: center;
+			box-sizing: border-box;
+			border-radius: 50%;
+			background: var(--vscode-editor-background);
+		}
+
+		.agent-carousel-mark img {
+			width: 48px;
+			height: 48px;
+			border-radius: 50%;
+			object-fit: cover;
+		}
+
+		.agent-carousel-mark.agent-mark-monochrome {
+			width: 36px;
+			height: 36px;
+			border-radius: 0;
+			background: var(--vscode-foreground);
+			mask-repeat: no-repeat;
+			mask-position: center;
+			mask-size: contain;
+			-webkit-mask-repeat: no-repeat;
+			-webkit-mask-position: center;
+			-webkit-mask-size: contain;
+		}
+
+		.agent-carousel-mark.agent-mark-image {
+			border-radius: 11px;
+			overflow: hidden;
+		}
+
+		.agent-carousel-name {
+			height: 16px;
+			margin-top: 2px;
+			color: var(--vscode-descriptionForeground);
+			font-size: 11px;
+			font-weight: 600;
+			line-height: 16px;
+		}
+
 		@keyframes cleanSlateAgentManagerSurfaceEnter {
 			from {
 				opacity: 0;
