@@ -136,6 +136,26 @@ suite('CleanSlate refactored boundaries', () => {
 		assert.strictEqual(restored?.agentRuntimeState?.messages[1].toolCallId, 'call-1');
 	});
 
+	test('external agent identity survives GUI session persistence', () => {
+		const mapper = new CleanSlateAgentManagerSessionMapper();
+		const persisted = mapper.toPersistedSession({
+			id: 'external-session',
+			title: 'Review changes',
+			savedAt: 1,
+			history: [{ role: 'user', content: 'Review these changes' }],
+			planMode: false,
+			reasoningLevel: 'low',
+			externalAgent: { transport: 'acp', agentId: 'external-test' },
+			externalAgentSessionId: 'agent-session-1'
+		});
+
+		assert.strictEqual(persisted.runtime, 'external');
+		const restored = mapper.toSessionSnapshot(persisted);
+		assert.deepStrictEqual(restored?.externalAgent, { transport: 'acp', agentId: 'external-test' });
+		assert.strictEqual(restored?.externalAgentSessionId, 'agent-session-1');
+		assert.strictEqual(restored?.runtime, 'external');
+	});
+
 	test('agent manager distinguishes sidebar summaries from hydrated conversations', () => {
 		const mapper = new CleanSlateAgentManagerSessionMapper();
 		const summary = {

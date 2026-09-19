@@ -338,6 +338,9 @@ export interface ICleanSlatePersistedSession {
     readonly threadState?: unknown;
     readonly agentRuntimeState?: ICleanSlateAgentRuntimeSnapshot;
     readonly agent?: unknown;
+	readonly runtime?: 'native' | 'external';
+	readonly externalAgent?: { readonly transport: 'acp'; readonly agentId: string };
+	readonly externalAgentSessionId?: string;
 }
 
 export interface ICleanSlateThreadSessionUpdate {

@@ -10,6 +10,7 @@ import {
 	type ICleanSlateAgentRuntimeSnapshot,
     normalizeCleanSlateExecutionState
 } from '../../../../../services/cleanSlate/common/core/cleanSlateAI.js';
+import { CleanSlateAgentRuntime, IExternalAgentConfig } from '../../../../../services/cleanSlate/common/externalAgents/externalAgentTypes.js';
 
 export const CLEANSLATE_SESSION_STATES = ['starting', 'running', 'detached', 'stopping', 'stopped'] as const;
 
@@ -61,6 +62,9 @@ export interface ICleanSlateSessionSnapshot {
     readonly agent?: AgentDefinition;
     readonly workspaceName?: string;
     readonly isGenerating?: boolean;
+	readonly runtime?: CleanSlateAgentRuntime;
+	readonly externalAgent?: IExternalAgentConfig;
+	readonly externalAgentSessionId?: string;
 }
 
 export interface ICleanSlateSessionIndexEntry {

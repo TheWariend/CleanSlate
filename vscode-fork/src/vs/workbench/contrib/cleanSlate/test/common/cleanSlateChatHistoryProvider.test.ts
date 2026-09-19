@@ -4,7 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
+import { promises as fs } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { URI } from '../../../../../base/common/uri.js';
 import { StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
+import { CleanSlateThreadPersistenceStore } from '../../../../services/cleanSlate/node/core/cleanSlateThreadPersistenceStore.js';
 import { CleanSlateChatHistoryProvider } from '../../browser/chat/providers/cleanSlateChatHistoryProvider.js';
 import { ICleanSlateSessionSnapshot } from '../../browser/chat/types/cleanSlateChatSessionTypes.js';
 
@@ -49,6 +54,61 @@ suite('CleanSlateChatHistoryProvider', () => {
 
 		assert.deepStrictEqual(sessions.map(session => session.id), ['session-a']);
 		assert.deepStrictEqual(sessions[0].transcript?.map(message => message.content), ['implemented dark mode', 'Not yet.']);
+	});
+
+	test('preserves external agent identity while archiving and restoring a chat', async () => {
+		const storage = createStorageService();
+		const provider = new CleanSlateChatHistoryProvider(
+			storage,
+			createWorkspaceContextService(),
+			createMainService()
+		);
+		await provider.whenReady();
+
+		provider.upsertArchivedSession({
+			...createSnapshot('external-session', 'Review changes'),
+			externalAgent: { transport: 'acp', agentId: 'external-test' },
+			externalAgentSessionId: 'agent-session-1'
+		});
+
+		const archived = provider.getArchivedSessions()[0];
+		assert.strictEqual(archived.runtime, 'external');
+		assert.deepStrictEqual(archived.externalAgent, { transport: 'acp', agentId: 'external-test' });
+		assert.strictEqual(archived.externalAgentSessionId, 'agent-session-1');
+		const cached = JSON.parse(storage.get('cleanSlate.chat.archivedSessions', StorageScope.WORKSPACE) ?? '[]');
+		assert.deepStrictEqual(cached[0].externalAgent, { transport: 'acp', agentId: 'external-test' });
+	});
+
+	test('persists external agent identity in the shared session database', async () => {
+		const directory = await fs.mkdtemp(join(tmpdir(), 'cleanslate-thread-store-'));
+		const store = new CleanSlateThreadPersistenceStore({
+			userRoamingDataHome: URI.file(directory)
+		} as any, {
+			info() { },
+			warn() { },
+			error() { }
+		} as any);
+		try {
+			await store.archiveSession('file:///workspace', {
+				id: 'external-session',
+				title: 'Review changes',
+				savedAt: 1,
+				history: [{ role: 'user', content: 'Review changes' }],
+				runtime: 'external',
+				externalAgent: { transport: 'acp', agentId: 'external-test' },
+				externalAgentSessionId: 'agent-session-1'
+			});
+			const restored = await store.loadSession('external-session');
+			assert.strictEqual(restored?.runtime, 'external');
+			assert.deepStrictEqual(restored?.externalAgent, { transport: 'acp', agentId: 'external-test' });
+			assert.strictEqual(restored?.externalAgentSessionId, 'agent-session-1');
+			const summary = (await store.listSessions())[0];
+			assert.deepStrictEqual(summary.externalAgent, { transport: 'acp', agentId: 'external-test' });
+		} finally {
+			store.dispose();
+			await new Promise(resolve => setTimeout(resolve, 0));
+			await fs.rm(directory, { recursive: true, force: true });
+		}
 	});
 
 	test('does not resurrect locally cached sessions after deletion', async () => {

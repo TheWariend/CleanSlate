@@ -40,6 +40,14 @@ import {
 } from '../../common/core/cleanSlateAI.js';
 import { DisposableStore, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
+import {
+	IExternalAgentDescriptor,
+	IExternalAgentEvent,
+	IExternalAgentPermissionResponse,
+	IExternalAgentPromptRequest,
+	IExternalAgentSessionInfo,
+	IExternalAgentStartRequest
+} from '../../common/externalAgents/externalAgentTypes.js';
 
 export class CleanSlateMainChannel implements IServerChannel {
 	private readonly activeStreams = new Map<string, CancellationTokenSource>();
@@ -66,6 +74,8 @@ export class CleanSlateMainChannel implements IServerChannel {
                 return this.service.onDidPublishThreadSession as unknown as Event<T>;
             case 'onDidRefreshManagedToken':
                 return this.service.onDidRefreshManagedToken as unknown as Event<T>;
+			case 'onDidEmitExternalAgentEvent':
+				return this.service.onDidEmitExternalAgentEvent as unknown as Event<T>;
         }
 
         throw new Error(`Event not found: ${event}`);
@@ -134,6 +144,24 @@ export class CleanSlateMainChannel implements IServerChannel {
                 return this.service.removeThreadSession(arg[0]);
             case 'removeArchivedThreadSession':
                 return this.service.removeArchivedThreadSession(arg[0], arg[1]);
+			case 'getExternalAgentUsage':
+				return this.service.getExternalAgentUsage(arg);
+			case 'listExternalAgents':
+				return this.service.listExternalAgents();
+			case 'registerExternalAgent':
+				return this.service.registerExternalAgent(arg);
+			case 'startExternalAgentSession':
+				return this.service.startExternalAgentSession(arg[0]);
+			case 'promptExternalAgentSession':
+				return this.service.promptExternalAgentSession(arg[0]);
+			case 'cancelExternalAgentSession':
+				return this.service.cancelExternalAgentSession(arg[0]);
+			case 'respondToExternalAgentPermission':
+				return this.service.respondToExternalAgentPermission(arg[0]);
+			case 'respondToExternalAgentHostTool':
+				return this.service.respondToExternalAgentHostTool(arg[0]);
+			case 'closeExternalAgentSession':
+				return this.service.closeExternalAgentSession(arg[0]);
         }
 
         throw new Error(`Call not found: ${command}`);
@@ -195,11 +223,23 @@ export class CleanSlateMainChannelClient implements ICleanSlateMainService {
     declare readonly _serviceBrand: undefined;
     readonly onDidPublishThreadSession: Event<ICleanSlateThreadSessionUpdate>;
     readonly onDidRefreshManagedToken: Event<ICleanSlateManagedTokenRefreshEvent>;
+	readonly onDidEmitExternalAgentEvent: Event<IExternalAgentEvent>;
 
     constructor(private readonly channel: any) {
         this.onDidPublishThreadSession = this.channel.listen('onDidPublishThreadSession');
         this.onDidRefreshManagedToken = this.channel.listen('onDidRefreshManagedToken');
+		this.onDidEmitExternalAgentEvent = this.channel.listen('onDidEmitExternalAgentEvent');
     }
+
+	getExternalAgentUsage(agentId: string): Promise<import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentUsage> { return this.channel.call('getExternalAgentUsage', agentId); }
+	listExternalAgents(): Promise<IExternalAgentDescriptor[]> { return this.channel.call('listExternalAgents'); }
+	registerExternalAgent(value: import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentRegistration): Promise<void> { return this.channel.call('registerExternalAgent', value); }
+	startExternalAgentSession(request: IExternalAgentStartRequest): Promise<IExternalAgentSessionInfo> { return this.channel.call('startExternalAgentSession', [request]); }
+	promptExternalAgentSession(request: IExternalAgentPromptRequest): Promise<void> { return this.channel.call('promptExternalAgentSession', [request]); }
+	cancelExternalAgentSession(cleanSlateSessionId: string): Promise<void> { return this.channel.call('cancelExternalAgentSession', [cleanSlateSessionId]); }
+	respondToExternalAgentPermission(response: IExternalAgentPermissionResponse): Promise<void> { return this.channel.call('respondToExternalAgentPermission', [response]); }
+	respondToExternalAgentHostTool(response: import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentHostToolResponse): Promise<void> { return this.channel.call('respondToExternalAgentHostTool', [response]); }
+	closeExternalAgentSession(cleanSlateSessionId: string): Promise<void> { return this.channel.call('closeExternalAgentSession', [cleanSlateSessionId]); }
 
     getRuntimeConfig(): Promise<ICleanSlateRuntimeConfig> {
         return this.channel.call('getRuntimeConfig');

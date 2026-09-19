@@ -79,6 +79,9 @@
     "update-build-ts-version": "npm install -D typescript@next && npm install -D @typescript/native-preview && (cd build && npm run typecheck)"
   },
   "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.76.0",
+    "@agentclientprotocol/codex-acp": "1.11.0",
+    "@agentclientprotocol/sdk": "1.4.0",
     "@anthropic-ai/sandbox-runtime": "0.0.23",
     "@anthropic-ai/sdk": "^0.96.0",
     "@aws-sdk/client-bedrock": "^3.1046.0",

@@ -61,7 +61,10 @@ export class CleanSlateAgentManagerSessionMapper {
 			reasoningLevel: executionState.reasoningLevel,
 			agent: session.agent as ICleanSlateSessionSnapshot['agent'],
 			workspaceName: session.workspaceName,
-			isGenerating: false
+			isGenerating: false,
+			runtime: session.externalAgent ? 'external' : session.runtime,
+			externalAgent: session.externalAgent,
+			externalAgentSessionId: session.externalAgentSessionId
 		};
 	}
 
@@ -89,7 +92,10 @@ export class CleanSlateAgentManagerSessionMapper {
 			taskState: snapshot.taskState,
 			threadState: snapshot.threadState,
 			agentRuntimeState: snapshot.agentRuntimeState,
-			agent: snapshot.agent
+			agent: snapshot.agent,
+			runtime: snapshot.externalAgent ? 'external' : snapshot.runtime,
+			externalAgent: snapshot.externalAgent,
+			externalAgentSessionId: snapshot.externalAgentSessionId
 		};
 	}
 

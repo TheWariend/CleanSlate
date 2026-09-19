@@ -402,11 +402,15 @@ export class CleanSlateChatHistoryProvider {
                 transcriptVersion: snapshot.transcriptVersion ?? 1,
                 taskState: snapshot.taskState,
                 threadState: snapshot.threadState,
+				agentRuntimeState: snapshot.agentRuntimeState,
                 planMode: executionState.planMode,
                 reasoningLevel: executionState.reasoningLevel,
                 agent: snapshot.agent,
                 workspaceName: snapshot.workspaceName,
-                isGenerating: isGenerating ? true : undefined
+				isGenerating: isGenerating ? true : undefined,
+				runtime: snapshot.externalAgent ? 'external' : snapshot.runtime,
+				externalAgent: snapshot.externalAgent,
+				externalAgentSessionId: snapshot.externalAgentSessionId
             })) as ICleanSlateSessionSnapshot;
         } catch {
             return {
@@ -428,11 +432,15 @@ export class CleanSlateChatHistoryProvider {
                 transcriptVersion: snapshot.transcriptVersion ?? 1,
                 taskState: snapshot.taskState,
                 threadState: snapshot.threadState,
+				agentRuntimeState: snapshot.agentRuntimeState,
                 planMode: executionState.planMode,
                 reasoningLevel: executionState.reasoningLevel,
                 agent: snapshot.agent,
                 workspaceName: snapshot.workspaceName,
-                isGenerating: isGenerating ? true : undefined
+				isGenerating: isGenerating ? true : undefined,
+				runtime: snapshot.externalAgent ? 'external' : snapshot.runtime,
+				externalAgent: snapshot.externalAgent,
+				externalAgentSessionId: snapshot.externalAgentSessionId
             };
         }
     }
@@ -561,7 +569,11 @@ export class CleanSlateChatHistoryProvider {
             transcriptVersion: snapshot.transcriptVersion ?? 1,
             taskState: snapshot.taskState,
             threadState: snapshot.threadState,
-            agent: snapshot.agent
+			agentRuntimeState: snapshot.agentRuntimeState,
+			agent: snapshot.agent,
+			runtime: snapshot.externalAgent ? 'external' : snapshot.runtime,
+			externalAgent: snapshot.externalAgent,
+			externalAgentSessionId: snapshot.externalAgentSessionId
         };
     }
 
@@ -608,10 +620,14 @@ export class CleanSlateChatHistoryProvider {
             transcriptVersion: session.transcriptVersion,
             taskState: session.taskState as ICleanSlateSessionSnapshot['taskState'],
             threadState: session.threadState as ICleanSlateSessionSnapshot['threadState'],
+			agentRuntimeState: session.agentRuntimeState as ICleanSlateSessionSnapshot['agentRuntimeState'],
             planMode: executionState.planMode,
             reasoningLevel: executionState.reasoningLevel,
             agent: session.agent as ICleanSlateSessionSnapshot['agent'],
-            workspaceName: session.workspaceName
+			workspaceName: session.workspaceName,
+			runtime: session.externalAgent ? 'external' : session.runtime,
+			externalAgent: session.externalAgent,
+			externalAgentSessionId: session.externalAgentSessionId
         });
     }
 }

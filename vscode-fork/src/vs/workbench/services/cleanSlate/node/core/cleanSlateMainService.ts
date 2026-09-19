@@ -87,6 +87,15 @@ import {
 } from '@cleanslate/sdk/protocol/cleanSlateModelsDevCatalog.js';
 import { CleanSlateOpenAIMessageAdapter } from '@cleanslate/sdk/node/cleanSlateOpenAIMessageAdapter.js';
 import { CleanSlateAnthropicMessageAdapter } from '@cleanslate/sdk/node/cleanSlateAnthropicMessageAdapter.js';
+import { ExternalAgentService } from '../externalAgents/externalAgentService.js';
+import {
+	IExternalAgentDescriptor,
+	IExternalAgentEvent,
+	IExternalAgentPermissionResponse,
+	IExternalAgentPromptRequest,
+	IExternalAgentSessionInfo,
+	IExternalAgentStartRequest
+} from '../../common/externalAgents/externalAgentTypes.js';
 
 interface IReasoningTagSplitState {
     inside: boolean;
@@ -147,6 +156,8 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
     private readonly threadPersistenceStore: CleanSlateThreadPersistenceStore;
     private readonly localEmbeddingService: CleanSlateLocalEmbeddingService;
     private readonly agentHost: CleanSlateHostedAgentRuntime;
+	private readonly externalAgents: ExternalAgentService;
+	readonly onDidEmitExternalAgentEvent: Event<IExternalAgentEvent>;
     private hostedBrowserViews?: { create(id: string, sessionId: string): Promise<void>; release(id: string): Promise<void>; pointer?(id: string, x: number, y: number, click: boolean): Promise<void> };
 
     configureHostedBrowserViews(views: NonNullable<NodeCleanSlateMainService['hostedBrowserViews']>): void {
@@ -171,6 +182,10 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
         this.webRetrievalService = new CleanSlateWebRetrievalService(this.requestService, this.logService);
         this.threadPersistenceStore = this._register(new CleanSlateThreadPersistenceStore(this.environmentService, this.logService));
         this.localEmbeddingService = new CleanSlateLocalEmbeddingService(this.environmentService, this.logService);
+		this.externalAgents = this._register(new ExternalAgentService());
+		const externalEvents = this._register(new Emitter<import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentEvent>());
+		this._register(this.externalAgents.onDidEmitEvent(event => externalEvents.fire(event)));
+		this.onDidEmitExternalAgentEvent = externalEvents.event;
         this.agentHost = this._register(new CleanSlateHostedAgentRuntime((request, hooks) => {
             const sessionKey = createHash('sha256').update(request.session.id).digest('hex');
             const storageHome = path.join(this.environmentService.userDataPath, 'cleanslate-agent-host', sessionKey);
@@ -218,6 +233,37 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
     getRuntimeConfig(): Promise<ICleanSlateRuntimeConfig> {
         return Promise.resolve(buildCleanSlateRuntimeConfig(this.envLookup));
     }
+
+	getExternalAgentUsage(agentId: string): Promise<import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentUsage> { return this.externalAgents.getUsage(agentId); }
+	async registerExternalAgent(value: import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentRegistration): Promise<void> { this.externalAgents.registerAgent(value); }
+
+	listExternalAgents(): Promise<IExternalAgentDescriptor[]> {
+		return Promise.resolve(this.externalAgents.listAgents());
+	}
+
+	startExternalAgentSession(request: IExternalAgentStartRequest): Promise<IExternalAgentSessionInfo> {
+		return this.externalAgents.startSession(request);
+	}
+
+	promptExternalAgentSession(request: IExternalAgentPromptRequest): Promise<void> {
+		return this.externalAgents.prompt(request);
+	}
+
+	cancelExternalAgentSession(cleanSlateSessionId: string): Promise<void> {
+		return this.externalAgents.cancel(cleanSlateSessionId);
+	}
+
+	respondToExternalAgentPermission(response: IExternalAgentPermissionResponse): Promise<void> {
+		this.externalAgents.respondToPermission(response);
+		return Promise.resolve();
+	}
+	async respondToExternalAgentHostTool(response: import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentHostToolResponse): Promise<void> {
+		this.externalAgents.respondToHostTool(response);
+	}
+
+	closeExternalAgentSession(cleanSlateSessionId: string): Promise<void> {
+		return this.externalAgents.closeSession(cleanSlateSessionId);
+	}
 
 
     async proxyRequest(options: IRequestOptions, token: CancellationToken): Promise<ICleanSlateBufferedRequestResponse> {

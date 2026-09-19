@@ -36,6 +36,9 @@ interface IThreadSessionRow {
     agent: string | null;
     transcript: string | null;
     transcriptVersion: number | null;
+	runtime: string | null;
+	externalAgent: string | null;
+	externalAgentSessionId: string | null;
     isActive: number;
     isArchived: number;
 }
@@ -285,6 +288,9 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
                 agent TEXT,
                 transcript TEXT,
                 transcriptVersion INTEGER,
+				runtime TEXT,
+				externalAgent TEXT,
+				externalAgentSessionId TEXT,
                 isActive INTEGER NOT NULL DEFAULT 0,
                 isArchived INTEGER NOT NULL DEFAULT 0
             )`);
@@ -300,6 +306,9 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
             await this.ensureColumn(db, 'ThreadSessions', 'transcriptVersion', 'INTEGER');
             await this.dropThreadSessionExecutionProfileColumn(db);
             await this.ensureColumn(db, 'ThreadSessions', 'agentRuntimeState', 'TEXT');
+			await this.ensureColumn(db, 'ThreadSessions', 'runtime', 'TEXT');
+			await this.ensureColumn(db, 'ThreadSessions', 'externalAgent', 'TEXT');
+			await this.ensureColumn(db, 'ThreadSessions', 'externalAgentSessionId', 'TEXT');
             await this.run(db, `CREATE INDEX IF NOT EXISTS idx_thread_sessions_workspace_active ON ThreadSessions(workspaceId, isActive, updatedAt)`);
             await this.run(db, `CREATE INDEX IF NOT EXISTS idx_thread_sessions_workspace_archived ON ThreadSessions(workspaceId, isArchived, savedAt)`);
             await this.run(db, `CREATE TABLE IF NOT EXISTS ThreadMessages (
@@ -440,8 +449,9 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
                 `INSERT INTO ThreadSessions (
                     id, parentSessionId, createdAt, workspaceId, projectRoot, workDir, status, sessionKey,
                     title, savedAt, updatedAt, workspaceName, planMode, reasoningLevel,
-                    taskState, threadState, agent, transcript, transcriptVersion, isActive, isArchived, agentRuntimeState
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    taskState, threadState, agent, transcript, transcriptVersion, runtime, externalAgent,
+					externalAgentSessionId, isActive, isArchived, agentRuntimeState
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     parentSessionId = excluded.parentSessionId,
                     createdAt = excluded.createdAt,
@@ -461,6 +471,9 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
                     agent = excluded.agent,
                     transcript = excluded.transcript,
                     transcriptVersion = excluded.transcriptVersion,
+					runtime = excluded.runtime,
+					externalAgent = excluded.externalAgent,
+					externalAgentSessionId = excluded.externalAgentSessionId,
                     isActive = excluded.isActive,
                     isArchived = excluded.isArchived,
                     agentRuntimeState = excluded.agentRuntimeState`,
@@ -484,6 +497,9 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
                     this.toJson(normalized.agent),
                     this.toJson(normalized.transcript),
                     normalized.transcriptVersion ?? null,
+					normalized.runtime ?? null,
+					this.toJson(normalized.externalAgent),
+					normalized.externalAgentSessionId ?? null,
                     flags.isActive ? 1 : 0,
                     flags.isArchived ? 1 : 0,
                     this.toJson(normalized.agentRuntimeState)
@@ -857,6 +873,9 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
             })),
             transcript: this.fromJson(row.transcript) as ICleanSlatePersistedSession['transcript'],
             transcriptVersion: typeof row.transcriptVersion === 'number' ? row.transcriptVersion : undefined,
+			runtime: row.externalAgent ? 'external' : row.runtime === 'external' ? 'external' : row.runtime === 'native' ? 'native' : undefined,
+			externalAgent: this.fromJson(row.externalAgent) as ICleanSlatePersistedSession['externalAgent'],
+			externalAgentSessionId: row.externalAgentSessionId ?? undefined,
             agentRuntimeState: this.fromJson(row.agentRuntimeState ?? null) as ICleanSlatePersistedSession['agentRuntimeState'],
             taskState: this.fromJson(row.taskState),
             threadState: this.fromJson(row.threadState),
@@ -900,6 +919,9 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
             }],
             transcript: undefined,
             transcriptVersion: typeof row.transcriptVersion === 'number' ? row.transcriptVersion : undefined,
+			runtime: row.externalAgent ? 'external' : row.runtime === 'external' ? 'external' : row.runtime === 'native' ? 'native' : undefined,
+			externalAgent: this.fromJson(row.externalAgent) as ICleanSlatePersistedSession['externalAgent'],
+			externalAgentSessionId: row.externalAgentSessionId ?? undefined,
             taskState: undefined,
             threadState: undefined,
             agent: undefined
@@ -929,6 +951,9 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
             history: Array.isArray(session.history) ? session.history.map(message => this.normalizeMessage(message)) : [],
             transcript: Array.isArray(session.transcript) ? session.transcript.map(message => this.normalizeMessage(message)) : undefined,
             transcriptVersion: Number.isFinite(session.transcriptVersion) ? session.transcriptVersion : undefined,
+			runtime: session.externalAgent ? 'external' : session.runtime === 'external' ? 'external' : session.runtime === 'native' ? 'native' : undefined,
+			externalAgent: session.externalAgent,
+			externalAgentSessionId: typeof session.externalAgentSessionId === 'string' ? session.externalAgentSessionId : undefined,
             agentRuntimeState: session.agentRuntimeState,
             taskState: session.taskState,
             threadState: session.threadState,

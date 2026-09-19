@@ -45,6 +45,14 @@ import { Event } from '../../../../../base/common/event.js';
 import { VSBuffer } from '../../../../../base/common/buffer.js';
 import { IChannel } from '../../../../../base/parts/ipc/common/ipc.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
+import {
+	IExternalAgentDescriptor,
+	IExternalAgentEvent,
+	IExternalAgentPermissionResponse,
+	IExternalAgentPromptRequest,
+	IExternalAgentSessionInfo,
+	IExternalAgentStartRequest
+} from '../../common/externalAgents/externalAgentTypes.js';
 
 export class CleanSlateMainServiceProxy extends Disposable implements ICleanSlateMainService {
 
@@ -52,6 +60,7 @@ export class CleanSlateMainServiceProxy extends Disposable implements ICleanSlat
     private readonly channel: IChannel;
     readonly onDidPublishThreadSession: Event<ICleanSlateThreadSessionUpdate>;
     readonly onDidRefreshManagedToken: Event<ICleanSlateManagedTokenRefreshEvent>;
+	readonly onDidEmitExternalAgentEvent: Event<IExternalAgentEvent>;
 
     constructor(
         @ICleanSlateChannelService channelService: ICleanSlateChannelService
@@ -60,7 +69,38 @@ export class CleanSlateMainServiceProxy extends Disposable implements ICleanSlat
         this.channel = channelService.getChannel('cleanSlateMain');
         this.onDidPublishThreadSession = this.channel.listen('onDidPublishThreadSession');
         this.onDidRefreshManagedToken = this.channel.listen('onDidRefreshManagedToken');
+		this.onDidEmitExternalAgentEvent = this.channel.listen('onDidEmitExternalAgentEvent');
     }
+
+	getExternalAgentUsage(agentId: string): Promise<import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentUsage> { return this.channel.call('getExternalAgentUsage', agentId); }
+	registerExternalAgent(value: import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentRegistration): Promise<void> { return this.channel.call('registerExternalAgent', value); }
+
+	listExternalAgents(): Promise<IExternalAgentDescriptor[]> {
+		return this.channel.call('listExternalAgents');
+	}
+
+	startExternalAgentSession(request: IExternalAgentStartRequest): Promise<IExternalAgentSessionInfo> {
+		return this.channel.call('startExternalAgentSession', [request]);
+	}
+
+	promptExternalAgentSession(request: IExternalAgentPromptRequest): Promise<void> {
+		return this.channel.call('promptExternalAgentSession', [request]);
+	}
+
+	cancelExternalAgentSession(cleanSlateSessionId: string): Promise<void> {
+		return this.channel.call('cancelExternalAgentSession', [cleanSlateSessionId]);
+	}
+
+	respondToExternalAgentPermission(response: IExternalAgentPermissionResponse): Promise<void> {
+		return this.channel.call('respondToExternalAgentPermission', [response]);
+	}
+	respondToExternalAgentHostTool(response: import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentHostToolResponse): Promise<void> {
+		return this.channel.call('respondToExternalAgentHostTool', [response]);
+	}
+
+	closeExternalAgentSession(cleanSlateSessionId: string): Promise<void> {
+		return this.channel.call('closeExternalAgentSession', [cleanSlateSessionId]);
+	}
 
     getRuntimeConfig(): Promise<ICleanSlateRuntimeConfig> {
         return this.channel.call('getRuntimeConfig');

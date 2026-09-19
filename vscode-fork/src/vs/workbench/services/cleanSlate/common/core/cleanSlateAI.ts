@@ -17,6 +17,15 @@ import type {
 	ICleanSlateVectorStore as ICleanSlateVectorStoreShape,
 	IMCPClientService as IMCPClientServiceShape
 } from '@cleanslate/sdk/protocol/cleanSlateAI.js';
+import { Event } from '../../../../../base/common/event.js';
+import {
+	IExternalAgentDescriptor,
+	IExternalAgentEvent,
+	IExternalAgentPermissionResponse,
+	IExternalAgentPromptRequest,
+	IExternalAgentSessionInfo,
+	IExternalAgentStartRequest
+} from '../externalAgents/externalAgentTypes.js';
 
 /**
  * The AI protocol, re-exported from the SDK.
@@ -62,5 +71,16 @@ export const IMCPClientService = createDecorator<IMCPClientService>('mcpClientSe
 export interface ICleanSlateArtifactService extends ICleanSlateArtifactServiceShape { }
 export const ICleanSlateArtifactService = createDecorator<ICleanSlateArtifactService>('cleanSlateArtifactService');
 
-export interface ICleanSlateMainService extends ICleanSlateMainServiceShape { }
+export interface ICleanSlateMainService extends ICleanSlateMainServiceShape {
+	readonly onDidEmitExternalAgentEvent: Event<IExternalAgentEvent>;
+	getExternalAgentUsage(agentId: string): Promise<import('../externalAgents/externalAgentTypes.js').IExternalAgentUsage>;
+	listExternalAgents(): Promise<IExternalAgentDescriptor[]>;
+	registerExternalAgent(value: import('../externalAgents/externalAgentTypes.js').IExternalAgentRegistration): Promise<void>;
+	startExternalAgentSession(request: IExternalAgentStartRequest): Promise<IExternalAgentSessionInfo>;
+	promptExternalAgentSession(request: IExternalAgentPromptRequest): Promise<void>;
+	cancelExternalAgentSession(cleanSlateSessionId: string): Promise<void>;
+	respondToExternalAgentPermission(response: IExternalAgentPermissionResponse): Promise<void>;
+	respondToExternalAgentHostTool(response: import('../externalAgents/externalAgentTypes.js').IExternalAgentHostToolResponse): Promise<void>;
+	closeExternalAgentSession(cleanSlateSessionId: string): Promise<void>;
+}
 export const ICleanSlateMainService = createDecorator<ICleanSlateMainService>('cleanSlateMainService');

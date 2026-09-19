@@ -59,6 +59,10 @@ export class CleanSlateChatSidebarViewModel {
 		return this.sessionProvider.getActiveSessionId();
 	}
 
+	getExternalContextUsage() {
+		return this.sessionProvider.getExternalContextUsage();
+	}
+
 	consumeExternalActiveSessionRefresh(): boolean {
 		return this.sessionProvider.consumeExternalActiveSessionRefresh();
 	}
@@ -269,6 +273,10 @@ export class CleanSlateChatSidebarViewModel {
 	hasPendingCommandApproval(): boolean {
 		return this.sessionProvider.hasPendingCommandApproval();
 	}
+
+	getPendingExternalQuestion() { return this.sessionProvider.getPendingExternalQuestion(); }
+	cancelExternalQuestion(): void { this.sessionProvider.cancelExternalQuestion(); }
+	answerExternalQuestion(answer: string, beforeResume?: () => void): boolean { return this.sessionProvider.answerExternalQuestion(answer, beforeResume); }
 
 	getPendingCommandApproval(): ICleanSlateCommandApprovalRequest | undefined {
 		return this.sessionProvider.getPendingCommandApproval();

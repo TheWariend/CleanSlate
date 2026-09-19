@@ -60,6 +60,14 @@ export class CleanSlateMessageSubmitController {
 		const composerView = this.options.getComposerView();
 		const sessionId = this.sidebarViewModel.getActiveSessionId();
 		const rawInput = (messageOverride ?? composerView.getValue()).trim();
+		const externalQuestionDisplayText = displayOverride ?? rawInput;
+		if (this.sidebarViewModel.answerExternalQuestion(rawInput, () => {
+			composerView.clearValue();
+			this.options.getRenderer().addMessage(externalQuestionDisplayText, 'user');
+			this.sidebarViewModel.recordTranscriptMessage({ role: 'user', content: externalQuestionDisplayText, renderPayload: options?.userRenderPayload });
+		})) {
+			return;
+		}
 		if (this.sidebarViewModel.hasPendingCommandApproval()) {
 			if (!rawInput) {
 				return;

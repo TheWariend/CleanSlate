@@ -4,6 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Emitter, Event } from '../../../../../../base/common/event.js';
+import { CleanSlateProviderSchemaNormalizer } from '@cleanslate/sdk/node/cleanSlateProviderSchemaNormalizer.js';
+import { normalizePlanningQuestion } from '../runtime/cleanSlateChatResponseNormalizer.js';
 import { Disposable, DisposableStore, IDisposable } from '../../../../../../base/common/lifecycle.js';
 import { basename, isEqualOrParent, joinPath } from '../../../../../../base/common/resources.js';
 import { generateUuid } from '../../../../../../base/common/uuid.js';
@@ -12,6 +14,7 @@ import { SyncDescriptor } from '../../../../../../platform/instantiation/common/
 import { ServiceCollection } from '../../../../../../platform/instantiation/common/serviceCollection.js';
 import { ICodeEditorService } from '../../../../../../editor/browser/services/codeEditorService.js';
 import { INotificationService } from '../../../../../../platform/notification/common/notification.js';
+import { IQuickInputService } from '../../../../../../platform/quickinput/common/quickInput.js';
 import { CleanSlateReasoningLevel, ICleanSlateContextService, ICleanSlateEditCodeService, ICleanSlateIndexService, ICleanSlateMainService, ICleanSlatePersistedSession, ICleanSlateThreadSessionUpdate, normalizeCleanSlateExecutionState, type ICleanSlateContext } from '../../../../../services/cleanSlate/common/core/cleanSlateAI.js';
 import { CleanSlateIndexServiceProxy } from '../../../../../services/cleanSlate/browser/indexing/cleanSlateIndexServiceProxy.js';
 import { URI } from '../../../../../../base/common/uri.js';
@@ -20,7 +23,7 @@ import { IWorkspaceContextService, WorkbenchState, type IWorkspace, type IWorksp
 import { AgentDefinition } from '@cleanslate/sdk/composer/registry/agentSchema.js';
 import { CleanSlateAgent } from '../../agent/cleanSlateAgent.js';
 import { CleanSlateChatController } from '../runtime/cleanSlateChatController.js';
-import { type ChatResponse, IResponseRenderer } from '../types/cleanSlateChatTypes.js';
+import { type ChatResponse, type InteractionBlock, IResponseRenderer } from '../types/cleanSlateChatTypes.js';
 import { stringifyCleanSlateTranscriptRenderPayload } from '../runtime/cleanSlateTranscriptPersistence.js';
 import { getCleanSlateVisibleUserRequestText, normalizeCleanSlateVisibleWhitespace } from '../runtime/cleanSlateVisibleText.js';
 import { stringifyCleanSlateUserSelectionDisplay } from '../viewModel/cleanSlateChatViewHelpers.js';
@@ -51,6 +54,10 @@ import { CleanSlateChatSessionRunState, CleanSlateSessionAlreadyRunningError, ty
 import { CleanSlateChatSessionSnapshotCodec } from './cleanSlateChatSessionSnapshotCodec.js';
 import { CLEANSLATE_HOSTED_AGENT_OWNER } from '@cleanslate/sdk/protocol/cleanSlateAI.js';
 import { ICleanSlateBrowserAutomationService } from '../../core/cleanSlateBrowserAutomationService.js';
+import { IExternalAgentConfig, IExternalAgentEvent } from '../../../../../services/cleanSlate/common/externalAgents/externalAgentTypes.js';
+import { createExternalAgentHandoffPrompt, createExternalAgentHostPrompt } from '@cleanslate/sdk/externalAgents/handoff.js';
+import { CleanSlateDiffService } from '@cleanslate/sdk/services/cleanSlateDiffService.js';
+import { CleanSlateFilesModifiedService, type ICleanSlateFileChange } from '@cleanslate/sdk/agent/cleanSlateFilesModifiedService.js';
 
 const CLEANSLATE_ACTIVE_SESSION_STORAGE_KEY = 'cleanSlate.chat.activeSession';
 const CLEANSLATE_ACTIVE_SESSION_SAVE_DEBOUNCE_MS = 250;
@@ -104,9 +111,41 @@ interface ICleanSlateLiveSession {
     /** This surface is displaying a run owned by another provider. */
     liveOwnerId?: string;
     transportStatus?: NonNullable<ICleanSlateThreadSessionUpdate['live']>['transportStatus'];
+	runtime: 'native' | 'external';
+	externalAgent?: IExternalAgentConfig;
+	externalAgentSessionId?: string;
 }
 
 export class CleanSlateChatSessionProvider extends Disposable {
+	private readonly externalHostCalls = new Map<string, AbortController>();
+	private readonly externalQuestions = new Map<string, { question: NonNullable<ReturnType<typeof normalizePlanningQuestion>>; resolve: (answer: string) => void; cancel: () => void }>();
+	cancelExternalQuestion(): void { this.externalQuestions.get(this.activeSessionId)?.cancel(); }
+
+	getPendingExternalQuestion() { return this.externalQuestions.get(this.activeSessionId)?.question; }
+	answerExternalQuestion(answer: string, beforeResume?: () => void): boolean {
+		const pending = this.externalQuestions.get(this.activeSessionId);
+		if (!pending || !answer.trim()) { return false; }
+		beforeResume?.();
+		const run = this.externalRuns.get(this.activeSessionId);
+		if (run) {
+			run.resumeAfterQuestion = true;
+		}
+		this.externalQuestions.delete(this.activeSessionId);
+		pending.resolve(answer);
+		this._onDidChangeState.fire();
+		return true;
+	}
+	private readonly externalHostToolNames = new Set([
+		'cleanslate_context', 'execute_command', 'start_background_command', 'read_background_command', 'stop_background_command',
+		'web_search', 'web_fetch', 'mcp_call_tool',
+		'submit_artifact', 'ask_question', 'spawn_worker', 'wait_worker', 'list_workers', 'cancel_worker',
+		'get_open_files', 'read_lints', 'read_symbols', 'get_definitions', 'find_references',
+		'read_file', 'read_file_range', 'list_dir', 'find_by_name', 'grep_search', 'search_workspace', 'search_codebase', 'semantic_search',
+		'list_skills', 'mcp_list_tools',
+		'browser_open', 'browser_get_url', 'browser_snapshot', 'browser_screenshot', 'browser_diagnostics',
+		'browser_tabs', 'browser_new_tab', 'browser_select_tab', 'browser_close_tab', 'browser_wait',
+		'browser_click', 'browser_hover', 'browser_fill', 'browser_check', 'browser_select', 'browser_type', 'browser_key', 'browser_scroll'
+	]);
     private readonly providerId = generateUuid();
     private readonly snapshotCodec = new CleanSlateChatSessionSnapshotCodec();
     private readonly sessions = new Map<string, ICleanSlateLiveSession>();
@@ -131,6 +170,8 @@ export class CleanSlateChatSessionProvider extends Disposable {
     private externalActiveSessionRefreshPending = false;
     private disposeAfterRuns = false;
     private readonly pendingHostedSubmissions = new Map<string, Promise<void>>();
+	private readonly externalFilesModifiedService = new CleanSlateFilesModifiedService();
+	private readonly externalRuns = new Map<string, { renderer: IResponseRenderer; target?: HTMLElement; text: string; timeline: InteractionBlock[]; fileChanges: Map<string, ICleanSlateFileChange>; resumeAfterQuestion?: boolean; resolve: (status: 'completed' | 'cancelled') => void; reject: (error: Error) => void }>();
     private readonly publishedRunningSessions = new Map<string, boolean>();
     private readonly hostedApprovals = new Map<string, string>();
     private readonly hostedUpdateVersions = new Map<string, number>();
@@ -164,6 +205,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
         }));
         this._register(this.runState.onDidChangeStatus(() => this._onDidChangeState.fire()));
         this._register(this.cleanSlateMainService.onDidPublishThreadSession(update => this.applyPublishedThreadSession(update)));
+		this._register(this.cleanSlateMainService.onDidEmitExternalAgentEvent(event => this.handleExternalAgentEvent(event)));
         for (const sessionId of loadCleanSlateDeletedSessionIds(this.storageService)) {
             this.deletedSessionIds.add(sessionId);
         }
@@ -192,6 +234,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
     }
 
     override dispose(): void {
+		for (const call of this.externalHostCalls.values()) { call.abort(); }
         this.hostedApprovals.clear();
         // An editor/auxiliary view can close during IDE handoff. Keep execution
         // ownership and the live-control subscription until its runs settle.
@@ -370,6 +413,25 @@ export class CleanSlateChatSessionProvider extends Disposable {
         return this.activeSession.agentDefinition;
     }
 
+	private readonly externalContextUsage = new Map<string, { usedTokens: number; maxTokens: number }>();
+
+	getExternalContextUsage(sessionId = this.activeSessionId): { usedTokens: number; maxTokens: number } | null | undefined {
+		const session = this.sessions.get(sessionId) ?? this.sideChats.get(sessionId);
+		if (session?.runtime !== 'external') { return undefined; }
+		const cached = this.externalContextUsage.get(sessionId);
+		if (cached) { return cached; }
+		try {
+			const saved = JSON.parse(this.storageService.get(`cleanSlate.acp.context.${sessionId}`, StorageScope.PROFILE, 'null'));
+			if (saved && saved.remoteSessionId === session.externalAgentSessionId
+				&& saved.agentId === session.externalAgent?.agentId
+				&& Number.isFinite(saved.usedTokens) && saved.usedTokens >= 0
+				&& Number.isFinite(saved.maxTokens) && saved.maxTokens > 0) {
+				return { usedTokens: saved.usedTokens, maxTokens: saved.maxTokens };
+			}
+		} catch { /* Invalid cached usage is replaced by the next agent update. */ }
+		return null;
+	}
+
     getIsGenerating(): boolean {
         return this.isLiveSessionRunning(this.activeSession);
     }
@@ -410,9 +472,10 @@ export class CleanSlateChatSessionProvider extends Disposable {
     startNewChat(
         planMode = false,
         reasoningLevel: CleanSlateReasoningLevel = this.getCurrentReasoningLevel(),
-        workspaceMetadata: ICleanSlateSessionWorkspaceMetadata = {}
+        workspaceMetadata: ICleanSlateSessionWorkspaceMetadata = {},
+		externalAgent?: IExternalAgentConfig
     ): void {
-        const session = this.createLiveSession(undefined, planMode, reasoningLevel, workspaceMetadata);
+        const session = this.createLiveSession(undefined, planMode, reasoningLevel, workspaceMetadata, externalAgent);
         this.registerSession(session);
         this.activeSessionId = session.id;
         this.activeSessionRevision++;
@@ -434,6 +497,11 @@ export class CleanSlateChatSessionProvider extends Disposable {
 		return this.createSideChatForParent(parent, title).id;
 	}
 
+	getSideChatExternalRequest(sessionId: string) {
+		const session = this.sideChats.get(sessionId);
+		return session?.externalAgent ? { cleanSlateSessionId: session.id, config: session.externalAgent, cwd: session.workDir || session.projectRoot, externalSessionId: session.externalAgentSessionId } : undefined;
+	}
+
 	private createSideChatForParent(parent: ICleanSlateLiveSession, title = 'Side chat'): ICleanSlateLiveSession {
 		const side = this.createLiveSession(undefined, false, parent.reasoningLevel, {
 			parentSessionId: parent.id,
@@ -442,7 +510,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 			workDir: parent.workDir,
 			workspaceName: parent.workspaceName,
 			title
-		});
+		}, parent.externalAgent ? { ...parent.externalAgent } : undefined);
 		// Register in the auxiliary layer before seeding context because the thread
 		// history listener fires synchronously. This keeps even the initial seed out
 		// of persistence, publishing, archives and sidebar history.
@@ -503,6 +571,10 @@ export class CleanSlateChatSessionProvider extends Disposable {
 	abortSideChat(sessionId: string, renderer: IResponseRenderer): void {
 		const session = this.sideChats.get(sessionId);
 		if (!session) {
+			return;
+		}
+		if (session.runtime === 'external') {
+			void this.cleanSlateMainService.cancelExternalAgentSession(session.id);
 			return;
 		}
 		session.controller.abortGeneration(renderer);
@@ -705,6 +777,17 @@ export class CleanSlateChatSessionProvider extends Disposable {
      * so it is never overwritten here.
      */
     private refreshLiveSessionFromSnapshot(liveSession: ICleanSlateLiveSession, snapshot: ICleanSlateSessionSnapshot, fromLiveUpdate = false): void {
+		// A saved snapshot must not replace the configuration of an in-flight agent.
+		if (this.runState.isRunning(liveSession.id)) { return; }
+		if (snapshot.externalAgent) {
+			liveSession.runtime = 'external';
+			liveSession.externalAgent = snapshot.externalAgent;
+			liveSession.externalAgentSessionId = snapshot.externalAgentSessionId;
+		} else if (snapshot.runtime === 'native') {
+			liveSession.runtime = 'native';
+			liveSession.externalAgent = undefined;
+			liveSession.externalAgentSessionId = undefined;
+		}
         if (this.runState.isRunning(liveSession.id)
             || (!fromLiveUpdate && !!liveSession.liveOwnerId)
             || this.isSessionPayloadCurrent(liveSession, snapshot)) {
@@ -728,6 +811,8 @@ export class CleanSlateChatSessionProvider extends Disposable {
     }
 
     markSessionDeleted(sessionId: string): void {
+		this.externalContextUsage.delete(sessionId);
+		this.storageService.remove(`cleanSlate.acp.context.${sessionId}`, StorageScope.PROFILE);
         rememberCleanSlateDeletedSessionId(this.storageService, this.deletedSessionIds, sessionId);
         this.pendingLiveSyncSessions.delete(sessionId);
         if (this.pendingActiveSessionSave?.id === sessionId) {
@@ -786,12 +871,19 @@ export class CleanSlateChatSessionProvider extends Disposable {
             reasoningLevel: session.reasoningLevel,
             agent: session.agentDefinition,
             workspaceName: session.workspaceName ?? workspaceName,
-            isGenerating: isRunning
+			isGenerating: isRunning,
+			runtime: session.runtime,
+			externalAgent: session.externalAgent,
+			externalAgentSessionId: session.externalAgentSessionId
         };
     }
 
     abortGeneration(renderer: IResponseRenderer): void {
         const session = this.activeSession;
+		if (session.runtime === 'external') {
+			void this.cleanSlateMainService.cancelExternalAgentSession(session.id);
+			return;
+		}
         const submission = this.pendingHostedSubmissions.get(session.id);
         if (submission) {
             void submission.then(() => this.requestHostedStop(session)).catch(() => { });
@@ -850,6 +942,12 @@ export class CleanSlateChatSessionProvider extends Disposable {
 		forceVisibleRenderer = false,
 		renderUserMessage = false
     ): Promise<void> {
+		if (this.handoffs.has(session.id)) { return Promise.reject(new Error('Wait for the agent handoff to finish.')); }
+		if (session.runtime === 'external') {
+			return this.sendExternalSessionMessage(session, text, this.createSessionScopedRenderer(session, renderer, forceVisibleRenderer), value => {
+				if (forceVisibleRenderer || this.isActiveSession(session)) { onGeneratingChange?.(value); }
+			}, images, renderUserMessage);
+		}
         if (this.cleanSlateMainService.startHostedAgentRun && !session.parentSessionId) {
             return this.submitHostedRun(session, text, onGeneratingChange, images);
         }
@@ -1384,6 +1482,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
     }
 
     private startRun(session: ICleanSlateLiveSession) {
+		if (this.handoffs.has(session.id)) { throw new Error('Wait for the agent handoff to finish.'); }
         if (session.controller.getIsGenerating()) {
             throw new CleanSlateSessionAlreadyRunningError(session.id);
         }
@@ -1427,11 +1526,391 @@ export class CleanSlateChatSessionProvider extends Disposable {
         return name === 'AbortError' || /abort|cancel|interrupt/i.test(message);
     }
 
+	private readonly handoffs = new Set<string>();
+
+	async handoffAgent(config: IExternalAgentConfig | undefined, name: string): Promise<void> {
+		const session = this.activeSession;
+		if (this.handoffs.has(session.id)) { throw new Error('An agent handoff is already in progress.'); }
+		if (this.isLiveSessionRunning(session)) { throw new Error('Stop the current response before switching agents.'); }
+		if (session.externalAgent?.agentId === config?.agentId) { return; }
+		this.handoffs.add(session.id);
+		try {
+		await this.cleanSlateMainService.closeExternalAgentSession(session.id);
+		session.runtime = config ? 'external' : 'native';
+		this.externalContextUsage.delete(session.id);
+		this.storageService.remove(`cleanSlate.acp.context.${session.id}`, StorageScope.PROFILE);
+		session.externalAgent = config;
+		session.externalAgentSessionId = undefined;
+		if (session.controller.getHistory().length) {
+			const content = `Conversation handed off to ${name}.`;
+			session.threadService.addMessage('assistant', content);
+			session.transcriptHistory.push({ role: 'assistant', content });
+		}
+		this.persistSession(session);
+		this.notifySessionChanged(session);
+		} finally { this.handoffs.delete(session.id); }
+	}
+
+	private async sendExternalSessionMessage(
+		session: ICleanSlateLiveSession,
+		text: string,
+		renderer: IResponseRenderer,
+		onGeneratingChange?: (isGenerating: boolean) => void,
+		images?: string[],
+		renderUserMessage = false
+	): Promise<void> {
+		if (!session.externalAgent) {
+			throw new Error('External agent configuration is missing.');
+		}
+		const state = this.startRun(session);
+		if (renderUserMessage) { renderer.addMessage(text, 'user', images); }
+		let promptStarted = false;
+		onGeneratingChange?.(true);
+		try {
+		const previousRemoteSessionId = session.externalAgentSessionId;
+		{
+			const cwd = session.workDir || session.projectRoot;
+			const started = await this.cleanSlateMainService.startExternalAgentSession({
+				cleanSlateSessionId: session.id,
+				config: session.externalAgent,
+				cwd,
+				externalSessionId: session.externalAgentSessionId,
+				hostTools: {
+					ownerId: this.providerId,
+					tools: [{ name: 'cleanslate_context', description: 'Identify the current CleanSlate chat, workspace, surface and available IDE tools.', inputSchema: { type: 'object', properties: {} } }, ...session.agent.getTools().filter(tool => this.externalHostToolNames.has(tool.name)).map(tool => ({
+						name: tool.name, description: `Runs through the current CleanSlate IDE chat. ${tool.name === 'spawn_worker' ? 'Starts a CleanSlate-managed worker using the configured CleanSlate provider, not another instance of this external agent. ' : ''}${tool.description}`,
+						inputSchema: new CleanSlateProviderSchemaNormalizer().normalizeJsonObjectSchema(tool.parametersSchema)
+					}))]
+				}
+			});
+			session.externalAgentSessionId = started.externalSessionId;
+		}
+		const fresh = !previousRemoteSessionId || previousRemoteSessionId !== session.externalAgentSessionId;
+		const history = fresh ? session.controller.getHistory().map(message => ({ role: message.role, content: message.content })) : [];
+		const prompt = createExternalAgentHostPrompt(createExternalAgentHandoffPrompt(text, history), session.agent.getTools().filter(tool => this.externalHostToolNames.has(tool.name)).map(tool => tool.name));
+		session.threadService.addMessage('user', text, false, images);
+		session.status = 'running';
+		onGeneratingChange?.(true);
+		this.notifySessionChanged(session);
+		promptStarted = true;
+		const completionStatus = await new Promise<'completed' | 'cancelled'>((resolve, reject) => {
+			this.externalRuns.set(session.id, { renderer, text: '', timeline: [], fileChanges: new Map(), resolve, reject });
+			void this.cleanSlateMainService.promptExternalAgentSession({ cleanSlateSessionId: session.id, prompt, images }).catch(error => {
+				this.externalRuns.delete(session.id);
+				reject(error instanceof Error ? error : new Error(String(error)));
+			});
+		});
+		this.finishRun(session, state.runId, completionStatus === 'cancelled' ? 'cancelled' : 'completed');
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (!promptStarted) {
+				const response: ChatResponse = {
+					response: '',
+					timeline: [{ id: generateUuid(), type: 'summary', summaryRole: 'progress', content: `External agent stopped: ${message}` }],
+					transcriptStatus: 'interrupted'
+				};
+				const renderPayload = stringifyCleanSlateTranscriptRenderPayload(response, false) ?? '';
+				renderer.renderJSONResponse(response, false, renderer.addMessage('', 'cleanSlate'));
+				session.threadService.addMessage('assistant', '');
+				session.threadService.setLastAssistantRenderPayload(renderPayload);
+			}
+			this.finishRun(session, state.runId, 'failed');
+			throw error;
+		} finally {
+			session.status = 'detached';
+			onGeneratingChange?.(false);
+			this.notifySessionChanged(session);
+		}
+	}
+
+	private handleExternalAgentEvent(event: IExternalAgentEvent): void {
+		if (event.type === 'host_tool_cancel') {
+			if (event.ownerId === this.providerId) { this.externalHostCalls.get(event.requestId)?.abort(); }
+			return;
+		}
+		if (event.type === 'host_tool') {
+			if (event.ownerId === this.providerId) { void this.executeExternalHostTool(event); }
+			return;
+		}
+		const run = this.externalRuns.get(event.cleanSlateSessionId);
+		const session = this.sessions.get(event.cleanSlateSessionId) ?? this.sideChats.get(event.cleanSlateSessionId);
+		if (event.type === 'usage' && session) {
+			if (typeof event.used === 'number' && Number.isFinite(event.used) && event.used >= 0
+				&& typeof event.size === 'number' && Number.isFinite(event.size) && event.size > 0) {
+				this.externalContextUsage.set(session.id, { usedTokens: event.used, maxTokens: event.size });
+				if (!session.parentSessionId) {
+					this.storageService.store(`cleanSlate.acp.context.${session.id}`, JSON.stringify({ usedTokens: event.used, maxTokens: event.size, remoteSessionId: session.externalAgentSessionId, agentId: session.externalAgent?.agentId }), StorageScope.PROFILE, StorageTarget.MACHINE);
+				}
+				this.notifySessionChanged(session);
+			}
+			return;
+		}
+		if (event.type === 'permission') {
+			if (!session) { return; }
+			const picker = this.instantiationService.invokeFunction(accessor => accessor.get(IQuickInputService));
+			void picker.pick(event.options.map(option => ({ label: option.name, description: option.kind.replaceAll('_', ' '), optionId: option.id })), {
+				title: event.title,
+				placeHolder: 'Choose the permission scope for this agent action',
+				ignoreFocusLost: true
+			}).then(option => this.cleanSlateMainService.respondToExternalAgentPermission({ requestId: event.requestId, optionId: option?.optionId }))
+				.catch(() => this.cleanSlateMainService.respondToExternalAgentPermission({ requestId: event.requestId }));
+			return;
+		}
+		if (!run || !session) {
+			return;
+		}
+		const shouldBeginPostQuestionSegment = run.resumeAfterQuestion && (
+			event.type === 'message'
+			|| event.type === 'thought'
+			|| event.type === 'plan'
+			|| (event.type === 'tool' && !run.timeline.some(block => block.toolCallId === event.toolCallId))
+		);
+		if (shouldBeginPostQuestionSegment) {
+			this.beginExternalPostQuestionSegment(run);
+		}
+		if (event.type === 'message') {
+			run.text += event.text;
+			const last = run.timeline.at(-1);
+			if (last?.type === 'assistant_text') {
+				last.content = `${last.content ?? ''}${event.text}`;
+			} else {
+				run.timeline.push({ id: generateUuid(), type: 'assistant_text', content: event.text, isStreaming: true });
+			}
+			run.target ??= run.renderer.addMessage('', 'cleanSlate');
+			run.renderer.renderJSONResponse({ response: run.text, timeline: run.timeline }, true, run.target);
+			run.renderer.scrollToBottom();
+			return;
+		}
+		if (event.type === 'thought') {
+			const last = run.timeline[run.timeline.length - 1];
+			const blockType = event.presentation === 'summary' ? 'summary' : 'reasoning';
+			if (last?.type === blockType && last.isStreaming) {
+				last.content = `${last.content ?? ''}${event.text}`;
+			} else {
+				run.timeline.push({
+					id: generateUuid(),
+					type: blockType,
+					summaryRole: blockType === 'summary' ? 'progress' : undefined,
+					content: event.text,
+					isStreaming: true
+				});
+			}
+			run.target ??= run.renderer.addMessage('', 'cleanSlate');
+			run.renderer.renderJSONResponse({ response: run.text, timeline: run.timeline }, true, run.target);
+			return;
+		}
+		if (event.type === 'tool') {
+			const locations = event.locations;
+			for (const change of event.fileChanges ?? []) {
+				const pathKey = change.path.replace(/\\/g, '/').toLowerCase();
+				const previous = run.fileChanges.get(pathKey);
+				run.fileChanges.set(pathKey, {
+					path: previous?.path ?? change.path,
+					beforeContent: previous?.beforeContent ?? change.beforeContent,
+					afterContent: change.afterContent
+				});
+			}
+			const existing = run.timeline.find(block => block.toolCallId === event.toolCallId);
+			const status = event.status === 'failed' ? 'failed' : event.status === 'completed' ? 'completed' : event.status ? 'running' : existing?.toolStatus ?? 'running';
+			const terminal = event.kind === 'execute' || !!event.command;
+			if (existing) {
+				existing.content = event.title ?? existing.content;
+				existing.toolStatus = status;
+				existing.isStreaming = status === 'running';
+				existing.details = locations ? [...locations] : existing.details;
+				existing.command = event.command ?? existing.command;
+				existing.output = event.output ?? existing.output;
+				existing.exitCode = event.exitCode ?? existing.exitCode;
+				if (event.fileChanges?.length) {
+					existing.fileChanges = event.fileChanges.map(change => {
+						const edits = CleanSlateDiffService.computeDiff(change.beforeContent, change.afterContent);
+						const stats = CleanSlateDiffService.computeLineChangeStats(change.beforeContent, change.afterContent);
+						return { path: change.path, created: change.created, ...stats, beforeContent: change.beforeContent, afterContent: change.afterContent, diff: CleanSlateDiffService.renderUnifiedDiff(change.path, change.beforeContent, edits) };
+					});
+				}
+			} else {
+				const fileChanges = event.fileChanges?.map(change => {
+					const edits = CleanSlateDiffService.computeDiff(change.beforeContent, change.afterContent);
+					const stats = CleanSlateDiffService.computeLineChangeStats(change.beforeContent, change.afterContent);
+					return { path: change.path, created: change.created, ...stats, beforeContent: change.beforeContent, afterContent: change.afterContent, diff: CleanSlateDiffService.renderUnifiedDiff(change.path, change.beforeContent, edits) };
+				});
+				run.timeline.push({ id: event.toolCallId, type: terminal ? 'terminal' : 'tool', toolCallId: event.toolCallId, toolName: event.kind, content: event.title, command: event.command, output: event.output, exitCode: event.exitCode, toolStatus: status, isStreaming: status === 'running', details: locations ? [...locations] : undefined, fileChanges });
+			}
+			// Use the shared discovery widget for ACP's semantic tool kinds.
+			// Status-only updates retain the original kind and discovery identity.
+			const block = existing ?? run.timeline.at(-1)!;
+			block.externalTool = true;
+			block.status = status;
+			if (event.worker) {
+				block.toolName = 'spawn_worker';
+				block.content = `Worker: ${event.worker.name}`;
+				block.details = [event.worker.prompt];
+			}
+			const kind = event.kind ?? block.toolName;
+			if (kind === 'read' || kind === 'search') {
+				const read = kind === 'read';
+				block.id = status === 'failed' ? event.toolCallId : `group-activity-block-acp-${event.toolCallId}`;
+				block.type = status === 'failed' ? 'tool' : 'file';
+				block.toolName = kind;
+				block.status = status === 'running' ? (read ? 'Analyzing...' : 'Exploring...') : status === 'failed' ? 'Failed' : read ? 'Analyzed' : 'Explored';
+				block.fileCount = read ? Math.max(1, block.details?.length ?? 0) : 0;
+				block.searchCount = read ? 0 : 1;
+				block.details ??= [event.title ?? 'Tool'];
+			}
+			run.target ??= run.renderer.addMessage('', 'cleanSlate');
+			run.renderer.renderJSONResponse({ response: run.text, timeline: run.timeline }, true, run.target);
+			if (status !== 'running') { this.notifySessionChanged(session); }
+			return;
+		}
+		if (event.type === 'plan') {
+			const id = `acp-plan-${session.id}`;
+			const content = event.entries.map(entry => `${entry.status}: ${entry.content}`).join('\n');
+			const plan = run.timeline.find(block => block.id === id);
+			if (plan) { plan.content = content; }
+			else { run.timeline.push({ id, type: 'summary', summaryRole: 'progress', content }); }
+			run.target ??= run.renderer.addMessage('', 'cleanSlate');
+			run.renderer.renderJSONResponse({ response: run.text, timeline: run.timeline }, true, run.target);
+			return;
+		}
+		if (event.type === 'status' && (event.status === 'completed' || event.status === 'cancelled' || event.status === 'failed')) {
+			if (event.status !== 'completed') {
+				for (const child of session.agent.listChildAgents()) {
+					if (child.status === 'running' || child.status === 'queued') { session.agent.cancelChildAgent(child.id); }
+				}
+			}
+			this.externalRuns.delete(event.cleanSlateSessionId);
+			if (event.status === 'failed') {
+				if (!run.text && run.timeline.length === 0) {
+					run.timeline.push({ id: generateUuid(), type: 'summary', summaryRole: 'progress', content: `External agent stopped: ${event.detail || 'The agent process ended before responding.'}` });
+				}
+			}
+			const completedFileChanges = this.externalFilesModifiedService.mergeFileChanges([], Array.from(run.fileChanges.values())
+				.filter(change => change.beforeContent !== change.afterContent)
+				.map(change => ({
+					...change,
+					...CleanSlateDiffService.computeLineChangeStats(change.beforeContent ?? '', change.afterContent ?? '')
+				})));
+			if (completedFileChanges.length > 0) {
+				run.timeline.push({
+					id: `external-files-modified-${event.cleanSlateSessionId}`,
+					type: 'finish',
+					status: event.status === 'completed' ? 'completed' : event.status,
+					fileChanges: completedFileChanges,
+					isStreaming: false
+				});
+			}
+			if (run.text || run.timeline.length) {
+				for (const block of run.timeline) {
+					if (block.externalTool && block.toolStatus === 'running') {
+						block.type = 'tool';
+						block.status = 'interrupted';
+						block.toolStatus = undefined;
+					}
+					block.isStreaming = false;
+				}
+				const response: ChatResponse = { response: run.text, timeline: run.timeline, transcriptStatus: event.status === 'completed' ? 'completed' : 'interrupted' };
+				const renderPayload = stringifyCleanSlateTranscriptRenderPayload(response, false) ?? '';
+				session.threadService.addMessage('assistant', run.text);
+				session.threadService.setLastAssistantRenderPayload(renderPayload);
+				run.target ??= run.renderer.addMessage('', 'cleanSlate');
+				run.renderer.renderJSONResponse(response, false, run.target);
+			}
+			if (event.status === 'failed') {
+				run.reject(new Error(event.detail || 'External agent failed.'));
+			} else {
+				run.resolve(event.status);
+			}
+		}
+	}
+
+	private beginExternalPostQuestionSegment(run: { renderer: IResponseRenderer; target?: HTMLElement; text: string; timeline: InteractionBlock[]; resumeAfterQuestion?: boolean }): void {
+		run.resumeAfterQuestion = false;
+		if (run.target && (run.text || run.timeline.length)) {
+			for (const block of run.timeline) {
+				block.isStreaming = false;
+			}
+			run.renderer.renderJSONResponse({ response: run.text, timeline: run.timeline }, false, run.target);
+		}
+		run.target = undefined;
+		run.text = '';
+		run.timeline = [];
+	}
+
+	private async executeExternalHostTool(event: Extract<IExternalAgentEvent, { type: 'host_tool' }>): Promise<void> {
+		const abort = new AbortController();
+		this.externalHostCalls.set(event.requestId, abort);
+		const run = this.externalRuns.get(event.cleanSlateSessionId);
+		const hostBlock = run?.timeline.findLast(block => block.type === 'tool' && block.content?.match(/^cleanslate-ide[_:]([a-z_]+)/i)?.[1] === event.name);
+		const showApprovalState = (waiting: boolean) => {
+			if (!run || !hostBlock || !this.externalRuns.has(event.cleanSlateSessionId)) { return; }
+			hostBlock.awaitingApproval = waiting;
+			if (run.target) { run.renderer.renderJSONResponse({ response: run.text, timeline: run.timeline }, true, run.target); }
+		};
+		try {
+			const session = this.sessions.get(event.cleanSlateSessionId) ?? this.sideChats.get(event.cleanSlateSessionId);
+			if (!session || !this.externalRuns.has(session.id) || !this.externalHostToolNames.has(event.name)) {
+				throw new Error('This IDE tool is unavailable for the current agent response.');
+			}
+			if (event.name === 'cleanslate_context') {
+				await this.cleanSlateMainService.respondToExternalAgentHostTool({ ownerId: this.providerId, requestId: event.requestId, result: {
+					application: 'CleanSlate', sessionId: session.id, surface: this.surface,
+					workspace: session.workDir || session.projectRoot, planMode: session.planMode,
+					tools: session.agent.getTools().filter(tool => this.externalHostToolNames.has(tool.name)).map(tool => tool.name),
+					guidance: 'Use browser_open to open pages inside CleanSlate. Shell open commands launch the system browser. IDE tool access requires user approval.'
+				} });
+				return;
+			}
+			if (event.name === 'ask_question') {
+				const question = normalizePlanningQuestion(event.input);
+				if (!question) { throw new Error('A question and answer options are required.'); }
+				if (this.externalQuestions.has(session.id)) { throw new Error('This chat already has a pending question.'); }
+				const answer = await new Promise<string>((resolve, reject) => {
+					const cancel = () => {
+						this.externalQuestions.delete(session.id);
+						this._onDidChangeState.fire();
+						reject(new Error('The question was cancelled.'));
+					};
+					if (abort.signal.aborted) { cancel(); return; }
+					abort.signal.addEventListener('abort', cancel, { once: true });
+					this.externalQuestions.set(session.id, { question, cancel: () => abort.abort(), resolve: value => { abort.signal.removeEventListener('abort', cancel); resolve(value); } });
+					this._onDidChangeState.fire();
+				});
+				await this.cleanSlateMainService.respondToExternalAgentHostTool({ ownerId: this.providerId, requestId: event.requestId, result: { answer } });
+				return;
+			}
+			const approvalId = `external-host-${event.requestId}`;
+			const rejectApproval = () => this.commandApprovalService.reject(approvalId);
+			abort.signal.addEventListener('abort', rejectApproval, { once: true });
+			let approved = false;
+			try {
+				if (abort.signal.aborted) { throw new Error('IDE tool request cancelled.'); }
+				showApprovalState(true);
+				approved = await this.commandApprovalService.requestApproval({
+					id: approvalId, sessionId: session.id, toolName: event.name, toolCallId: event.requestId,
+					command: `${event.name} ${JSON.stringify(event.input)}`,
+					cwd: session.workDir || session.projectRoot,
+					reason: 'The external agent requests access to this chat’s IDE tools. Review the arguments before allowing access.'
+				});
+			} finally { abort.signal.removeEventListener('abort', rejectApproval); showApprovalState(false); }
+			if (abort.signal.aborted || !approved || !this.externalRuns.has(session.id)) { throw new Error('IDE tool request cancelled.'); }
+			let result: unknown;
+			const input = event.name === 'wait_worker' ? { ...event.input, timeout_ms: Math.min(typeof event.input.timeout_ms === 'number' ? Math.max(0, event.input.timeout_ms) : 30000, 30000) } : event.input;
+			for await (const part of session.agent.executeTool(event.name, input, event.requestId, abort.signal)) {
+				if (abort.signal.aborted) { throw new Error('IDE tool request cancelled.'); }
+				if (part.type === 'tool_result') { result = part.result; }
+			}
+			await this.cleanSlateMainService.respondToExternalAgentHostTool({ ownerId: this.providerId, requestId: event.requestId, result });
+		} catch (error) {
+			await this.cleanSlateMainService.respondToExternalAgentHostTool({ ownerId: this.providerId, requestId: event.requestId, error: error instanceof Error ? error.message : String(error) }).catch(() => undefined);
+		} finally { this.externalHostCalls.delete(event.requestId); }
+	}
+
     private createLiveSession(
         sessionId: string = this.createSessionId(),
         planMode = false,
         reasoningLevel: CleanSlateReasoningLevel = 'low',
-        metadata: ICleanSlateSessionWorkspaceMetadata & Partial<Pick<ICleanSlateLiveSession, 'parentSessionId' | 'createdAt' | 'status' | 'title'>> = {}
+		metadata: ICleanSlateSessionWorkspaceMetadata & Partial<Pick<ICleanSlateLiveSession, 'parentSessionId' | 'createdAt' | 'status' | 'title'>> = {},
+		externalAgent?: IExternalAgentConfig
     ): ICleanSlateLiveSession {
 		const workspaceMetadata = this.normalizeWorkspaceMetadata(metadata);
 		const workspaceContextService = new CleanSlateSessionWorkspaceContextService(this.workspaceContextService, workspaceMetadata);
@@ -1511,7 +1990,9 @@ export class CleanSlateChatSessionProvider extends Disposable {
             transcriptHistory: [],
             status: metadata.status ?? 'starting',
             threadHistoryListener,
-            controllerStateListener
+			controllerStateListener,
+			runtime: externalAgent ? 'external' : 'native',
+			externalAgent
         };
 
         return liveSession;
@@ -1528,7 +2009,8 @@ export class CleanSlateChatSessionProvider extends Disposable {
             workspaceName: snapshot.workspaceName,
             status: this.getRestoredSessionStatus(snapshot.status),
             title: this.deriveStableTitleText('', snapshot.history) || snapshot.title
-        });
+		}, snapshot.externalAgent);
+		session.externalAgentSessionId = snapshot.externalAgentSessionId;
         session.threadService.setHistory(this.snapshotCodec.cloneHistoryWithTranscriptImages(snapshot.history, snapshot.transcript));
         session.transcriptHistory = this.snapshotCodec.cloneTranscript(snapshot.transcript?.length ? snapshot.transcript : deriveCleanSlateTranscriptFromHistory(snapshot.history));
         session.taskSessionService.restoreStateSnapshot(this.snapshotCodec.cloneObject(snapshot.taskState ?? snapshot.threadState), { markActiveTaskInterrupted: !fromLiveUpdate });
@@ -1992,7 +2474,10 @@ export class CleanSlateChatSessionProvider extends Disposable {
             taskState: this.snapshotCodec.cloneObject(snapshot.taskState),
             threadState: this.snapshotCodec.cloneObject(snapshot.threadState),
 			agentRuntimeState: this.snapshotCodec.cloneObject(snapshot.agentRuntimeState),
-            agent: this.snapshotCodec.cloneObject(snapshot.agent)
+			agent: this.snapshotCodec.cloneObject(snapshot.agent),
+			runtime: snapshot.externalAgent ? 'external' : snapshot.runtime,
+			externalAgent: snapshot.externalAgent,
+			externalAgentSessionId: snapshot.externalAgentSessionId
         };
     }
 
@@ -2038,7 +2523,10 @@ export class CleanSlateChatSessionProvider extends Disposable {
             reasoningLevel: executionState.reasoningLevel,
             agent: this.snapshotCodec.cloneObject(session.agent) as AgentDefinition | undefined,
             workspaceName: session.workspaceName,
-            isGenerating: false
+			isGenerating: false,
+			runtime: session.externalAgent ? 'external' : session.runtime,
+			externalAgent: session.externalAgent,
+			externalAgentSessionId: session.externalAgentSessionId
         };
         return this.hasVisibleSessionContent(snapshot) && !this.isDeletedSessionSnapshot(snapshot) ? snapshot : undefined;
     }
