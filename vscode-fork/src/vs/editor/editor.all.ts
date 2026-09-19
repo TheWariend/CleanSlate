@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './browser/coreCommands.js';
-import './browser/cleanSlate/core/cleanSlateTestCommand.js';
 import './browser/widget/codeEditor/codeEditorWidget.js';
 import './browser/widget/diffEditor/diffEditor.contribution.js';
 import './contrib/anchorSelect/browser/anchorSelect.js';
@@ -71,4 +70,3 @@ import './contrib/floatingMenu/browser/floatingMenu.contribution.js';
 import './common/standaloneStrings.js';
 
 import '../base/browser/ui/codicons/codiconStyles.js'; // The codicons are defined here and must be loaded
-
