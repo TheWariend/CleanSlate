@@ -46,3 +46,23 @@ test('sessions are isolated by workspace', () => {
 		fs.rmSync(home, { recursive: true, force: true });
 	}
 });
+
+test('deleting a session removes it without affecting later sessions', () => {
+	const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cleanslate-session-test-'));
+	try {
+		const workspace = path.join(home, 'repo');
+		const store = new CliSessionStore(workspace, home);
+		const removed = store.create('openai', 'gpt-test', 'Remove me');
+		store.save(removed);
+
+		assert.equal(store.delete(removed.id), true);
+		assert.equal(store.load(removed.id), undefined);
+		assert.equal(store.delete(removed.id), false);
+
+		const retained = store.create('openai', 'gpt-test', 'Keep me');
+		store.save(retained);
+		assert.equal(store.load(retained.id)?.title, 'Keep me');
+	} finally {
+		fs.rmSync(home, { recursive: true, force: true });
+	}
+});

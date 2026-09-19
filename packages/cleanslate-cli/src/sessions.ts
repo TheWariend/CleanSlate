@@ -53,6 +53,9 @@ function safeSessionId(value: string): string {
 
 export class CliSessionStore {
 	private readonly directory: string;
+	private static readonly lockRetryDelayMs = 10;
+	private static readonly lockTimeoutMs = 5_000;
+	private static readonly staleLockMs = 30_000;
 
 	constructor(readonly workspace: string, homePath: string = getCleanSlateHome()) {
 		this.workspace = path.resolve(workspace);
@@ -80,11 +83,13 @@ export class CliSessionStore {
 		}
 		fs.mkdirSync(this.directory, { recursive: true, mode: 0o700 });
 		const target = this.sessionPath(session.id);
-		const temporary = `${target}.${process.pid}.tmp`;
-		session.updatedAt = Date.now();
-		const value = { ...session, version: 1 as const };
-		fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-		fs.renameSync(temporary, target);
+		this.withSessionLock(target, () => {
+			const temporary = `${target}.${process.pid}.tmp`;
+			session.updatedAt = Date.now();
+			const value = { ...session, version: 1 as const };
+			fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+			fs.renameSync(temporary, target);
+		});
 	}
 
 	load(id: string): ICliSession | undefined {
@@ -120,10 +125,61 @@ export class CliSessionStore {
 
 	delete(id: string): boolean {
 		try {
-			fs.unlinkSync(this.sessionPath(id));
-			return true;
+			fs.mkdirSync(this.directory, { recursive: true, mode: 0o700 });
+			const target = this.sessionPath(id);
+			return this.withSessionLock(target, () => {
+				try {
+					fs.unlinkSync(target);
+					return true;
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+						return false;
+					}
+					throw error;
+				}
+			});
 		} catch {
 			return false;
+		}
+	}
+
+	private withSessionLock<T>(target: string, operation: () => T): T {
+		const lockPath = `${target}.lock`;
+		const deadline = Date.now() + CliSessionStore.lockTimeoutMs;
+		while (true) {
+			try {
+				fs.mkdirSync(lockPath, { mode: 0o700 });
+				break;
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+					throw error;
+				}
+				try {
+					const age = Date.now() - fs.statSync(lockPath).mtimeMs;
+					if (age > CliSessionStore.staleLockMs) {
+						fs.rmdirSync(lockPath);
+						continue;
+					}
+				} catch (lockError) {
+					if ((lockError as NodeJS.ErrnoException).code === 'ENOENT') {
+						continue;
+					}
+				}
+				if (Date.now() >= deadline) {
+					throw new Error(`Timed out waiting to update session ${path.basename(target, '.json')}.`);
+				}
+				Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, CliSessionStore.lockRetryDelayMs);
+			}
+		}
+
+		try {
+			return operation();
+		} finally {
+			try {
+				fs.rmdirSync(lockPath);
+			} catch {
+				// A stale-lock recovery may already have removed it.
+			}
 		}
 	}
 
