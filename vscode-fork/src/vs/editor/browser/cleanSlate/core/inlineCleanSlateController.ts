@@ -89,22 +89,9 @@ export class InlineCleanSlateController extends Disposable implements IEditorCon
 		const merged = new Map<string, { uri: URI; added: number; deleted: number }>();
 		for (const [uriStr, state] of InlineCleanSlateController.stateMap.entries()) {
 			if (state.sessions.length > 0) {
-				let added = 0;
-				let deleted = 0;
-				for (const session of state.sessions) {
-					for (const edit of session.edits) {
-						if (edit.text && edit.text.length > 0) {
-							added += edit.text.split('\n').length;
-						}
-						// If range is empty (start === end), then 0 lines deleted
-						if (edit.range.startLineNumber === edit.range.endLineNumber &&
-							edit.range.startColumn === edit.range.endColumn) {
-							// Pure insertion
-						} else {
-							deleted += (edit.range.endLineNumber - edit.range.startLineNumber + 1);
-						}
-					}
-				}
+				const beforeContent = state.sessions[0].beforeContent;
+				const currentContent = InlineCleanSlateController.reconstructContentFromSessions(state.sessions);
+				const { added, deleted } = CleanSlateDiffService.computeLineChangeStats(beforeContent, currentContent);
 				const uri = URI.parse(uriStr);
 				const key = InlineCleanSlateController.normalizePendingEditKey(uri);
 				const previous = merged.get(key);

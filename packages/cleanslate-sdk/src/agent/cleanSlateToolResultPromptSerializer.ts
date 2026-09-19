@@ -38,6 +38,29 @@ export function sanitizeToolResultForRenderer(toolName: string, result: unknown)
 			result as Record<string, unknown>
 		);
 	}
+	if (['write_file', 'create_and_write_file', 'create_multiple_files', 'apply_edit', 'multi_file_replace'].includes(toolName)) {
+		let remaining = 12 * 1024 * 1024;
+		const restore = (target: Record<string, unknown>, original: Record<string, unknown>): void => {
+			for (const key of ['beforeContent', 'afterContent', 'diff']) {
+				const value = original[key];
+				if (typeof value === 'string' && value.length <= remaining) { target[key] = value; remaining -= value.length; }
+			}
+			for (const key of ['results', 'fileChanges']) {
+				const entries = target[key];
+				const originals = original[key];
+				if (!Array.isArray(entries) || !Array.isArray(originals)) { continue; }
+				for (let index = 0; index < entries.length; index++) {
+					if (entries[index] && typeof entries[index] === 'object' && originals[index] && typeof originals[index] === 'object') {
+						for (const field of ['beforeContent', 'afterContent', 'diff']) {
+							const value = originals[index][field];
+							if (typeof value === 'string' && value.length <= remaining) { entries[index][field] = value; remaining -= value.length; }
+						}
+					}
+				}
+			}
+		};
+		restore(sanitized as Record<string, unknown>, result as Record<string, unknown>);
+	}
 
 	return sanitized;
 }

@@ -1803,9 +1803,9 @@ export class CleanSlateChatController extends Disposable {
                             if (event.result.success === false || resultEntry?.success === false) {
                                 block.status = 'Failed';
                             } else if (event.toolName === 'write_file' || event.toolName === 'create_and_write_file') {
-                                block.status = resultEntry.created ? 'Created' : 'Edited';
+                                block.status = resultEntry.created === true || resultEntry.operation === 'created' ? 'Created' : 'Edited';
                             } else if (event.toolName === 'create_multiple_files') {
-                                block.status = resultEntry.updated ? 'Edited' : 'Created';
+                                block.status = resultEntry.created === true || resultEntry.operation === 'created' ? 'Created' : 'Edited';
                             } else if (event.toolName.startsWith('read_file')) {
                                 block.status = block.id.startsWith('group-activity-block') ? 'Analyzed' : 'Read';
                             } else {

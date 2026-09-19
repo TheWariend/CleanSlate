@@ -134,6 +134,46 @@ export class CleanSlateDiffService {
         return this.computeLineDiff(originalContent, newContent);
     }
 
+    public static computeLineChangeStats(originalContent: string, newContent: string): { added: number; deleted: number } {
+        let added = 0;
+        let deleted = 0;
+        for (const edit of this.computeLineDiff(originalContent, newContent)) {
+            added += this.countSelectedLines(edit.text);
+            deleted += this.countSelectedLines(this.textInRange(originalContent, edit.range));
+        }
+        return { added, deleted };
+    }
+
+    private static countSelectedLines(content: string): number {
+        const normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        if (!normalized) {
+            return 0;
+        }
+        return normalized.endsWith('\n')
+            ? normalized.slice(0, -1).split('\n').length
+            : normalized.split('\n').length;
+    }
+
+    private static textInRange(content: string, range: Range): string {
+        const offsetAt = (lineNumber: number, column: number): number => {
+            let line = 1;
+            let offset = 0;
+            while (line < lineNumber && offset < content.length) {
+                const nextNewline = content.indexOf('\n', offset);
+                if (nextNewline === -1) {
+                    return content.length;
+                }
+                offset = nextNewline + 1;
+                line++;
+            }
+            return Math.min(content.length, offset + Math.max(0, column - 1));
+        };
+        return content.slice(
+            offsetAt(range.startLineNumber, range.startColumn),
+            offsetAt(range.endLineNumber, range.endColumn)
+        );
+    }
+
     private static readonly MAX_UNIFIED_DIFF_CELLS = 4_000_000;
 
     /**
