@@ -7,6 +7,10 @@ import * as dom from '../../../../../base/browser/dom.js';
 import { mainWindow } from '../../../../../base/browser/window.js';
 import { FileAccess } from '../../../../../base/common/network.js';
 import { Action } from '../../../../../base/common/actions.js';
+import { renderCleanSlateEnvironment } from './cleanSlateEnvironmentView.js';
+import { readCleanSlateEnvironmentGit, runCleanSlateEnvironmentGitAction, openCleanSlateEnvironmentUrl, formatCleanSlateEnvironmentUsage } from './cleanSlateEnvironmentModel.js';
+import { isWeb } from '../../../../../base/common/platform.js';
+import { INativeHostService } from '../../../../../platform/native/common/native.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { hash } from '../../../../../base/common/hash.js';
 import * as json from '../../../../../base/common/json.js';
@@ -190,6 +194,9 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	private progressList!: HTMLElement;
 	private startupLoadingOverlay: HTMLElement | undefined;
 	private rightPaneToggleButton: HTMLButtonElement | undefined;
+	private environmentHost: HTMLElement | undefined;
+	private environmentToggle: HTMLButtonElement | undefined;
+	private environmentVisible = false;
 	private rightResizeHandle: HTMLElement | undefined;
 	private rightPane: HTMLElement | undefined;
 	private rightPaneTitle: HTMLElement | undefined;
@@ -408,6 +415,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 				if (this.sidebarViewModel.getActiveSessionId() === sessionId) {
 					this.restoreCurrentSessionView();
 					this.updateModelDropdownState();
+					if (this.environmentVisible) { this.renderEnvironment(); }
 				}
 			}
 		);
@@ -494,13 +502,17 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			}
 		}));
 		this._register(this.sessionProvider.onDidPendingEditsChange(() => this.updatePendingEdits()));
-		this._register(this.scmService.onDidAddRepository(repository => {
-			this._register(repository.provider.onDidChangeResources(() => this.updatePendingEdits()));
+		const onRepositoryChanged = () => {
 			this.updatePendingEdits();
+			if (this.environmentVisible) { this.renderEnvironment(); }
+		};
+		this._register(this.scmService.onDidAddRepository(repository => {
+			this._register(repository.provider.onDidChangeResources(onRepositoryChanged));
+			onRepositoryChanged();
 		}));
-		this._register(this.scmService.onDidRemoveRepository(() => this.updatePendingEdits()));
+		this._register(this.scmService.onDidRemoveRepository(onRepositoryChanged));
 		for (const repository of this.scmService.repositories) {
-			this._register(repository.provider.onDidChangeResources(() => this.updatePendingEdits()));
+			this._register(repository.provider.onDidChangeResources(onRepositoryChanged));
 		}
 		this._register(this.composerProvider.onDidChangeState(() => {
 			this.renderImagePreviews();
@@ -765,8 +777,24 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		this.bindUpdateButton(shell.updateButton);
 		this.bindUpdateMenuItem(shell.updateMenuItem, shell.updateBadge);
 		this.rightPaneToggleButton = shell.rightPaneToggleButton;
+		this.environmentToggle = dom.$('button.cleanSlate-agent-manager-right-tab-add') as HTMLButtonElement;
+		this.environmentToggle.type = 'button';
+		this.environmentToggle.title = 'Environment';
+		this.environmentToggle.setAttribute('aria-label', 'Environment');
+		this.environmentToggle.setAttribute('aria-pressed', 'false');
+		dom.append(this.environmentToggle, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.settings)}`));
+		this.rightPaneToggleButton.before(this.environmentToggle);
+		const environmentToggle = this.environmentToggle;
+		this.shellDisposables.add(toDisposable(() => environmentToggle.remove()));
+		this.environmentToggle.onclick = () => {
+			this.environmentVisible = !this.environmentVisible;
+			this.renderEnvironment();
+		};
 		this.bindNavResize(shell.navResizeHandle);
 		this.buildMain(shell.main);
+		this.environmentHost = dom.append(shell.main, dom.$('aside.cleanSlate-environment-host'));
+		this.environmentHost.hidden = true;
+		this.environmentVisible = false;
 		this.rightResizeHandle = shell.rightResizeHandle;
 		this.bindRightPaneResize(this.rightResizeHandle);
 		this.rightPane = shell.rightPane;
@@ -1121,6 +1149,88 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		this.rightPaneTitle = parts.title;
 		this.rightPaneBody = parts.body;
 		this.rightPaneTabsEl = parts.tabs;
+	}
+
+	private environmentRenderVersion = 0;
+	private environmentGitBusy = false;
+	private renderEnvironment(): void {
+		const version = ++this.environmentRenderVersion;
+		const host = this.environmentHost;
+		if (!host) { return; }
+		host.hidden = !this.environmentVisible;
+		host.parentElement?.classList.toggle('environment-visible', this.environmentVisible);
+		this.environmentToggle?.setAttribute('aria-pressed', String(this.environmentVisible));
+		if (!this.environmentVisible) { return; }
+		const snapshot = this.sidebarViewModel.getCurrentSessionSnapshot();
+		const sessionId = snapshot.id;
+		const root = snapshot.workDir || snapshot.projectRoot || this.selectedWorkspaceEntry?.folderUri?.fsPath;
+		const cwd = root?.startsWith('file:') ? URI.parse(root).fsPath : root;
+		const current = () => this.environmentRenderVersion === version && this.sidebarViewModel.getActiveSessionId() === sessionId;
+		const externalId = snapshot.externalAgent?.agentId;
+		const externalDescriptor = externalId ? this.externalAgentDescriptors.get(externalId) : undefined;
+		renderCleanSlateEnvironment(host, {
+			cwd,
+			agent: externalId ? externalDescriptor?.name ?? externalId : 'CleanSlate',
+			agentIconUrl: FileAccess.asBrowserUri((externalDescriptor?.iconPath ?? 'vs/workbench/contrib/cleanSlate/browser/media/logo.png') as Parameters<typeof FileAccess.asBrowserUri>[0]).toString(true),
+			agentIconMonochrome: externalDescriptor?.monochromeIcon,
+			loadGit: () => cwd ? readCleanSlateEnvironmentGit(this.cleanSlateMainService, cwd) : Promise.resolve(undefined),
+			loadChanges: async () => {
+				const roots = cwd ? [URI.file(cwd)] : [];
+				let failure: unknown;
+				// The shared review reader tolerates unavailable Git commands. A summary
+				// must distinguish that from a repository with no changes.
+				const service = new Proxy(this.cleanSlateMainService, {
+					get: (target, property, receiver) => property === 'executeCommand'
+						? async (options: Parameters<ICleanSlateMainService['executeCommand']>[0]) => {
+							try {
+								const result = await target.executeCommand(options);
+								const expectedAbsence = /not a git repository|bad revision 'HEAD'|ambiguous argument 'HEAD'/i.test(result.stderr);
+								if (!result.success && !expectedAbsence) { failure = new Error(result.stderr || 'Could not read changes.'); }
+								return result;
+							} catch (error) { failure = error; throw error; }
+						}
+						: Reflect.get(target, property, receiver)
+				});
+				const changes = roots.length ? await collectGitReviewChanges(service, this.fileService, { roots, mode: 'working' }) : [];
+				if (failure) { throw failure; }
+				return { count: changes.length, added: changes.reduce((n, change) => n + change.added, 0), deleted: changes.reduce((n, change) => n + change.deleted, 0) };
+			},
+			loadUsage: async () => {
+				if (externalId) { return this.cleanSlateMainService.getExternalAgentUsage(externalId); }
+				const result = await this.cleanSlateConfigService.getManagedEntitlements();
+				return formatCleanSlateEnvironmentUsage(result);
+			},
+			loadServers: async () => (await this.cleanSlateMainService.listBackgroundCommands())
+				.filter(process => (process.sessionId === sessionId || (!!cwd && process.cwd === cwd)) && ['ready', 'running'].includes(process.status) && !!process.url)
+				.map(process => ({ label: process.url ?? process.command, url: process.url })),
+			loadPullRequest: async () => {
+				if (!cwd || !current()) { throw new Error('The active task changed. Reopen Environment.'); }
+				const result = await this.cleanSlateMainService.executeCommand({ command: 'gh pr view --json title,url,state', cwd, timeoutMs: 20000 });
+				if (!result.success) {
+					if (/no pull requests? found/i.test(result.stderr)) { return undefined; }
+					throw new Error(result.stderr || 'Unable to check pull requests. Check GitHub CLI sign-in.');
+				}
+				const raw = result.stdout;
+				const pr: unknown = JSON.parse(raw);
+				if (typeof pr !== 'object' || !pr) { return undefined; }
+				const value = pr as Record<string, unknown>;
+				return typeof value.title === 'string' && typeof value.url === 'string' && typeof value.state === 'string'
+					? { title: value.title, url: value.url, state: value.state } : undefined;
+			},
+			onGit: async (action, value) => {
+				if (!cwd) { throw new Error('Select a project first.'); }
+				if (this.environmentGitBusy) { throw new Error('A Git operation is already running.'); }
+				this.environmentGitBusy = true;
+				try { await runCleanSlateEnvironmentGitAction(this.cleanSlateMainService, cwd, current, action, value); }
+				finally { this.environmentGitBusy = false; }
+				if (current()) { this.renderEnvironment(); this.updatePendingEdits(); }
+			},
+			onWorktree: path => { if (current()) { this.startNewChat({ id: URI.file(path).toString(), label: basename(URI.file(path)), folderUri: URI.file(path), description: path }); this.renderEnvironment(); } },
+			onChanges: () => { if (current()) { this.setReviewScopeMode('working'); this.selectRightPaneTab('review', true); } },
+			onOpenUrl: url => openCleanSlateEnvironmentUrl(url, href => isWeb
+				? this.openerService.open(URI.parse(href), { openExternal: true, allowContributedOpeners: false, fromUserGesture: true, fromWorkspace: true })
+				: this.instantiationService.invokeFunction(accessor => accessor.get(INativeHostService).openExternal(href)))
+		});
 	}
 
 	private openRightPaneTab(tab: CleanSlateAgentManagerRightTab): void {
@@ -1659,6 +1769,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		this.saveRightPaneStateForSession(previousSessionId);
 		void this.browserAutomationService.setOpenBrowserVisible(false, this.getAgentManagerBrowserSurfaceForSession(previousSessionId));
 		this.restoreRightPaneStateForSession(activeSessionId);
+		if (this.environmentVisible) { this.renderEnvironment(); }
 		this.adoptVisibleIdeBrowserForActiveSessionIfNeeded();
 	}
 
@@ -1757,6 +1868,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		this.updateRightPaneChrome();
 		this.layoutRightPane();
 		this.restoreBrowserPaneForSession(sessionId);
+		if (this.environmentVisible) { this.renderEnvironment(); }
 	}
 
 	private restoreBrowserPaneForSession(sessionId: string | undefined): void {
@@ -3316,6 +3428,31 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		void this.renderProjectTree();
 	}
 
+	private readonly pullRequestChecks = new Map<string, number>();
+
+	private async refreshSessionPullRequest(session: ICleanSlateSessionSnapshot): Promise<void> {
+		const key = `cleanSlate.chatPullRequest.${session.id}`;
+		const saved = this.storageService.getObject<{ cwd: string; url: string; state: string }>(key, StorageScope.PROFILE);
+		if (saved) { this.projectSidebarView?.updatePullRequest(session.id, saved.state); }
+		if (Date.now() - (this.pullRequestChecks.get(session.id) ?? 0) < 60000) { return; }
+		// Discover only for the active chat; never assign the current branch's PR to other chats.
+		if (!saved && this.sidebarViewModel.getActiveSessionId() !== session.id) { return; }
+		const root = session.workDir || session.projectRoot;
+		if (!root) { return; }
+		const cwd = root.startsWith('file:') ? URI.parse(root).fsPath : root;
+		if (saved && saved.cwd !== cwd) { return; }
+		this.pullRequestChecks.set(session.id, Date.now());
+		try {
+			const target = saved?.url && /^https:\/\//.test(saved.url) ? ` '${saved.url.replace(/'/g, `'\\''`)}'` : '';
+			const result = await this.cleanSlateMainService.executeCommand({ command: `gh pr view${target} --json url,state`, cwd, timeoutMs: 10000 });
+			if (!result.success || (!saved && this.sidebarViewModel.getActiveSessionId() !== session.id)) { return; }
+			const pr = JSON.parse(result.stdout) as { url?: unknown; state?: unknown };
+			if (typeof pr.url !== 'string' || !pr.url.startsWith('https://') || typeof pr.state !== 'string' || !['OPEN', 'CLOSED', 'MERGED'].includes(pr.state)) { return; }
+			this.storageService.store(key, { cwd, url: pr.url, state: pr.state }, StorageScope.PROFILE, StorageTarget.MACHINE);
+			this.projectSidebarView?.updatePullRequest(session.id, pr.state);
+		} catch { /* Missing CLI, authentication, or PR must not disrupt navigation. */ }
+	}
+
 	private async renderProjectTree(): Promise<void> {
 		if (!this.projectSidebarView) {
 			return;
@@ -3356,6 +3493,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			onShowProjectActions: (group, anchor) => this.showProjectActions(group, anchor)
 		});
 		const visibleSessions = groups.flatMap(group => group.sessions);
+		for (const session of visibleSessions) { void this.refreshSessionPullRequest(session); }
 		for (const session of visibleSessions) {
 			if (this.requestedSidebarLiveSessions.has(session.id)) { continue; }
 			this.requestedSidebarLiveSessions.add(session.id);

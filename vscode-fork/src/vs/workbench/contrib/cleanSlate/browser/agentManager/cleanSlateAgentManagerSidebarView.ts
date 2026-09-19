@@ -32,6 +32,21 @@ export class CleanSlateAgentManagerSidebarView {
 
 	constructor(private readonly container: HTMLElement) { }
 
+	updatePullRequest(sessionId: string, state: string): void {
+		for (const chat of this.container.querySelectorAll<HTMLButtonElement>('button.cleanSlate-agent-manager-session')) {
+			if (chat.dataset.sessionId !== sessionId) { continue; }
+			chat.querySelector('.session-pr-status')?.remove();
+			const icon = state === 'MERGED' ? Codicon.gitMerge : state === 'OPEN' ? Codicon.gitPullRequest : state === 'CLOSED' ? Codicon.gitPullRequestClosed : undefined;
+			if (!icon) { continue; }
+			const badge = dom.$(`span.session-pr-status${ThemeIcon.asCSSSelector(icon)}`);
+			badge.title = `Pull request ${state.toLowerCase()}`;
+			badge.setAttribute('aria-label', badge.title);
+			badge.style.cssText = 'flex:0 0 14px;font-size:14px;margin-right:6px';
+			badge.style.color = state === 'MERGED' ? '#a78bfa' : 'var(--vscode-descriptionForeground)';
+			chat.prepend(badge);
+		}
+	}
+
 	render(options: ICleanSlateAgentManagerSidebarRenderOptions): void {
 		const previousScrollTop = this.container.scrollTop;
 		const label = this.container.querySelector<HTMLElement>('.cleanSlate-agent-manager-section-label')

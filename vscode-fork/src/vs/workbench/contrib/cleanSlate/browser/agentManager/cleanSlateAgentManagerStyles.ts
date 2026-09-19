@@ -557,6 +557,66 @@ registerThemingParticipant((_theme, collector) => {
 			color: var(--cleanSlate-agent-manager-text);
 		}
 
+		.cleanSlate-environment-host {
+			position: absolute;
+			right: 14px;
+			top: 14px;
+			bottom: 14px;
+			width: 286px;
+			z-index: 8;
+			overflow-y: auto;
+			scrollbar-width: thin;
+			pointer-events: none;
+		}
+		.cleanSlate-environment-host {
+			scrollbar-color: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4)) transparent;
+		}
+		.cleanSlate-environment-host::-webkit-scrollbar { width: 6px; height: 6px; }
+		.cleanSlate-environment-host::-webkit-scrollbar-track,
+		.cleanSlate-environment-host::-webkit-scrollbar-corner { background: transparent; }
+		.cleanSlate-environment-host::-webkit-scrollbar-thumb {
+			background: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4));
+			border-radius: 6px;
+		}
+		.cleanSlate-environment-host::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground, rgba(121, 121, 121, 0.6)); }
+		.cleanSlate-environment-host[hidden] { display: none; }
+		.cleanSlate-environment-host:not([hidden]) .cleanSlate-environment { animation: cleanSlateEnvironmentEnter 160ms ease-out; }
+		@keyframes cleanSlateEnvironmentEnter { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
+		@media (prefers-reduced-motion: reduce) { .cleanSlate-environment-host:not([hidden]) .cleanSlate-environment { animation: none; } }
+		.cleanSlate-agent-manager-main.environment-visible { padding-right: 314px; box-sizing: border-box; }
+		.cleanSlate-agent-manager-surface.right-pane-visible .cleanSlate-agent-manager-main.environment-visible { padding-right: 0; }
+		.cleanSlate-environment {
+			pointer-events: auto;
+			padding: 13px 10px;
+			border: 1px solid var(--cleanSlate-agent-manager-border);
+			border-radius: 16px;
+			background: var(--vscode-sideBar-background);
+			color: var(--cleanSlate-agent-manager-text);
+			box-shadow: 0 5px 20px var(--vscode-widget-shadow);
+			font-size: 13px;
+		}
+		.cleanSlate-environment-header { padding: 0 7px 6px; color: var(--cleanSlate-agent-manager-text-muted); font-size: 12px; }
+		.cleanSlate-environment-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 7px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+		.cleanSlate-environment-row:hover { background: var(--vscode-list-hoverBackground); }
+		.cleanSlate-environment-row:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+		.cleanSlate-environment-row:disabled { opacity: 0.5; cursor: default; }
+		.cleanSlate-environment-row > .codicon { flex: 0 0 17px; font-size: 16px; }
+		.cleanSlate-environment-agent-logo { width: 17px; height: 17px; flex: 0 0 17px; display: inline-flex; align-items: center; justify-content: center; }
+		.cleanSlate-environment-agent-logo img { width: 17px; height: 17px; object-fit: contain; }
+		.cleanSlate-environment-agent-logo.monochrome { background: currentColor; mask-size: contain; mask-position: center; mask-repeat: no-repeat; -webkit-mask-size: contain; -webkit-mask-position: center; -webkit-mask-repeat: no-repeat; }
+		.cleanSlate-environment-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.cleanSlate-environment-meta { display: flex; gap: 5px; flex: 0 0 auto; color: var(--cleanSlate-agent-manager-text-muted); font-size: 11px; }
+		.cleanSlate-environment-added { color: var(--vscode-gitDecoration-addedResourceForeground); }
+		.cleanSlate-environment-deleted { color: var(--vscode-gitDecoration-deletedResourceForeground); }
+		.cleanSlate-environment-section { margin-top: 9px; padding-top: 10px; border-top: 1px solid var(--cleanSlate-agent-manager-border); }
+		.cleanSlate-environment-caption { color: var(--cleanSlate-agent-manager-text-muted); font-size: 11px; padding: 0 7px 6px; }
+		.cleanSlate-environment-expanded { margin: 3px 5px 8px; padding: 6px; border-radius: 7px; background: var(--vscode-editor-background); }
+		.cleanSlate-environment-expanded[hidden] { display: none; }
+		.cleanSlate-environment-detail { padding: 5px 7px; color: var(--cleanSlate-agent-manager-text-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+		.cleanSlate-environment-input { width: 100%; box-sizing: border-box; padding: 7px; border: 1px solid var(--vscode-input-border, var(--cleanSlate-agent-manager-border)); border-radius: 5px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); }
+		.cleanSlate-environment summary { cursor: pointer; padding: 5px 7px; color: var(--cleanSlate-agent-manager-text-muted); }
+		@media (max-width: 1050px) { .cleanSlate-agent-manager-main.environment-visible { padding-right: 0; } }
+
 		/* File tab: embedded editor + workspace tree */
 		.cleanSlate-agent-manager-right-body.file {
 			display: block;
