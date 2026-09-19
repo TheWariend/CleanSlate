@@ -96,7 +96,7 @@ function shouldShowBlock(block: InteractionBlock, options: ICleanSlateResolvedDi
 		case 'web':
 			return isImportantWebBlock(block, options);
 		case 'tool':
-			return false;
+			return block.externalTool === true;
 		default:
 			return false;
 	}

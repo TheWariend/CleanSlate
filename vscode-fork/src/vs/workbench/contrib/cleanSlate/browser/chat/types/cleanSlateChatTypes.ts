@@ -15,6 +15,7 @@ export interface InteractionBlock {
     summaryRole?: 'orientation' | 'progress' | 'completion' | 'status';
     toolName?: string;
     toolCallId?: string;
+    externalTool?: boolean;
     toolStatus?: 'running' | 'completed' | 'failed';
     command?: string;
     output?: string;
@@ -42,7 +43,7 @@ export interface InteractionBlock {
     searchCount?: number;
     details?: string[];
     detailMetadata?: { label: string; path?: string; range?: string; query?: string; type: 'read' | 'explore' }[];
-    fileChanges?: { path: string; added?: number; deleted?: number; diff?: string; beforeContent?: string; afterContent?: string }[];
+    fileChanges?: { path: string; created?: boolean; added?: number; deleted?: number; diff?: string; beforeContent?: string; afterContent?: string }[];
     browserToolName?: string;
     browserAction?: string;
     browserUrl?: string;

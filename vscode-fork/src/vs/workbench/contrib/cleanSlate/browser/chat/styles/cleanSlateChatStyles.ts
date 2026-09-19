@@ -2640,9 +2640,50 @@ export const CLEANSLATE_CHAT_STYLES = `
 
 			.cleanSlate-tool-activity-status {
 				color: var(--vscode-disabledForeground, rgba(255, 255, 255, 0.38));
-				font-size: 12px;
+				font-size: inherit;
+				line-height: inherit;
+				align-self: center;
 				flex: 0 0 auto;
 			}
+
+			.cleanSlate-work-summary { margin: 0; color: var(--vscode-descriptionForeground); }
+			.cleanSlate-work-summary > summary { display: flex; align-items: center; gap: 9px; list-style: none; cursor: pointer; font-size: 13px; line-height: 24px; width: fit-content; border-radius: 4px; }
+			.cleanSlate-work-summary > summary::-webkit-details-marker { display: none; }
+			.cleanSlate-work-summary > summary::after { content: ''; width: 6px; height: 6px; border-top: 1.5px solid currentColor; border-right: 1.5px solid currentColor; transform: rotate(45deg); opacity: 0; transition: opacity 120ms ease, transform 120ms ease; }
+			.cleanSlate-work-summary > summary:hover::after,
+			.cleanSlate-work-summary > summary:focus-visible::after,
+			.cleanSlate-work-summary[open] > summary::after { opacity: 1; }
+			.cleanSlate-work-summary[open] > summary::after { transform: rotate(135deg); }
+			@media (hover: none) { .cleanSlate-work-summary > summary::after { opacity: 1; } }
+			@media (prefers-reduced-motion: reduce) { .cleanSlate-work-summary > summary::after { transition: none; } }
+			.cleanSlate-work-summary > summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 4px; }
+			.cleanSlate-work-summary-body { display: flex; flex-direction: column; gap: 14px; margin: 12px 0 8px; padding: 0; }
+			.cleanSlate-work-summary-body > .cleanSlate-timeline-block { margin: 0; }
+			.cleanSlate-work-summary-body .cleanSlate-reasoning-block,
+			.cleanSlate-work-summary-body .cleanSlate-terminal-activity { margin-block: 0; }
+			.cleanSlate-work-summary-body > .cleanSlate-message-content { color: var(--vscode-descriptionForeground); }
+			.cleanSlate-external-tool-details > summary { min-height: 28px; padding: 2px 0; border-radius: 5px; }
+			.cleanSlate-external-tool-details > summary:hover .cleanSlate-tool-activity-row { color: var(--vscode-foreground); }
+			.cleanSlate-tool-result { margin: 8px 0 12px 21px; padding: 12px 14px; max-height: 320px; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--vscode-scrollbarSlider-background) transparent; background: var(--vscode-textCodeBlock-background); border: 1px solid var(--vscode-widget-border); border-radius: 9px; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+			.cleanSlate-tool-result:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+			.cleanSlate-tool-result .rendered-markdown { font-size: inherit; line-height: inherit; }
+			.cleanSlate-tool-result .rendered-markdown p { margin: 6px 0; white-space: pre-wrap; }
+			.cleanSlate-external-file-changes { display: flex; flex-direction: column; gap: 6px; }
+			.cleanSlate-tool-result .rendered-markdown :is(h1,h2,h3) { font-size: 13px; margin: 12px 0 6px; }
+			.cleanSlate-tool-result .rendered-markdown :is(ul,ol) { margin: 6px 0; padding-left: 20px; }
+			.cleanSlate-tool-reference { font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 8px; white-space: pre-wrap; }
+			.cleanSlate-tool-diff { font-family: var(--vscode-editor-font-family); font-size: 12px; white-space: pre; overflow-x: auto; }
+			@media (max-width: 600px) { .cleanSlate-tool-result { margin-left: 0; padding: 10px; } }
+			.cleanSlate-external-tool-details { margin: 0; }
+			.cleanSlate-external-tool-details > summary { display: flex; align-items: center; gap: 8px; list-style: none; }
+			.cleanSlate-external-tool-details > summary::-webkit-details-marker { display: none; }
+			.cleanSlate-external-tool-details > summary::after { content: ''; width: 6px; height: 6px; flex: 0 0 6px; border-top: 1.5px solid currentColor; border-right: 1.5px solid currentColor; transform: rotate(45deg); opacity: 0.6; transition: transform 120ms ease; }
+			.cleanSlate-external-tool-details[open] > summary::after { transform: rotate(135deg); }
+			.cleanSlate-external-tool-details .status-completed .cleanSlate-tool-activity-status { display: none; }
+			.cleanSlate-external-tool-details > summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 3px; }
+			@media (prefers-reduced-motion: reduce) { .cleanSlate-external-tool-details > summary::after { transition: none; } }
+			.cleanSlate-external-tool-details > summary { cursor: pointer; color: var(--vscode-descriptionForeground); font-size: 12px; line-height: 20px; }
+			.cleanSlate-external-tool-details > summary .cleanSlate-tool-activity-row { min-width: 0; }
 
 			.cleanSlate-tool-activity-row.status-failed,
 			.cleanSlate-tool-activity-row.status-failed .cleanSlate-tool-activity-status {

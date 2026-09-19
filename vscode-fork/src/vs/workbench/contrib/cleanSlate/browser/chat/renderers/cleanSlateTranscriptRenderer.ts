@@ -23,6 +23,7 @@ import { renderAnsiToHtml } from './cleanSlateAnsiRenderer.js';
 import { CleanSlateWebActivityRenderer } from './cleanSlateWebActivityRenderer.js';
 import { CleanSlateTranscriptFileRenderer } from './cleanSlateTranscriptFileRenderer.js';
 import { CleanSlateStreamingText } from './cleanSlateStreamingText.js';
+import { getCleanSlateHostToolPresentation, getCleanSlateExternalFileMutationBlocks, getCleanSlateExternalBrowserPresentation, getCleanSlateExternalToolOutput, isCleanSlateReasoningVisuallyStreaming } from './cleanSlateActivityPresentation.js';
 
 interface ICleanSlateAssistantMarkdownStreamState {
     renderedContent: string;
@@ -120,6 +121,14 @@ export class CleanSlateTranscriptRenderer {
         }
 
         // Forward the to_do steps to the plan dropup widget (owned by the view pane).
+		const previousActivity = transcript.querySelector<HTMLDetailsElement>(':scope > .cleanSlate-work-summary');
+		const activityExpanded = previousActivity?.open ?? false;
+		const activityFocused = previousActivity?.querySelector('summary') === transcript.ownerDocument.activeElement;
+		if (previousActivity) {
+			const body = previousActivity.querySelector('.cleanSlate-work-summary-body');
+			if (body) { previousActivity.replaceWith(...Array.from(body.children)); }
+			else { previousActivity.remove(); }
+		}
         const toDoSteps = normalizedData.to_do || [];
         this.onDidUpdateToDo?.(toDoSteps);
 
@@ -174,6 +183,24 @@ export class CleanSlateTranscriptRenderer {
             this.removeFallbackSummaryBlock(transcript);
         }
 
+		if (!isStreaming) {
+			const children = Array.from(transcript.children) as HTMLElement[];
+			const finalAnswer = children.filter(element => element.matches('.type-assistant_text')).at(-1);
+			const activity = children.filter(element => element !== finalAnswer && !element.matches('.type-summary, .type-finish, .type-turn, .status-failed, .status-interrupted') && !element.querySelector('.status-failed, .status-interrupted'));
+			if (activity.length) {
+				const disclosure = previousActivity ?? document.createElement('details');
+				disclosure.className = 'cleanSlate-work-summary';
+				disclosure.open = activityExpanded;
+				const heading = disclosure.querySelector('summary') ?? document.createElement('summary');
+				heading.textContent = 'Worked';
+				const body = disclosure.querySelector('.cleanSlate-work-summary-body') ?? document.createElement('div');
+				body.className = 'cleanSlate-work-summary-body';
+				activity[0].before(disclosure);
+				disclosure.append(heading, body);
+				body.append(...activity);
+				if (activityFocused) { heading.focus({ preventScroll: true }); }
+			}
+		}
         this.removeEmptyTranscript(lastMessage, transcript, isStreaming);
         onDidRender?.();
     }
@@ -226,7 +253,7 @@ export class CleanSlateTranscriptRenderer {
         }
 
         if (block.type === 'tool') {
-            return false;
+            return block.externalTool === true;
         }
 
         if (block.type === 'turn') {
@@ -504,6 +531,10 @@ export class CleanSlateTranscriptRenderer {
                 return block.id;
             }
 
+			if (block.type === 'reasoning' && block.isStreaming === true) {
+				return block.id;
+			}
+
             if (block.type === 'assistant_text' && block.isStreaming === true) {
                 return block.id;
             }
@@ -775,6 +806,10 @@ export class CleanSlateTranscriptRenderer {
 
     private disposeBlockMarkdownRenders(el: HTMLElement): void {
         this.disposeMarkdownRender(el);
+        for (const child of Array.from(el.querySelectorAll<HTMLElement>('[data-change-id]'))) {
+            this.fileRenderer.disposeFinishDiffEditorsForBlock(child.dataset.changeId!);
+            this.fileRenderer.clearFileDeltaCounterStatesForBlock(child.dataset.changeId!);
+        }
     }
 
     private clearAssistantMarkdownStreamStateForBlock(blockId: string): void {
@@ -828,7 +863,11 @@ export class CleanSlateTranscriptRenderer {
 
     private updateReasoningBlock(block: InteractionBlock, el: HTMLElement): void {
         const content = block.content || '';
-        const isStreaming = block.isStreaming === true;
+		// ACP streams can leave earlier thought chunks flagged as live after the
+		// agent has advanced. The transcript's active-block selection is the
+		// authoritative visual state: only the latest activity gets the sheen and
+		// expanded reasoning body.
+        const isStreaming = isCleanSlateReasoningVisuallyStreaming(block, el.classList.contains('is-active'));
 
         el.classList.add('cleanSlate-reasoning-block');
 
@@ -875,7 +914,9 @@ export class CleanSlateTranscriptRenderer {
         // those markers so they read as clean prose. The visible content follows
         // provider deltas instead of replaying them character by character
         // after the model has already moved to its next action.
-        const displayContent = this.stripReasoningEmphasis(content);
+        // ACP providers may prefix thought deltas with blank lines. Rendering
+        // those in a pre-wrapped body creates a large false gap below the header.
+        const displayContent = this.stripReasoningEmphasis(content).trimStart();
         const isActiveOrHolding = this.renderReasoningAtStreamPace(block.id, body!, displayContent, isStreaming);
         if (!isStreaming && !isActiveOrHolding && el.dataset.userToggled !== 'true') {
             el.classList.add('is-collapsed');
@@ -1002,8 +1043,8 @@ export class CleanSlateTranscriptRenderer {
     private updateSummaryBlock(block: InteractionBlock, el: HTMLElement): void {
         const content = block.content || '';
         el.classList.add('cleanSlate-message-content');
-        el.style.marginTop = '8px';
-        el.style.marginBottom = '8px';
+        el.style.marginTop = '0';
+        el.style.marginBottom = '0';
         this.setMarkdownIfChanged(el, content, `summary:${content}`);
     }
 
@@ -1012,8 +1053,8 @@ export class CleanSlateTranscriptRenderer {
         el.classList.add('cleanSlate-message-content');
         el.classList.add('cleanSlate-assistant-text-block');
         el.classList.toggle('is-streaming', block.isStreaming === true);
-        el.style.marginTop = '8px';
-        el.style.marginBottom = '8px';
+        el.style.marginTop = '0';
+        el.style.marginBottom = '0';
 
         if (block.isStreaming) {
             this.renderAssistantMarkdownStream(block.id, el, content, true, onDidRender);
@@ -1374,6 +1415,8 @@ export class CleanSlateTranscriptRenderer {
                 : 'codicon-check';
         const expanded = this.expandedTerminalBlockIds.has(block.id);
         const activityLabel = running ? 'Running' : 'Ran';
+        const folderListing = /^ls(?:\s+-[a-zA-Z]+)*(?:\s+(?:"[^"$`]+"|'[^']+'|[^\s;&|<>`$]+))?\s*$/.test(cmd);
+        const summaryLabel = folderListing ? (running ? 'Exploring folder' : failed ? 'Folder listing failed' : 'Explored folder') : `${activityLabel} command`;
         const cardHtml = expanded ? `
             <div class="cleanSlate-terminal-block${running ? ' streaming' : ''}">
                 <div class="terminal-shell-heading">Shell</div>
@@ -1411,9 +1454,8 @@ export class CleanSlateTranscriptRenderer {
         this.setTrustedHtmlIfChanged(el, `
             <div class="cleanSlate-terminal-activity${expanded ? ' expanded' : ' collapsed'}">
                 <button class="terminal-summary-toggle" type="button" aria-expanded="${expanded ? 'true' : 'false'}" title="${this.escapeHtml(cmd)}">
-                    <i class="codicon codicon-terminal terminal-summary-icon" aria-hidden="true"></i>
-                    <span class="terminal-summary-label">${activityLabel}</span>
-                    <span class="terminal-summary-command">${this.escapeHtml(cmd || 'command')}</span>
+                    <i class="codicon ${folderListing ? 'codicon-folder' : 'codicon-terminal'} terminal-summary-icon" aria-hidden="true"></i>
+                    <span class="terminal-summary-label">${summaryLabel}</span>
                     <i class="codicon ${expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'} terminal-summary-chevron" aria-hidden="true"></i>
                 </button>
                 ${cardHtml}
@@ -1725,16 +1767,129 @@ export class CleanSlateTranscriptRenderer {
     }
 
     private updateToolBlock(block: InteractionBlock, el: HTMLElement): void {
+        const browserPresentation = getCleanSlateExternalBrowserPresentation(block);
+        if (browserPresentation) {
+            block = { ...block, content: browserPresentation.label, output: browserPresentation.output, details: [] };
+        }
+		const normalizedOutput = getCleanSlateExternalToolOutput(block);
+		if (normalizedOutput !== block.output) { block = { ...block, output: normalizedOutput }; }
+        const mutations = getCleanSlateExternalFileMutationBlocks(block);
+        if (mutations.length) {
+            el.classList.toggle('status-failed', block.toolStatus === 'failed');
+            el.classList.toggle('status-interrupted', block.status === 'interrupted');
+            if (!el.classList.contains('cleanSlate-external-file-changes')) {
+                this.disposeBlockMarkdownRenders(el);
+                el.replaceChildren();
+                el.classList.add('cleanSlate-external-file-changes');
+                delete el.dataset.toolContentKey;
+            }
+            const activeIds = new Set(mutations.map(change => change.id));
+            for (const child of Array.from(el.children) as HTMLElement[]) {
+                if (!activeIds.has(child.dataset.changeId ?? '')) {
+                    this.fileRenderer.disposeFinishDiffEditorsForBlock(child.dataset.changeId ?? '');
+                    this.fileRenderer.clearFileDeltaCounterStatesForBlock(child.dataset.changeId ?? '');
+                    child.remove();
+                }
+            }
+            for (const change of mutations) {
+                let row = Array.from(el.children).find(child => (child as HTMLElement).dataset.changeId === change.id) as HTMLElement | undefined;
+                if (!row) { row = document.createElement('div'); row.dataset.changeId = change.id; el.append(row); }
+                this.fileRenderer.updateFileBlock(change, row, block.isStreaming === true);
+            }
+            return;
+        }
+        if (el.classList.contains('cleanSlate-external-file-changes')) {
+            for (const child of Array.from(el.children) as HTMLElement[]) {
+                this.fileRenderer.disposeFinishDiffEditorsForBlock(child.dataset.changeId ?? '');
+                this.fileRenderer.clearFileDeltaCounterStatesForBlock(child.dataset.changeId ?? '');
+            }
+            el.replaceChildren();
+            el.classList.remove('cleanSlate-external-file-changes');
+            delete el.dataset.toolContentKey;
+        }
         const interrupted = (block.status || '').toLowerCase() === 'interrupted';
         const status = interrupted ? 'interrupted' : block.toolStatus || (block.isStreaming ? 'running' : 'completed');
+		const signature = JSON.stringify([status, block.awaitingApproval, block.content, block.toolName, block.output, block.details, block.fileChanges]);
+		if (el.dataset.toolContentKey === signature) { return; }
+		el.dataset.toolContentKey = signature;
+        const expanded = el.querySelector('details')?.open ?? false;
+		const focused = el.querySelector('summary') === el.ownerDocument.activeElement;
+		const scrollTop = el.querySelector('.cleanSlate-tool-result')?.scrollTop ?? 0;
+        const previousDetails = el.querySelector('details');
+        previousDetails?.remove();
+		el.dataset.renderKey = '';
         this.updateToolActivityRow(
             el,
             status,
             block.isStreaming === true,
-            block.content || this.getWorkingPlaceholderLabel(block.toolName),
-            'codicon-tools',
-            `tool:${block.toolName || ''}`
+            this.formatExternalToolLabel(block),
+            (browserPresentation ? 'codicon-globe' : getCleanSlateHostToolPresentation(block.content ?? '', status === 'running', block.toolName)?.icon) ?? (block.externalTool && ['edit', 'delete', 'move'].includes(block.toolName ?? '') ? 'codicon-edit' : block.toolName === 'spawn_worker' ? 'codicon-hubot' : block.toolName === 'fetch' ? 'codicon-globe' : block.toolName === 'read' ? 'codicon-file' : block.toolName === 'search' ? 'codicon-search' : 'codicon-tools'),
+            `tool:${block.toolName || ''}`,
+            block.awaitingApproval === true
         );
+        if (block.externalTool && (block.output || block.details?.length || block.fileChanges?.length)) {
+            const details = document.createElement('details');
+            details.className = 'cleanSlate-external-tool-details';
+            details.open = expanded;
+            const summary = document.createElement('summary');
+			const row = el.querySelector('.cleanSlate-tool-activity-row');
+			if (row) { summary.append(row); }
+            else { summary.textContent = 'Tool output'; }
+            details.append(summary);
+            this.markdownRenderDisposables.get(el)?.dispose();
+			const panel = document.createElement('div');
+			panel.className = 'cleanSlate-tool-result';
+			panel.tabIndex = 0;
+			panel.setAttribute('role', 'region');
+			panel.setAttribute('aria-label', `${this.formatExternalToolLabel(block)} output`);
+			for (const path of block.details ?? []) {
+				const reference = document.createElement('div');
+				reference.className = 'cleanSlate-tool-reference';
+				reference.textContent = /^[\\/]|^[A-Za-z]:[\\/]/.test(path) && !path.includes('\n') ? path.replace(/\\/g, '/').split('/').pop() || path : path;
+				reference.title = path;
+				panel.append(reference);
+			}
+			for (const change of block.fileChanges ?? []) {
+				const label = document.createElement('div');
+				label.className = 'cleanSlate-tool-reference';
+				label.textContent = `${change.path.replace(/\\/g, '/').split('/').pop()} · +${change.added ?? 0} −${change.deleted ?? 0}`;
+				panel.append(label);
+				if (change.diff) {
+					const diff = document.createElement('pre');
+					diff.className = 'cleanSlate-tool-diff';
+					diff.textContent = change.diff;
+					panel.append(diff);
+				}
+			}
+			const rendered = block.output ? this.renderMarkdownFragment(block.output, false) : undefined;
+			if (rendered) { panel.append(rendered.element); }
+            details.append(panel);
+            el.append(details);
+			if (rendered) { this.markdownRenderDisposables.set(el, rendered); }
+			panel.scrollTop = scrollTop;
+			if (focused) { summary.focus({ preventScroll: true }); }
+        }
+    }
+
+    private formatExternalToolLabel(block: InteractionBlock): string {
+        const label = block.content || this.getWorkingPlaceholderLabel(block.toolName);
+        if (!block.externalTool) { return label; }
+		const running = block.toolStatus === 'running' || block.isStreaming;
+		const hostPresentation = getCleanSlateHostToolPresentation(label, running === true, block.toolName);
+		if (hostPresentation) { return hostPresentation.label; }
+		const verbs: Record<string, [string, string]> = { edit: ['Editing file', 'Edited file'], delete: ['Deleting file', 'Deleted file'], move: ['Moving file', 'Moved file'], fetch: ['Fetching page', 'Fetched page'], search: ['Searching', 'Searched'], read: ['Reading', 'Read'] };
+		const action = verbs[block.toolName ?? ''];
+		const location = block.fileChanges?.[0]?.path ?? block.details?.find(value => /[\\/]/.test(value) && !/^https?:\/\//.test(value) && !value.includes('\n'));
+		const filename = location?.replace(/\\/g, '/').split('/').pop();
+		const url = [label, ...(block.details ?? [])].join(' ').match(/https?:\/\/[^\s"')]+/)?.[0];
+		if (action) {
+			let target = filename;
+			if (block.toolName === 'fetch' && url) { try { target = new URL(url).hostname; } catch { /* Keep the reported file target. */ } }
+			return `${action[running ? 0 : 1]}${target ? ` · ${target}` : ''}`;
+		}
+		if (url) { try { return `${running ? 'Accessing' : 'Accessed'} ${new URL(url).hostname}`; } catch { /* Use the agent label when no URL can be parsed. */ } }
+		if (/^(?:\/?Users\/|\/?home\/|[A-Za-z]:[\\/])/.test(label)) { return label.replace(/\\/g, '/').split('/').pop() || 'File operation'; }
+		return label;
     }
 
     private updateToolActivityRow(
@@ -1743,7 +1898,8 @@ export class CleanSlateTranscriptRenderer {
         isStreaming: boolean,
         rawLabel: string,
         completedIconClass: string,
-        renderKeyPrefix: string
+        renderKeyPrefix: string,
+        awaitingApproval = false
     ): void {
         const failed = status === 'failed';
         const interrupted = status === 'interrupted';
@@ -1752,11 +1908,9 @@ export class CleanSlateTranscriptRenderer {
             ? 'codicon-error'
             : interrupted
                 ? 'codicon-debug-stop'
-                : running
-                    ? 'codicon-loading codicon-modifier-spin'
-                    : completedIconClass;
+                : completedIconClass;
         const label = this.escapeHtml(rawLabel);
-        const statusLabel = failed ? 'Failed' : interrupted ? 'Interrupted' : running ? 'Running' : 'Done';
+        const statusLabel = awaitingApproval ? 'Awaiting approval' : failed ? 'Failed' : interrupted ? 'Interrupted' : running ? 'Running' : 'Done';
 
         const html = `
             <div class="cleanSlate-tool-activity-row status-${status}">

@@ -82,7 +82,7 @@ export class CleanSlateTranscriptFileRenderer {
             const basename = path.split(/[/\\]/).pop() || path;
             const added = change.added || 0;
             const deleted = change.deleted || 0;
-            const shouldShowDiffPreview = this.shouldShowFinishDiffPreview(change, path);
+            const shouldShowDiffPreview = this.hasReviewDiffContent(change.beforeContent, change.afterContent, change.diff);
             const diffKey = `${block.id}:${index}`;
             const isInitiallyHidden = index >= compactLimit;
             const isOpen = shouldShowDiffPreview && this.finishDiffExpandedKeys.has(diffKey);
@@ -141,11 +141,6 @@ export class CleanSlateTranscriptFileRenderer {
         this.setupFinishShowMore(el);
     }
 
-
-    private shouldShowFinishDiffPreview(change: NonNullable<InteractionBlock['fileChanges']>[number], path: string): boolean {
-        void path;
-        return this.hasReviewDiffContent(change.beforeContent, change.afterContent, change.diff);
-    }
 
     /** Render a diff into an already-visible container from inline change content. */
     private renderDiffPreview(
@@ -361,8 +356,8 @@ export class CleanSlateTranscriptFileRenderer {
                 const html = `
                     <details class="cleanSlate-activity-disclosure activity-group">
                         <summary class="cleanSlate-activity-summary">
-                            <svg class="cleanSlate-activity-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3z" fill="currentColor"/></svg>
                             <span class="cleanSlate-activity-label"></span>
+                            <svg class="cleanSlate-activity-chevron" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                         </summary>
                         <div class="cleanSlate-activity-content activity-details">
                         </div>

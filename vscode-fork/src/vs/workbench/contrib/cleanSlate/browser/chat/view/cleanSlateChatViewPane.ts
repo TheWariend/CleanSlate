@@ -94,6 +94,7 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
     private readonly messageSubmitController: CleanSlateMessageSubmitController;
     private planPanelView!: CleanSlatePlanPanelView;
     private planningQuestionView!: CleanSlatePlanningQuestionView;
+    private externalQuestionVisible = false;
     private planApprovalView!: CleanSlatePlanApprovalView;
     private commandApprovalView!: CleanSlateCommandApprovalView;
     private pendingEditsBarView!: CleanSlatePendingEditsBarView;
@@ -446,7 +447,8 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
                     () => {
                         this.updatePlaceholder();
                         this.updateApproveButtonVisibility();
-                    }
+                    },
+                    () => this.sidebarViewModel.cancelExternalQuestion()
                 );
                 this._register(dom.addDisposableListener(inputBox, 'cleanslate-planning-question-submit', (event: Event) => {
                     const submission = (event as CustomEvent<ICleanSlatePlanningQuestionSubmission>).detail;
@@ -515,6 +517,9 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
             },
             onDidInputChange: () => this.handleComposerInputChange(),
             onKeyDown: (event) => {
+				if (this.planningQuestionView.isVisible()) {
+					return this.planningQuestionView.handleKeyDown(event);
+				}
                 if (this.commandApprovalView.isVisible()) {
                     return this.commandApprovalView.handleKeyDown(event);
                 }
@@ -522,7 +527,7 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
             },
             onEscape: () => {
                 if (this.planningQuestionView.isVisible()) {
-                    this.planningQuestionView.clear(true);
+                    this.planningQuestionView.dismiss();
                     return true;
                 }
                 if (this.planApprovalView.isVisible()) {
@@ -940,6 +945,10 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
         }
 
         const pendingApproval = this.sidebarViewModel.getPendingCommandApproval();
+        const externalQuestion = this.sidebarViewModel.getPendingExternalQuestion();
+        if (externalQuestion) { this.planningQuestionView.show(externalQuestion); }
+        else if (this.externalQuestionVisible) { this.externalQuestionVisible = false; this.planningQuestionView.clear(); }
+        this.externalQuestionVisible = !!externalQuestion;
         this.planningQuestionView?.setSuppressed(!!pendingApproval);
         const becameVisible = this.commandApprovalView.update(pendingApproval);
         this.composerView?.setCommandApprovalPending(!!pendingApproval);
@@ -1020,7 +1029,9 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
         if (this.planningQuestionView.isVisible()) {
             const submission = this.planningQuestionView.consumeSubmission();
             if (submission) {
-                void this.messageSubmitController.send(submission.message, submission.displayText);
+				void this.messageSubmitController.send(submission.message, submission.displayText, {
+					userRenderPayload: stringifyCleanSlatePlanningAnswerPayload(submission.question)
+				});
             }
             return;
         }

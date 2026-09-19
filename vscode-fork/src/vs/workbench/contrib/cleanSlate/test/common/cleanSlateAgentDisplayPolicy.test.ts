@@ -8,6 +8,17 @@ import { applyCleanSlateAgentDisplayPolicy } from '../../browser/chat/runtime/cl
 import type { ChatResponse } from '../../browser/chat/types/cleanSlateChatTypes.js';
 
 suite('CleanSlateAgentDisplayPolicy', () => {
+    test('preserves external tool and worker output without exposing native helper widgets', () => {
+        const response: ChatResponse = { timeline: [
+            { id: 'external-worker', type: 'tool', externalTool: true, toolName: 'spawn_worker', content: 'Worker: Inspect tests', output: 'Found coverage gaps', toolStatus: 'completed' },
+            { id: 'native-helper', type: 'tool', content: 'Internal helper', toolStatus: 'completed' }
+        ] };
+        for (const isStreaming of [true, false]) {
+            const display = applyCleanSlateAgentDisplayPolicy(response, { isStreaming });
+            assert.deepStrictEqual(display.timeline?.map(block => block.id), ['external-worker']);
+            assert.strictEqual(display.timeline?.[0].output, 'Found coverage gaps');
+        }
+    });
     test('preserves completed native activity blocks without restoring generic tool widgets', () => {
         const response: ChatResponse = {
             transcriptStatus: 'interrupted',

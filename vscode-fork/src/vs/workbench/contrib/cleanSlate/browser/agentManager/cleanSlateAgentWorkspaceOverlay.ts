@@ -290,6 +290,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	private composerView!: CleanSlateComposerView;
 	private planPanelView!: CleanSlatePlanPanelView;
 	private planningQuestionView!: CleanSlatePlanningQuestionView;
+	private externalQuestionVisible = false;
 	private planApprovalView!: CleanSlatePlanApprovalView;
 	private commandApprovalView!: CleanSlateCommandApprovalView;
 	private pendingEditsBarView!: CleanSlatePendingEditsBarView;
@@ -470,6 +471,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 				this.restoreCurrentSessionView();
 			}
 			this.syncComposerWithCurrentSession();
+			this.syncLiveThinkingIndicator();
 			this.updatePlaceholder();
 			this.updateApproveButtonVisibility();
 			this.updateCommandApprovalVisibility();
@@ -1655,7 +1657,8 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 					() => {
 						this.updatePlaceholder();
 						this.updateApproveButtonVisibility();
-					}
+					},
+					() => this.sidebarViewModel.cancelExternalQuestion()
 				);
 				this.shellDisposables.add(dom.addDisposableListener(inputBox, 'cleanslate-planning-question-submit', (event: Event) => {
 					const submission = (event as CustomEvent<ICleanSlatePlanningQuestionSubmission>).detail;
@@ -1704,6 +1707,9 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			onRemoveSelectionReference: index => this.sidebarViewModel.removePendingSelectionReference(index),
 			onDidInputChange: () => this.composerDraftController.handleInputChange(),
 			onKeyDown: event => {
+				if (this.planningQuestionView.isVisible()) {
+					return this.planningQuestionView.handleKeyDown(event);
+				}
 				if (this.commandApprovalView.isVisible()) {
 					return this.commandApprovalView.handleKeyDown(event);
 				}
@@ -1711,7 +1717,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			},
 			onEscape: () => {
 				if (this.planningQuestionView.isVisible()) {
-					this.planningQuestionView.clear(true);
+					this.planningQuestionView.dismiss();
 					return true;
 				}
 				if (this.planApprovalView.isVisible()) {
@@ -3282,7 +3288,9 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		if (this.planningQuestionView.isVisible()) {
 			const submission = this.planningQuestionView.consumeSubmission();
 			if (submission) {
-				void this.messageSubmitController.send(submission.message, submission.displayText);
+				void this.messageSubmitController.send(submission.message, submission.displayText, {
+					userRenderPayload: stringifyCleanSlatePlanningAnswerPayload(submission.question)
+				});
 			}
 			return;
 		}
@@ -4216,6 +4224,10 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			return;
 		}
 		const pendingApproval = this.sidebarViewModel.getPendingCommandApproval();
+		const externalQuestion = this.sidebarViewModel.getPendingExternalQuestion();
+		if (externalQuestion) { this.planningQuestionView.show(externalQuestion); }
+		else if (this.externalQuestionVisible) { this.externalQuestionVisible = false; this.planningQuestionView.clear(); }
+		this.externalQuestionVisible = !!externalQuestion;
 		const becameVisible = this.commandApprovalView.update(pendingApproval);
 		this.composerView?.setCommandApprovalPending(!!pendingApproval);
 		this.updatePlaceholder();

@@ -23,7 +23,8 @@ export class CleanSlatePlanningQuestionView {
 	constructor(
 		parent: HTMLElement,
 		private readonly getInputElement: () => HTMLTextAreaElement | undefined,
-		private readonly onDidChange: () => void
+		private readonly onDidChange: () => void,
+		private readonly onDismiss?: () => void
 	) {
 		this.root = dom.append(parent, dom.$('.cleanSlate-planning-question'));
 	}
@@ -69,6 +70,11 @@ export class CleanSlatePlanningQuestionView {
 		}
 	}
 
+	dismiss(): void {
+		this.clear(true);
+		this.onDismiss?.();
+	}
+
 	getPlaceholder(): string {
 		const selected = this.getOptions()[this.choiceIndex];
 		if (selected?.custom) {
@@ -76,6 +82,23 @@ export class CleanSlatePlanningQuestionView {
 		}
 
 		return 'Add details for CleanSlate...';
+	}
+
+	handleKeyDown(event: KeyboardEvent): boolean {
+		if (!this.isVisible() || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) {
+			return false;
+		}
+		const options = this.getOptions();
+		if (!options.length) { return false; }
+		event.preventDefault();
+		event.stopPropagation();
+		const direction = event.key === 'ArrowDown' ? 1 : -1;
+		this.choiceIndex = (this.choiceIndex + direction + options.length) % options.length;
+		this.render();
+		this.onDidChange();
+		this.root.querySelector<HTMLElement>('.cleanSlate-planning-question-option.selected')?.scrollIntoView({ block: 'nearest' });
+		this.getInputElement()?.focus();
+		return true;
 	}
 
 	consumeSubmission(): ICleanSlatePlanningQuestionSubmission | undefined {
@@ -120,7 +143,7 @@ export class CleanSlatePlanningQuestionView {
 		const closeBtn = dom.append(header, dom.$('button.cleanSlate-planning-question-close'));
 		closeBtn.title = 'Dismiss';
 		dom.append(closeBtn, dom.$('i.codicon.codicon-close'));
-		closeBtn.onclick = () => this.clear(true);
+		closeBtn.onclick = () => this.dismiss();
 
 		const options = dom.append(this.root, dom.$('.cleanSlate-planning-question-options'));
 		this.getOptions().forEach((option, index) => {
@@ -147,7 +170,7 @@ export class CleanSlatePlanningQuestionView {
 		const dismissBtn = dom.append(footer, dom.$('button.cleanSlate-planning-question-dismiss'));
 		dom.append(dismissBtn, dom.$('span', undefined, 'Dismiss'));
 		dom.append(dismissBtn, dom.$('kbd', undefined, 'Esc'));
-		dismissBtn.onclick = () => this.clear(true);
+		dismissBtn.onclick = () => this.dismiss();
 
 		const submitBtn = dom.append(footer, dom.$('button.cleanSlate-planning-question-submit'));
 		dom.append(submitBtn, dom.$('span', undefined, 'Submit'));
