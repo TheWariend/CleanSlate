@@ -24,6 +24,49 @@ packages/cleanslate-sdk/VENDOR.md.
 
 --------------------------------------------------------------------------------
 
+Agent Client Protocol TypeScript SDK
+Copyright (c) JetBrains s.r.o.
+Licensed under the Apache License, Version 2.0.
+https://github.com/agentclientprotocol/typescript-sdk
+
+CleanSlate uses this SDK to communicate with compatible local coding agents.
+
+--------------------------------------------------------------------------------
+
+ACP adapter for Claude Agent SDK
+Copyright (c) Zed Industries
+Licensed under the Apache License, Version 2.0.
+https://github.com/agentclientprotocol/claude-agent-acp
+
+The adapter integrates Anthropic's Claude Agent SDK and launches the user's
+installed Claude executable. Anthropic components and Claude services remain
+subject to Anthropic's applicable terms. CleanSlate is not affiliated with,
+endorsed by, or sponsored by Anthropic. Claude names and marks belong to their
+respective owners.
+
+--------------------------------------------------------------------------------
+
+ACP adapter for Codex CLI
+Copyright (c) Agent Client Protocol contributors
+Licensed under the Apache License, Version 2.0.
+https://github.com/agentclientprotocol/codex-acp
+
+The CleanSlate desktop application bundles this adapter and its Apache-2.0
+Codex CLI dependency. Their license files are retained in their distributed npm
+packages. CleanSlate is not affiliated with, endorsed by, or sponsored by
+OpenAI. OpenAI and Codex names and marks belong to their respective owners.
+
+--------------------------------------------------------------------------------
+
+OpenCode and Grok
+
+CleanSlate can launch user-installed OpenCode and Grok executables through their
+documented ACP interfaces. Those executables are not distributed by CleanSlate.
+Their names and marks belong to their respective owners, and compatibility does
+not imply affiliation, endorsement, or sponsorship.
+
+--------------------------------------------------------------------------------
+
 opencode
 Copyright (c) opencode contributors
 Licensed under the MIT License.

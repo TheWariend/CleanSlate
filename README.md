@@ -116,6 +116,26 @@ The editor includes a bundled model for local embeddings. The CLI and SDK can us
 
 CleanSlate installs extensions from [Open VSX](https://open-vsx.org). The Visual Studio Marketplace is Microsoft-only and can't be used by forks.
 
+### External agents
+
+CleanSlate can act as an Agent Client Protocol (ACP) client for compatible local
+agents. Each external agent runs as a separate process and uses credentials that
+the user configured directly with that agent. CleanSlate does not collect,
+store, proxy, or resell external-agent account credentials.
+
+OpenCode, Grok, and Claude are discovered from the user's `PATH`. Claude support
+uses the Apache-2.0 ACP adapter for Anthropic's Claude Agent SDK and explicitly
+launches the user's installed Claude executable, preserving Claude's own
+authentication boundary. Codex support uses the
+Apache-2.0 `@agentclientprotocol/codex-acp` adapter bundled with the desktop
+application. Other agents can be registered explicitly by the user in settings;
+their installation, license terms, authentication, and usage charges remain the
+user's responsibility.
+
+CleanSlate is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI, xAI,
+OpenCode, or any other external-agent provider. Product names and marks identify
+compatible third-party services only.
+
 ### Contributing
 
 Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md).
@@ -124,6 +144,7 @@ To report a security issue, see [SECURITY.md](SECURITY.md).
 
 ### License
 
-CleanSlate is MIT licensed.
+CleanSlate is MIT licensed. Bundled third-party components remain under their
+respective licenses; see [NOTICE](NOTICE).
 
 The CleanSlate desktop editor is based on [Visual Studio Code](https://github.com/microsoft/vscode) (MIT, © Microsoft Corporation) — see [LICENSE.txt](vscode-fork/LICENSE.txt). CleanSlate is not affiliated with, endorsed by, or sponsored by Microsoft.
