@@ -1,2 +1,3 @@
 node_modules/
 dist/
+src/node/externalAgents/generatedSdkVersion.ts

@@ -42,11 +42,12 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "watch": "tsc -p tsconfig.json --watch",
+    "generate-version": "node ./scripts/write-sdk-version.mjs",
+    "build": "npm run generate-version && tsc -p tsconfig.json",
+    "watch": "npm run generate-version && tsc -p tsconfig.json --watch",
     "clean": "rm -rf dist",
     "test": "npm run build && node --test \"dist/test/*.test.js\"",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "npm run generate-version && tsc -p tsconfig.json --noEmit",
     "prepublishOnly": "npm run clean && npm run build && npm test"
   },
   "dependencies": {
