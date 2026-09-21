@@ -51,24 +51,24 @@ export class ExternalAgentService extends Disposable {
 			: Promise.resolve({ detail: 'Account limits are not exposed by this agent. Check usage with its provider.', windows: [] });
 	}
 
-	listAgents(): IExternalAgentDescriptor[] {
-		return this.registry.list();
+	listAgents(env?: NodeJS.ProcessEnv): IExternalAgentDescriptor[] {
+		return this.registry.list(env);
 	}
 	registerAgent(value: import('../../externalAgents/externalAgentTypes.js').IExternalAgentRegistration): void { this.registry.register(value); }
 
-	async startSession(request: IExternalAgentStartRequest): Promise<IExternalAgentSessionInfo> {
+	async startSession(request: IExternalAgentStartRequest, env?: NodeJS.ProcessEnv): Promise<IExternalAgentSessionInfo> {
 		if (this.disposed) { throw new Error('External agent service is disposed.'); }
 		const pending = this.starting.get(request.cleanSlateSessionId);
 		if (pending) {
-			return pending.then(info => request.modelSelection || info.config.agentId !== request.config.agentId ? this.startSession(request) : info);
+			return pending.then(info => request.modelSelection || info.config.agentId !== request.config.agentId ? this.startSession(request, env) : info);
 		}
 		this.cancelledStarts.delete(request.cleanSlateSessionId);
-		const starting = this.createOrUpdateSession(request).finally(() => this.starting.delete(request.cleanSlateSessionId));
+		const starting = this.createOrUpdateSession(request, env).finally(() => this.starting.delete(request.cleanSlateSessionId));
 		this.starting.set(request.cleanSlateSessionId, starting);
 		return starting;
 	}
 
-	private async createOrUpdateSession(request: IExternalAgentStartRequest): Promise<IExternalAgentSessionInfo> {
+	private async createOrUpdateSession(request: IExternalAgentStartRequest, env?: NodeJS.ProcessEnv): Promise<IExternalAgentSessionInfo> {
 		const requestedCwd = request.cwd?.trim();
 		const cwd = requestedCwd
 			? (requestedCwd.startsWith('file:') ? fileURLToPath(requestedCwd) : requestedCwd)
@@ -91,7 +91,7 @@ export class ExternalAgentService extends Disposable {
 			return { cleanSlateSessionId: request.cleanSlateSessionId, externalSessionId: existing.externalSessionId, config: existing.config, models: existing.models, controls: existing.controls };
 		}
 		await this.disposeSession(request.cleanSlateSessionId);
-		const launch = this.registry.resolve(request.config.agentId);
+		const launch = this.registry.resolve(request.config.agentId, env);
 		const eventOwner = Symbol();
 		this.eventOwners.set(request.cleanSlateSessionId, eventOwner);
 		if (request.hostTools) { this.hostOwners.set(request.cleanSlateSessionId, request.hostTools.ownerId); }

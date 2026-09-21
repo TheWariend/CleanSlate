@@ -128,7 +128,8 @@ const vscodeResources = [
 const bootstrapEntryPoints = [
 	'out-build/main.js',
 	'out-build/cli.js',
-	'out-build/bootstrap-fork.js'
+	'out-build/bootstrap-fork.js',
+	'out-build/hostToolsProxy.js'
 ];
 
 const bundleVSCodeTask = task.define('bundle-vscode', task.series(

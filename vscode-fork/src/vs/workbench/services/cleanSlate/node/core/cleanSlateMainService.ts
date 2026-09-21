@@ -59,7 +59,9 @@ import { VSBuffer, streamToBuffer } from '../../../../../base/common/buffer.js';
 import { CleanSlateCommandExecutionService } from './cleanSlateCommandExecutionService.js';
 import { CleanSlatePlaywrightBrowserService } from './cleanSlatePlaywrightBrowserService.js';
 import { INativeEnvironmentService } from '../../../../../platform/environment/common/environment.js';
+import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
+import { getResolvedShellEnv } from '../../../../../platform/shell/node/shellEnv.js';
 import { CleanSlateThreadPersistenceStore } from './cleanSlateThreadPersistenceStore.js';
 import { CleanSlateWebRetrievalService } from './cleanSlateWebRetrievalService.js';
 import { CleanSlateLocalEmbeddingService } from './cleanSlateLocalEmbeddingService.js';
@@ -157,6 +159,7 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
     private readonly localEmbeddingService: CleanSlateLocalEmbeddingService;
     private readonly agentHost: CleanSlateHostedAgentRuntime;
 	private readonly externalAgents: ExternalAgentService;
+	private externalAgentEnvironment?: Promise<NodeJS.ProcessEnv>;
 	readonly onDidEmitExternalAgentEvent: Event<IExternalAgentEvent>;
     private hostedBrowserViews?: { create(id: string, sessionId: string): Promise<void>; release(id: string): Promise<void>; pointer?(id: string, x: number, y: number, click: boolean): Promise<void> };
 
@@ -174,7 +177,8 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
     constructor(
         @IRequestService private readonly requestService: IRequestService,
         @INativeEnvironmentService private readonly environmentService: INativeEnvironmentService,
-        @ILogService private readonly logService: ILogService
+        @ILogService private readonly logService: ILogService,
+        @IConfigurationService private readonly configurationService: IConfigurationService
     ) {
         super();
         this._register({ dispose: () => this.managedTokens.clear() });
@@ -237,12 +241,27 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
 	getExternalAgentUsage(agentId: string): Promise<import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentUsage> { return this.externalAgents.getUsage(agentId); }
 	async registerExternalAgent(value: import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentRegistration): Promise<void> { this.externalAgents.registerAgent(value); }
 
-	listExternalAgents(): Promise<IExternalAgentDescriptor[]> {
-		return Promise.resolve(this.externalAgents.listAgents());
+	private resolveExternalAgentEnvironment(): Promise<NodeJS.ProcessEnv> {
+		if (!this.externalAgentEnvironment) {
+			this.externalAgentEnvironment = getResolvedShellEnv(
+				this.configurationService,
+				this.logService,
+				this.environmentService.args,
+				process.env
+			).then(shellEnv => ({ ...process.env, ...shellEnv })).catch(error => {
+				this.logService.warn('Unable to resolve the shell environment for external agents.', error);
+				return { ...process.env };
+			});
+		}
+		return this.externalAgentEnvironment;
 	}
 
-	startExternalAgentSession(request: IExternalAgentStartRequest): Promise<IExternalAgentSessionInfo> {
-		return this.externalAgents.startSession(request);
+	async listExternalAgents(): Promise<IExternalAgentDescriptor[]> {
+		return this.externalAgents.listAgents(await this.resolveExternalAgentEnvironment());
+	}
+
+	async startExternalAgentSession(request: IExternalAgentStartRequest): Promise<IExternalAgentSessionInfo> {
+		return this.externalAgents.startSession(request, await this.resolveExternalAgentEnvironment());
 	}
 
 	promptExternalAgentSession(request: IExternalAgentPromptRequest): Promise<void> {

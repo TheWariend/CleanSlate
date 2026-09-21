@@ -3,6 +3,9 @@ import { cp, mkdtemp, readFile, rm } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { createHostToolsBridge } from '@cleanslate/sdk/node/externalAgents/hostToolsBridge.js';
 
 function parseArgs(argv) {
 	const result = {};
@@ -173,6 +176,34 @@ async function stopApp(child) {
 	}
 }
 
+async function verifyPackagedHostToolsProxy(executablePath, appPath) {
+	const proxyPath = path.join(appPath, 'Contents', 'Resources', 'app', 'out', 'hostToolsProxy.js');
+	const bridge = await createHostToolsBridge([{
+		definition: { name: 'packaged_smoke', description: 'Packaged host-tools smoke test', inputSchema: { type: 'object' } },
+		async call() { return { content: [{ type: 'text', text: 'ok' }] }; }
+	}], async () => {});
+	const descriptor = bridge.servers[0];
+	const client = new Client({ name: 'cleanslate-packaged-smoke', version: '1.0.0' });
+	try {
+		if (!('env' in descriptor)) {
+			throw new Error('The host-tools bridge did not provide a stdio environment.');
+		}
+		const env = Object.fromEntries(descriptor.env.map(entry => [entry.name, entry.value]));
+		await client.connect(new StdioClientTransport({
+			command: executablePath,
+			args: [proxyPath],
+			env: { ...env, ELECTRON_RUN_AS_NODE: '1' }
+		}));
+		const tools = await client.listTools();
+		if (!tools.tools.some(tool => tool.name === 'packaged_smoke')) {
+			throw new Error('The packaged host-tools proxy did not expose the smoke-test tool.');
+		}
+	} finally {
+		await client.close();
+		await bridge.dispose();
+	}
+}
+
 const args = parseArgs(process.argv.slice(2));
 const sourceAppPath = path.resolve(args.app ?? '');
 
@@ -196,6 +227,8 @@ if (!executableName) {
 }
 
 const executablePath = path.join(appPath, 'Contents', 'MacOS', executableName);
+await verifyPackagedHostToolsProxy(executablePath, appPath);
+console.log('Packaged CleanSlate host-tools proxy completed an MCP handshake successfully.');
 const userDataPath = await mkdtemp(path.join(os.tmpdir(), 'cleanslate-packaged-smoke-'));
 const port = await reservePort();
 const output = [];

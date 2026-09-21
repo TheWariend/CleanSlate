@@ -128,14 +128,14 @@ export class ExternalAgentRegistry {
 					executable: process.execPath,
 					args: [modulePath, ...entry.args],
 					runAsNode: true,
-					env: nativeExecutable ? { CLAUDE_CODE_EXECUTABLE: nativeExecutable } : undefined
+					env: { ...entry.env, ...(env.PATH ? { PATH: env.PATH } : {}), ...(nativeExecutable ? { CLAUDE_CODE_EXECUTABLE: nativeExecutable } : {}) }
 				};
 			}
 		}
 		if (!executable) {
 			throw new Error(`${entry.name} is not installed or is not available on PATH.`);
 		}
-		return { ...entry, executable };
+		return { ...entry, executable, env: { ...entry.env, ...(env.PATH ? { PATH: env.PATH } : {}) } };
 	}
 
 	resolveUsage(agentId: string): { executable: string; args: readonly string[]; runAsNode: boolean } | undefined {

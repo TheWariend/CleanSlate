@@ -45,6 +45,7 @@ test('Claude ACP launches the user-installed Claude executable', async () => {
 		const launch = registry.resolve('claude', { PATH: directory });
 		assert.equal(launch.executable, process.execPath);
 		assert.equal(launch.env?.CLAUDE_CODE_EXECUTABLE, claude);
+		assert.equal(launch.env?.PATH, directory);
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}
