@@ -19,7 +19,7 @@ the same set the editor has, not a reduced subset:
 Editing and command execution pass through an approval gate that **refuses by
 default** — see [Permissions](#interactive-use).
 
-> **Current release: 1.0.9.**
+> **Current release: 1.0.10.**
 
 ## Install
 
