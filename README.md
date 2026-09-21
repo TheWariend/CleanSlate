@@ -21,7 +21,7 @@
 
 ### Installation
 
-The current release is **CleanSlate 1.0.10**. See the [release notes](https://github.com/TheWariend/CleanSlate-Releases/releases/tag/v1.0.10) or download it directly:
+The current release is **CleanSlate 1.0.11**. See the [release notes](https://github.com/TheWariend/CleanSlate-Releases/releases/tag/v1.0.11) or download it directly:
 
 | Platform | Download |
 | -------- | -------- |
