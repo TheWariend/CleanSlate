@@ -11,6 +11,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { IExternalAgentHostTools } from './externalAgentSession.js';
 import { CLEANSLATE_SDK_VERSION } from './externalAgentVersion.js';
+import { getCleanSlateBrowserHostPolicy } from '../../tools/cleanSlateBrowserPolicy.js';
 
 export interface IExternalAgentHostTool {
 	readonly definition: Tool;
@@ -29,7 +30,7 @@ export async function createHostToolsBridge(tools: readonly IExternalAgentHostTo
 		if (request.method !== 'POST') { response.writeHead(405).end(); return; }
 		const protocol = new Server({ name: 'CleanSlate IDE', version: CLEANSLATE_SDK_VERSION }, {
 			capabilities: { tools: {} },
-			instructions: 'These tools belong to the current CleanSlate chat and workspace. Use the advertised tools for IDE operations. Browser tools control the visible browser in this chat; use them by default instead of a separate agent browser unless the user explicitly chooses another destination. Capabilities not present in this catalog are unavailable through this connection.'
+			instructions: `These tools belong to the current CleanSlate chat and workspace. Use the advertised tools for IDE operations. ${getCleanSlateBrowserHostPolicy()} Capabilities not present in this catalog are unavailable through this connection.`
 		});
 		protocol.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: tools.map(tool => tool.definition) }));
 		protocol.setRequestHandler(CallToolRequestSchema, async ({ params }) => {

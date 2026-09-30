@@ -29,6 +29,7 @@ import { cancellationTokenFromAbortSignal } from '../services/cleanSlateCancella
 import { CancellationTokenSource } from '../core/cancellation.js';
 import { estimateCleanSlateFileReadTokens } from '../tools/cleanSlateFileReadPolicy.js';
 import type { ICleanSlatePullRequestMetadata } from '../tools/PreparePullRequestTool.js';
+import { getCleanSlateBrowserOptInLines } from '../tools/cleanSlateBrowserPolicy.js';
 
 type IExecutionToolExecution = ICleanSlateStreamingToolExecution;
 type IExecutionToolStreamEvent = CleanSlateStreamingToolEvent;
@@ -1038,9 +1039,7 @@ export class CleanSlateExecutionQueryEngine {
             'WEB ANSWER QUALITY:',
             getWebResearchFinalAnswerPrompt(),
             'BROWSER TOOL OPT-IN:',
-            'Use browser_* tools only when the current user request explicitly asks you to open a browser, preview a page, inspect DOM, capture screenshots, or perform visual/browser verification.',
-            'Do not open localhost, collect browser evidence, or require browser verification only because UI files changed.',
-            'When browser verification was not explicitly requested, rely on code inspection, diagnostics, tests, and concise completion reporting instead.',
+			...getCleanSlateBrowserOptInLines(),
             'When browser work is requested, operate the one bound live browser session: observe with browser_snapshot, choose a unique semantic locator, act, then observe the resulting URL/DOM/screenshot or diagnostics. Prefer role/name, label, placeholder, text, or testId over coordinates; use coordinates only as a visual fallback.',
             'browser_snapshot is semantic DOM text, not an image. When the user asks to inspect, test, preview, or visually verify a site, call browser_screenshot on the key page states; do not claim visual inspection from browser_snapshot alone.',
             'The visible mouse belongs only to real pointer actions such as browser_click, browser_hover, and browser_scroll. Direct navigation, DOM snapshots, and screenshots must not fabricate mouse movement.',

@@ -61,8 +61,9 @@ import {
     browserUploadTool,
     browserWaitTool
 } from './BrowserAutomationTools.js';
+import { applyCleanSlateBrowserToolPolicy } from './cleanSlateBrowserPolicy.js';
 
-export const ALL_TOOLS: CleanSlateTool[] = [
+const cleanSlateTools: CleanSlateTool[] = [
     readFileTool,
     readFileRangeTool,
     semanticSearchTool,
@@ -127,6 +128,8 @@ export const ALL_TOOLS: CleanSlateTool[] = [
     undoEditTool,
     fileHistoryRewindTool
 ];
+
+export const ALL_TOOLS: CleanSlateTool[] = cleanSlateTools.map(applyCleanSlateBrowserToolPolicy);
 
 export function getToolByName(name: string): CleanSlateTool | undefined {
     return ALL_TOOLS.find(tool => tool.name === name);
