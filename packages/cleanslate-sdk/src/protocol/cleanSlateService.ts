@@ -9,6 +9,7 @@ import { CancellationToken } from '../core/cancellation.js';
 import { Subscribable } from '../host/events.js';
 import { CleanSlateOpenAICompatibleProviderFlavor, CleanSlateProviderReasoningEffort, ICleanSlateModelCapabilityRequest, resolveCleanSlateModelCapabilities, resolveCleanSlateModelFamily } from './cleanSlateModelCapabilities.js';
 import { normalizeCleanSlateMessagesForProvider } from './cleanSlateProviderMessageTransforms.js';
+import { CleanSlateTranscriptIntegrityError, prepareCleanSlateProviderMessages } from './cleanSlateTranscriptIntegrity.js';
 
 const CLEANSLATE_NVIDIA_DEFAULT_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 const CLEANSLATE_OPENROUTER_DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
@@ -322,6 +323,7 @@ export class CleanSlateService implements ICleanSlateService {
 	}
 
 	async chat(messages: IChatMessage[], options: IChatOptions = {}): Promise<AsyncIterable<CleanSlateResponsePart>> {
+		messages = prepareCleanSlateProviderMessages(messages, id => this.logger.warn(`[CleanSlateService] tool_result_missing: ${id}; execution status is unknown.`));
 		const config = await this.configService.getResolvedConfiguration();
 		await this.ensureModelsDevMetadata(config.provider, this.getConfiguredModelForProvider(config, config.provider));
 		this.assertProviderSupportsRequestedTools(config.provider, options);
@@ -533,7 +535,7 @@ export class CleanSlateService implements ICleanSlateService {
 
 		const createRequest = () => {
 			const requestProfile = this.getOpenAICompatibleRequestProfile(config, model, 'custom', options, 'cleanslate');
-			const providerMessages = normalizeCleanSlateMessagesForProvider(messages, { target: 'openaiCompatible', model, provider: 'custom', hasTools: !!options.tools?.length });
+			const providerMessages = prepareCleanSlateProviderMessages(normalizeCleanSlateMessagesForProvider(messages, { target: 'openaiCompatible', model, provider: 'custom', hasTools: !!options.tools?.length }));
 			const event = this.cleanSlateMainService.openAICompatibleChatStream({
 				providerName: 'CleanSlate Pro',
 				apiKey: token,
@@ -588,7 +590,7 @@ export class CleanSlateService implements ICleanSlateService {
 		}
 
 		return this.retryOnRateLimit(async () => {
-			const providerMessages = normalizeCleanSlateMessagesForProvider(messages, { target: 'openaiCompatible', model, provider: 'openai', hasTools: !!options.tools?.length });
+			const providerMessages = prepareCleanSlateProviderMessages(normalizeCleanSlateMessagesForProvider(messages, { target: 'openaiCompatible', model, provider: 'openai', hasTools: !!options.tools?.length }));
 			const requestProfile = this.withOpenAIPriorityContextGuard(
 				this.getOpenAICompatibleRequestProfile(config, model, 'openai', options),
 				providerMessages
@@ -625,7 +627,7 @@ export class CleanSlateService implements ICleanSlateService {
 
 		return this.retryOnRateLimit(async () => {
 			const requestProfile = this.getOpenAICompatibleRequestProfile(config, model, 'xai', options);
-			const providerMessages = normalizeCleanSlateMessagesForProvider(messages, { target: 'openaiCompatible', model, provider: 'grok', hasTools: !!options.tools?.length });
+			const providerMessages = prepareCleanSlateProviderMessages(normalizeCleanSlateMessagesForProvider(messages, { target: 'openaiCompatible', model, provider: 'grok', hasTools: !!options.tools?.length }));
 			const event = this.cleanSlateMainService.openAICompatibleChatStream({
 				providerName: 'xAI Grok',
 				apiKey,
@@ -655,7 +657,7 @@ export class CleanSlateService implements ICleanSlateService {
 
 		return this.retryOnRateLimit(async () => {
 			const requestProfile = this.getOpenAICompatibleRequestProfile(config, model, 'nvidia', options);
-			const providerMessages = normalizeCleanSlateMessagesForProvider(messages, { target: 'openaiCompatible', model, provider: 'nvidia', hasTools: !!options.tools?.length });
+			const providerMessages = prepareCleanSlateProviderMessages(normalizeCleanSlateMessagesForProvider(messages, { target: 'openaiCompatible', model, provider: 'nvidia', hasTools: !!options.tools?.length }));
 			const event = this.cleanSlateMainService.openAICompatibleChatStream({
 				providerName: 'NVIDIA NIM',
 				apiKey,
@@ -685,7 +687,7 @@ export class CleanSlateService implements ICleanSlateService {
 
 		return this.retryOnRateLimit(async () => {
 			const requestProfile = this.getOpenAICompatibleRequestProfile(config, model, 'openrouter', options);
-			const providerMessages = normalizeCleanSlateMessagesForProvider(messages, { target: 'openaiCompatible', model, provider: 'openrouter', hasTools: !!options.tools?.length });
+			const providerMessages = prepareCleanSlateProviderMessages(normalizeCleanSlateMessagesForProvider(messages, { target: 'openaiCompatible', model, provider: 'openrouter', hasTools: !!options.tools?.length }));
 			const baseUrl = provider.baseUrl || CLEANSLATE_OPENROUTER_DEFAULT_BASE_URL;
 			const event = this.cleanSlateMainService.openAICompatibleChatStream({
 				providerName: 'OpenRouter',
@@ -716,7 +718,7 @@ export class CleanSlateService implements ICleanSlateService {
 
 		return this.retryOnRateLimit(async () => {
 			const requestProfile = this.getOpenAICompatibleRequestProfile(config, model, 'custom', options);
-			const providerMessages = normalizeCleanSlateMessagesForProvider(messages, { target: 'openaiCompatible', model, provider: 'custom', hasTools: !!options.tools?.length });
+			const providerMessages = prepareCleanSlateProviderMessages(normalizeCleanSlateMessagesForProvider(messages, { target: 'openaiCompatible', model, provider: 'custom', hasTools: !!options.tools?.length }));
 			const event = this.cleanSlateMainService.openAICompatibleChatStream({
 				providerName: 'Custom API',
 				apiKey: provider?.apiKey,
@@ -748,7 +750,7 @@ export class CleanSlateService implements ICleanSlateService {
 		}
 
 		return this.retryOnRateLimit(async () => {
-			const providerMessages = normalizeCleanSlateMessagesForProvider(messages, { target: 'openaiCompatible', model: deploymentName, provider: 'azureOpenAI', hasTools: !!options.tools?.length });
+			const providerMessages = prepareCleanSlateProviderMessages(normalizeCleanSlateMessagesForProvider(messages, { target: 'openaiCompatible', model: deploymentName, provider: 'azureOpenAI', hasTools: !!options.tools?.length }));
 			if (this.shouldUseAzureOpenAIV1ChatCompletions(endpoint, deploymentName)) {
 				const requestProfile = this.getOpenAICompatibleRequestProfile(config, deploymentName, 'azureFoundry', options);
 				const baseUrl = this.toAzureOpenAIV1BaseUrl(endpoint);
@@ -812,7 +814,7 @@ export class CleanSlateService implements ICleanSlateService {
 				configuredMaxOutputTokens: config.maxOutputTokens,
 				sessionId: options.sessionId
 			});
-			const providerMessages = normalizeCleanSlateMessagesForProvider(messages, { target: 'anthropic', model, provider: 'anthropic', hasTools: !!options.tools?.length });
+			const providerMessages = prepareCleanSlateProviderMessages(normalizeCleanSlateMessagesForProvider(messages, { target: 'anthropic', model, provider: 'anthropic', hasTools: !!options.tools?.length }));
 			const event = this.cleanSlateMainService.anthropicMessagesStream({
 				apiKey,
 				baseUrl: provider.baseUrl || 'https://api.anthropic.com/v1',
@@ -854,7 +856,7 @@ export class CleanSlateService implements ICleanSlateService {
 			configuredMaxOutputTokens: config.maxOutputTokens,
 			sessionId: options.sessionId
 		});
-		const providerMessages = normalizeCleanSlateMessagesForProvider(messages, { target: 'bedrock', model: provider.modelId, provider: 'bedrock', hasTools: !!options.tools?.length });
+		const providerMessages = prepareCleanSlateProviderMessages(normalizeCleanSlateMessagesForProvider(messages, { target: 'bedrock', model: provider.modelId, provider: 'bedrock', hasTools: !!options.tools?.length }));
 		const event = this.cleanSlateMainService.bedrockConverseStream({
 			region: provider.region,
 			modelId: provider.modelId,
@@ -1155,7 +1157,7 @@ export class CleanSlateService implements ICleanSlateService {
 				configuredMaxOutputTokens: config.maxOutputTokens,
 				sessionId: options.sessionId
 			});
-			const providerMessages = normalizeCleanSlateMessagesForProvider(messages, { target: 'gemini', model, provider: 'gemini', hasTools: !!options.tools?.length });
+			const providerMessages = prepareCleanSlateProviderMessages(normalizeCleanSlateMessagesForProvider(messages, { target: 'gemini', model, provider: 'gemini', hasTools: !!options.tools?.length }));
 			const event = this.cleanSlateMainService.geminiGenerateContentStream({
 				apiKey,
 				model,
@@ -1194,6 +1196,9 @@ export class CleanSlateService implements ICleanSlateService {
 				}
 				return;
 			} catch (e: any) {
+				if (e instanceof CleanSlateTranscriptIntegrityError) {
+					throw e;
+				}
 				const errorMessage = e.message || String(e);
 				if (this.isProviderQuotaExhaustedError(errorMessage)) {
 					this.logger.warn?.(`[CleanSlateService] Provider quota exhausted: ${errorMessage}`);

@@ -151,9 +151,10 @@ export class CleanSlateAgentSession {
 			this.clear();
 			return;
 		}
-		this.messages = snapshot.messages
-			.filter(message => this.isChatMessage(message))
-			.map(message => this.cloneMessage(message));
+		this.messages = snapshot.messages.flatMap(message => {
+			const restored = this.restoreMessage(message);
+			return restored ? [restored] : [];
+		});
 		this.objective = this.normalizeOptionalString(snapshot.objective);
 		this.mode = this.normalizeOptionalString(snapshot.mode);
 		this.phase = this.normalizeOptionalString(snapshot.phase);
@@ -226,6 +227,20 @@ export class CleanSlateAgentSession {
 			mode: this.normalizeOptionalString(candidate.mode),
 			phase: this.normalizeOptionalString(candidate.phase)
 		};
+	}
+
+	private restoreMessage(value: unknown): IChatMessage | undefined {
+		if (value && typeof value === 'object') {
+			const candidate = value as Partial<IChatMessage>;
+			// Older cloud snapshots converted empty narration to null. Tool-only
+			// assistant turns are still valid and must stay paired with their results.
+			if (candidate.role === 'assistant' && candidate.content == null
+				&& Array.isArray(candidate.toolCalls) && candidate.toolCalls.length > 0
+				&& candidate.toolCalls.every(call => call && typeof call.toolName === 'string' && call.toolName.trim().length > 0)) {
+				return this.cloneMessage({ ...candidate, role: 'assistant', content: '' });
+			}
+		}
+		return this.isChatMessage(value) ? this.cloneMessage(value) : undefined;
 	}
 
 	private isChatMessage(value: unknown): value is IChatMessage {

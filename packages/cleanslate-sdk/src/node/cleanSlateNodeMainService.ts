@@ -43,6 +43,7 @@ import { CleanSlateNodeCommandService } from './cleanSlateNodeCommandService.js'
 import { CleanSlateAnthropicMessageAdapter } from './cleanSlateAnthropicMessageAdapter.js';
 import { CleanSlateOpenAIMessageAdapter } from './cleanSlateOpenAIMessageAdapter.js';
 import { CleanSlateProviderSchemaNormalizer } from './cleanSlateProviderSchemaNormalizer.js';
+import { prepareCleanSlateProviderMessages } from '../protocol/cleanSlateTranscriptIntegrity.js';
 import { normalizeToolName } from '../protocol/cleanSlateProviderMessageTransforms.js';
 import { CleanSlateNodeWebRetrieval } from './cleanSlateNodeWebRetrieval.js';
 import { CleanSlateNodeHttpTransport } from './cleanSlateNodeHttpTransport.js';
@@ -188,6 +189,9 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 		(async () => {
 			let abort: ReturnType<NodeCleanSlateMainService['createProviderAbortController']> | undefined;
 			try {
+				// Yield until callers can subscribe before reporting validation failures.
+				await Promise.resolve();
+				options = { ...options, messages: prepareCleanSlateProviderMessages(options.messages, id => console.warn(`[CleanSlateService] tool_result_missing: ${id}; execution status is unknown.`)) };
 				if (!options.apiKey && !this.isCustomProviderName(options.providerName)) {
 					throw new Error(`${options.providerName} API key is required.`);
 				}
@@ -241,6 +245,7 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 				if (options.bodyOptions) {
 					Object.assign(body, options.bodyOptions);
 				}
+				body.messages = options.messages.map((message, index) => this.openAIMessageAdapter.toChatMessage(message, index));
 
 				if (options.options?.tools?.length) {
 					body.tools = options.options.tools.map(tool => ({
@@ -357,6 +362,9 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 		(async () => {
 			let abort: ReturnType<NodeCleanSlateMainService['createProviderAbortController']> | undefined;
 			try {
+				// Yield until callers can subscribe before reporting validation failures.
+				await Promise.resolve();
+				options = { ...options, messages: prepareCleanSlateProviderMessages(options.messages, id => console.warn(`[CleanSlateService] tool_result_missing: ${id}; execution status is unknown.`)) };
 				if (!options.apiKey) {
 					throw new Error(`${options.providerName} API key is required.`);
 				}
@@ -399,6 +407,7 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 				if (options.bodyOptions) {
 					Object.assign(body, options.bodyOptions);
 				}
+				body.input = this.openAIMessageAdapter.toResponsesInput(options.messages);
 
 				if (options.options?.tools?.length) {
 					body.tools = options.options.tools.map(tool => ({
@@ -586,6 +595,9 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 		(async () => {
 			let abort: ReturnType<NodeCleanSlateMainService['createProviderAbortController']> | undefined;
 			try {
+				// Yield until callers can subscribe before reporting validation failures.
+				await Promise.resolve();
+				options = { ...options, messages: prepareCleanSlateProviderMessages(options.messages, id => console.warn(`[CleanSlateService] tool_result_missing: ${id}; execution status is unknown.`)) };
 				if (!options.apiKey) {
 					throw new Error('Anthropic API key is required.');
 				}
@@ -724,6 +736,9 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 		(async () => {
 			let abort: ReturnType<NodeCleanSlateMainService['createProviderAbortController']> | undefined;
 			try {
+				// Yield until callers can subscribe before reporting validation failures.
+				await Promise.resolve();
+				options = { ...options, messages: prepareCleanSlateProviderMessages(options.messages, id => console.warn(`[CleanSlateService] tool_result_missing: ${id}; execution status is unknown.`)) };
 				if (!options.apiKey) {
 					throw new Error('Google Gemini API key is required.');
 				}
@@ -841,6 +856,9 @@ export class NodeCleanSlateMainService implements ICleanSlateMainService {
 		(async () => {
 			let abort: ReturnType<NodeCleanSlateMainService['createProviderAbortController']> | undefined;
 			try {
+				// Yield until callers can subscribe before reporting validation failures.
+				await Promise.resolve();
+				options = { ...options, messages: prepareCleanSlateProviderMessages(options.messages, id => console.warn(`[CleanSlateService] tool_result_missing: ${id}; execution status is unknown.`)) };
 				if (!options.region) {
 					throw new Error('AWS region is required for Bedrock.');
 				}

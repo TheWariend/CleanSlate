@@ -129,6 +129,7 @@ export type {
 	ICleanSlateManagedModel
 } from './protocol/cleanSlateAI.js';
 export { CleanSlateCodeParser } from './protocol/cleanSlateCodeParser.js';
+export { CleanSlateTranscriptIntegrityError } from './protocol/cleanSlateTranscriptIntegrity.js';
 export type { ICleanSlateCodeChunk } from './protocol/cleanSlateCodeParser.js';
 
 //#endregion

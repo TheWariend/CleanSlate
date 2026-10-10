@@ -1442,6 +1442,10 @@ export class CleanSlateExecutionQueryEngine {
             : guardState.mutatedPaths.size > 0
                 ? guardState.mutatedPaths
                 : guardState.touchedPaths);
+        if (!this.verificationToolName) {
+            guardState.pendingVerificationPaths.clear();
+            return { issues: [] };
+        }
         if (scopedPaths.length === 0) {
             return { issues: [] };
         }
