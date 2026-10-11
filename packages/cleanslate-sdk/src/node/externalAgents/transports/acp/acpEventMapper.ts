@@ -44,6 +44,114 @@ function numberField(record: Record<string, unknown> | undefined, ...keys: strin
 	return undefined;
 }
 
+/** Only classify literal shell batches whose commands have known read-only forms. */
+function simpleShellCommands(command: string): string[][] | undefined {
+	const commands: string[][] = [];
+	let words: string[] = [];
+	let word = '';
+	let started = false;
+	let quote: 'single' | 'double' | undefined;
+	const flushWord = () => {
+		if (started) { words.push(word); }
+		word = '';
+		started = false;
+	};
+	const flushCommand = () => {
+		flushWord();
+		if (words.length) { commands.push(words); }
+		words = [];
+	};
+	for (let index = 0; index < command.length; index++) {
+		const character = command[index];
+		if (quote === 'single') {
+			if (character === "'") { quote = undefined; } else { word += character; }
+			continue;
+		}
+		if (character === '$' || character === '`') { return undefined; }
+		if (character === '\\') {
+			if (index + 1 >= command.length || command[index + 1] === '\n') { return undefined; }
+			word += command[++index];
+			started = true;
+			continue;
+		}
+		if (quote === 'double') {
+			if (character === '"') { quote = undefined; } else { word += character; }
+			continue;
+		}
+		if (character === "'" || character === '"') {
+			quote = character === "'" ? 'single' : 'double';
+			started = true;
+			continue;
+		}
+		if (character === '>') {
+			// Discarding output is harmless, but file redirection remains execution.
+			const redirect = /^>{1,2}\s*\/dev\/null(?=$|[\s;&|])/.exec(command.slice(index));
+			if (!redirect) { return undefined; }
+			if (/^\d+$/.test(word)) { word = ''; started = false; }
+			flushWord();
+			index += redirect[0].length - 1;
+			continue;
+		}
+		if (character === '<' || character === '(' || character === ')' || character === '#') { return undefined; }
+		if (character === '&' || character === '|' || character === ';' || character === '\n') {
+			if (character === '&' && command[index + 1] !== '&') { return undefined; }
+			if ((character === '&' || character === '|') && command[index + 1] === character) { index++; }
+			flushCommand();
+			continue;
+		}
+		if (/\s/.test(character)) { flushWord(); continue; }
+		word += character;
+		started = true;
+	}
+	if (quote) { return undefined; }
+	flushCommand();
+	return commands.length ? commands : undefined;
+}
+
+function readOnlySedArguments(args: string[]): boolean {
+	const scripts: string[] = [];
+	for (let index = 0; index < args.length; index++) {
+		const argument = args[index];
+		if (argument === '-n' || argument === '--quiet' || argument === '--silent') { continue; }
+		if (argument === '-e' || argument === '--expression') {
+			if (++index >= args.length) { return false; }
+			scripts.push(args[index]);
+		} else if (argument.startsWith('--expression=')) {
+			scripts.push(argument.slice('--expression='.length));
+		} else if (argument.startsWith('-')) {
+			return false;
+		} else if (!scripts.length) {
+			scripts.push(argument);
+		}
+	}
+	// Sed scripts can write files or execute commands even without an in-place flag.
+	return scripts.length > 0 && scripts.every(script => script.split(/[;\n]/).every(part => /^(?:(?:\d+|\$)(?:,(?:\d+|\$))?)?p$/.test(part.trim())));
+}
+
+function readOnlyCommandKind(command: string | undefined): 'read' | 'search' | undefined {
+	if (!command) { return undefined; }
+	const commands = simpleShellCommands(command);
+	if (!commands) { return undefined; }
+	const readers = new Set(['cat', 'head', 'tail', 'ls', 'tree', 'pwd', 'wc']);
+	const searchers = new Set(['rg', 'grep', 'find', 'fd']);
+	let firstKind: 'read' | 'search' | undefined;
+	for (const words of commands) {
+		if (words[0] === 'env') { words.shift(); }
+		while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] ?? '')) { words.shift(); }
+		const name = words[0]?.replace(/^.*\//, '');
+		const args = words.slice(1);
+		if (!name || (!readers.has(name) && !searchers.has(name) && name !== 'sed')) { return undefined; }
+		if (name === 'sed' && !readOnlySedArguments(args)) { return undefined; }
+		if (name === 'find' && args.some(argument => /^-(?:delete|exec(?:dir)?|ok(?:dir)?|fprint0?|fprintf|fls)$/.test(argument))) { return undefined; }
+		if (name === 'fd' && args.some(argument => argument.startsWith('--exec') || /^-[^-]*[xX]/.test(argument))) { return undefined; }
+		if (name === 'rg' && args.some(argument => /^--(?:pre|hostname-bin)(?:=|$)/.test(argument))) { return undefined; }
+		if (name === 'tree' && args.some(argument => /^-[^-]*o/.test(argument))) { return undefined; }
+		firstKind ??= searchers.has(name) ? 'search' : 'read';
+	}
+	return firstKind;
+}
+
+
 export function mapAcpEvent(cleanSlateSessionId: string, update: SessionUpdate, thoughtPresentation: ExternalAgentThoughtPresentation = 'reasoning'): IExternalAgentEvent | undefined {
 	switch (update.sessionUpdate) {
 		case 'agent_message_chunk':
@@ -85,11 +193,13 @@ export function mapAcpEvent(cleanSlateSessionId: string, update: SessionUpdate, 
 					fileChanges.push({ path, beforeContent: before ?? '', afterContent: after, created });
 				}
 			}
+			const command = stringField(input, 'command', 'cmd');
+			const kind = update.kind === 'execute' ? readOnlyCommandKind(command) ?? update.kind : update.kind;
 			return {
 				type: 'tool', cleanSlateSessionId, toolCallId: update.toolCallId,
-				title: update.title ?? undefined, status: update.status ?? undefined, kind: update.kind ?? undefined,
+				title: update.title ?? undefined, status: update.status ?? undefined, kind: kind ?? undefined,
 				locations: update.locations?.map(location => location.path) ?? (stringField(input, 'file_path', 'filePath', 'path') ? [stringField(input, 'file_path', 'filePath', 'path')!] : undefined),
-				command: stringField(input, 'command', 'cmd'),
+				command,
 				output: contentOutput ? (contentOutput.length <= 12 * 1024 * 1024 ? contentOutput : '[Tool content exceeds the display limit.]') : (typeof update.rawOutput === 'string' ? update.rawOutput : stringField(output, 'output', 'stdout', 'text'))?.slice(-20000),
 				exitCode: numberField(output, 'exitCode', 'exit_code', 'code'),
 				fileChanges: fileChanges.length ? fileChanges : undefined,

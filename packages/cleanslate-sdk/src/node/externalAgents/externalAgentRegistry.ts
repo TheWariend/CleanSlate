@@ -31,7 +31,7 @@ const agents: readonly IExternalAgentLaunchConfiguration[] = [
 	{ id: 'grok', name: 'Grok', command: 'grok', args: ['--permission-mode', 'default', 'agent', '--no-leader', 'stdio'], iconPath: 'provider-xai.svg', monochromeIcon: true },
 	{ id: 'claude', name: 'Claude', nativeCommand: 'claude', command: 'claude-agent-acp', args: [], bundledModule: '@agentclientprotocol/claude-agent-acp/dist/index.js', iconPath: 'provider-claude.svg', monochromeIcon: true },
 	{
-		id: 'codex', name: 'Codex', command: 'codex-acp', args: [], bundledModule: '@agentclientprotocol/codex-acp/dist/index.js', usageBundledModule: '@openai/codex/bin/codex.js', iconPath: 'provider-openai.svg', monochromeIcon: true, thoughtPresentation: 'summary'
+		id: 'codex', name: 'Codex', command: 'codex-acp', args: [], bundledModule: '@agentclientprotocol/codex-acp/dist/index.js', usageBundledModule: '@openai/codex/bin/codex.js', iconPath: 'provider-openai.svg', monochromeIcon: true
 	}
 ];
 

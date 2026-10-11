@@ -188,7 +188,7 @@ test('ACP tool content retains text, resources, worker metadata and partial upda
 	assert.equal(resource.text, 'Resource body');
 });
 
-test('ACP thought semantics come from adapter capability metadata', () => {
+test('ACP thought notifications use the shared reasoning presentation by default', () => {
 	const thought = { sessionUpdate: 'agent_thought_chunk' as const, content: { type: 'text' as const, text: 'Inspecting the repository' } };
 	const defaultEvent = mapAcpEvent('session', thought);
 	assert.ok(defaultEvent?.type === 'thought');
@@ -196,7 +196,82 @@ test('ACP thought semantics come from adapter capability metadata', () => {
 	const summaryEvent = mapAcpEvent('session', thought, 'summary');
 	assert.ok(summaryEvent?.type === 'thought');
 	assert.equal(summaryEvent.presentation, 'summary');
-	assert.equal(new ExternalAgentRegistry('/nonexistent/cleanslate-agent-registry-test.json').get('codex').thoughtPresentation, 'summary');
+	assert.equal(new ExternalAgentRegistry('/nonexistent/cleanslate-agent-registry-test.json').get('codex').thoughtPresentation, undefined);
+});
+
+test('ACP normalizes clearly read-only shell batches into discovery activity', () => {
+	const read = mapAcpEvent('session', { sessionUpdate: 'tool_call', toolCallId: 'read', title: 'Read sources', kind: 'execute', status: 'completed', rawInput: { command: "sed -n '1,80p' src/a.ts && head -20 src/b.ts" } });
+	assert.ok(read?.type === 'tool');
+	assert.equal(read.kind, 'read');
+	const search = mapAcpEvent('session', { sessionUpdate: 'tool_call', toolCallId: 'search', title: 'Search sources', kind: 'execute', status: 'completed', rawInput: { command: "rg -n 'compact' src | head -20" } });
+	assert.ok(search?.type === 'tool');
+	assert.equal(search.kind, 'search');
+	const mutating = mapAcpEvent('session', { sessionUpdate: 'tool_call', toolCallId: 'write', title: 'Write target', kind: 'execute', status: 'completed', rawInput: { command: 'cat source.txt > target.txt' } });
+	assert.ok(mutating?.type === 'tool');
+	assert.equal(mutating.kind, 'execute');
+});
+
+test('ACP keeps mutating commands and shell expansion in execution activity', () => {
+	const commands = [
+		"sed -i '' 's/a/b/' file.txt",
+		"sed -ni '1p' file.txt",
+		"sed --in-place=.bak '1p' file.txt",
+		"sed -n '1p; w output.txt' file.txt",
+		"sed 's/a/b/e' file.txt",
+		"sed -f script.sed file.txt",
+		'find . -delete',
+		'find . -exec rm {} \\;',
+		'find . -execdir touch {} +',
+		'find . -ok rm {} \\;',
+		'find . -fprint output.txt',
+		'find . -fprintf output.txt %p',
+		'find . -fls output.txt',
+		'fd -x rm',
+		'fd -X touch',
+		'fd --exec=rm',
+		'fd --exec-batch rm',
+		'rg --pre=processor needle src',
+		'rg --hostname-bin hostname-script needle src',
+		'tree -o output.txt',
+		'cat source.txt > target.txt',
+		'cat source.txt 2>&1',
+		'cat $(touch marker.txt)',
+		'cat "$(touch marker.txt)"',
+		'cat `touch marker.txt`',
+		'cat source.txt && find . -delete',
+		'find . -delete | head -10',
+		'cat source.txt &',
+		'cat <(touch marker.txt)',
+		"sed -n '1p file.txt",
+	];
+	for (const command of commands) {
+		for (const sessionUpdate of ['tool_call', 'tool_call_update'] as const) {
+			const event = mapAcpEvent('session', { sessionUpdate, toolCallId: 'fixture', title: 'Inspect command', kind: 'execute', status: 'completed', rawInput: { command } });
+			assert.ok(event?.type === 'tool');
+			assert.equal(event.kind, 'execute', command);
+			assert.equal(event.command, command);
+		}
+	}
+});
+
+test('ACP retains discovery labels for literal read-only commands and quoted arguments', () => {
+	const commands = [
+		['read', "sed -n '1,80p' src/a.ts && head -20 src/b.ts"],
+		['read', "sed -n -e '1,80p' -e '100p' src/a.ts"],
+		['read', "sed --quiet --expression='1p; 3p' src/a.ts"],
+		['read', 'env LANG=C /bin/cat "file with spaces.txt"'],
+		['read', "cat 'file > rm.txt'"],
+		['read', "cat 'file$(literal).txt'"],
+		['search', "rg -n 'a|b' src 2>/dev/null | head -20"],
+		['search', "find . -type f -name '*.ts' -print"],
+		['search', 'fd --extension ts src'],
+		['search', "grep 'hello' src/a.ts; wc -l src/a.ts"],
+	] as const;
+	for (const [kind, command] of commands) {
+		const event = mapAcpEvent('session', { sessionUpdate: 'tool_call', toolCallId: 'fixture', title: 'Inspect command', kind: 'execute', status: 'completed', rawInput: { command } });
+		assert.ok(event?.type === 'tool');
+		assert.equal(event.kind, kind, command);
+	}
 });
 
 test('ACP preserves structured file snapshots without inferring creation from empty contents', () => {
