@@ -342,6 +342,9 @@ test('host tools cross the stdio bridge, reject unauthenticated access and close
 	const bridge = await createHostToolsBridge([{
 		definition: { name: 'test_context', description: 'Fixture context', inputSchema: { type: 'object' } },
 		async call() { calls++; return { content: [{ type: 'text', text: 'session-specific context' }] }; }
+	}, {
+		definition: { name: 'browser_open', description: 'Fixture browser', inputSchema: { type: 'object' } },
+		async call() { return { content: [{ type: 'text', text: 'browser opened' }] }; }
 	}], async () => { released = true; });
 	const descriptor = bridge.servers[0];
 	assert.ok('command' in descriptor);
@@ -351,6 +354,9 @@ test('host tools cross the stdio bridge, reject unauthenticated access and close
 		const forbidden = await fetch(env['CLEANSLATE_HOST_TOOL_URL'], { method: 'POST', body: '{}' });
 		assert.equal(forbidden.status, 403);
 		await client.connect(new StdioClientTransport({ command: descriptor.command, args: descriptor.args, env }));
+		assert.match(client.getInstructions() ?? '', /only when the current user request explicitly asks/);
+		assert.match(client.getInstructions() ?? '', /Do not open the browser, collect browser evidence, or require browser verification only because UI files changed/);
+		assert.doesNotMatch(client.getInstructions() ?? '', /use them by default/);
 		assert.equal((await client.listTools()).tools[0].name, 'test_context');
 		assert.ok(JSON.stringify(await client.callTool({ name: 'test_context' })).includes('session-specific context'));
 		assert.equal(calls, 1);
