@@ -63,6 +63,7 @@ import { IConfigurationService } from '../../../../../platform/configuration/com
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { getResolvedShellEnv } from '../../../../../platform/shell/node/shellEnv.js';
 import { CleanSlateThreadPersistenceStore } from './cleanSlateThreadPersistenceStore.js';
+import { CleanSlateProceduralMemory } from './cleanSlateProceduralMemory.js';
 import { CleanSlateWebRetrievalService } from './cleanSlateWebRetrievalService.js';
 import { CleanSlateLocalEmbeddingService } from './cleanSlateLocalEmbeddingService.js';
 import { CleanSlateProviderSchemaNormalizer } from '@cleanslate/sdk/node/cleanSlateProviderSchemaNormalizer.js';
@@ -200,7 +201,13 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
             }
             fs.mkdirSync(storageHome, { recursive: true });
             if (!root) { fs.mkdirSync(rootPath, { recursive: true }); }
-            return new CleanSlateNodeAgentRuntime({
+            const memory = new CleanSlateProceduralMemory(
+                path.join(this.environmentService.userDataPath, 'musclememory-private'),
+                () => this.logService.warn('MuscleMemory unavailable or upload queued; native agent continues.'),
+                rootPath
+            );
+            const runtime = new CleanSlateNodeAgentRuntime({
+                additionalContext: task => memory.context(task),
                 rootPath, workspaceStorageHome: storageHome, sessionId: request.session.id,
                 mainService: this, configuration: { ...request.configuration },
                 managedTokenCoordinator: this.managedTokens,
@@ -228,6 +235,7 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
                 }),
                 resolveAttachments: () => hooks.getImages().map(url => ({ type: 'image_url' as const, image_url: { url } }))
             });
+            return memory.attach(runtime);
         }, update => {
             this._onDidPublishThreadSession.fire(update);
             void this.persistPublishedThreadSession(update.session);
