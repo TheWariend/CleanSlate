@@ -29,7 +29,7 @@ export class CleanSlateProceduralMemory {
     private load(): Promise<void> {
         return this.loading ??= (async () => {
             if (!this.configFile) { return; }
-            const moduleName = process.env.CLEANSLATE_MUSCLEMEMORY_NODE_MODULE ?? 'musclememory/node';
+            const moduleName = process.env.CLEANSLATE_MUSCLEMEMORY_NODE_MODULE ?? '@thewariend/musclememory/node';
             const sdk = await import(path.isAbsolute(moduleName) ? pathToFileURL(moduleName).href : moduleName) as {
                 CleanSlateHostMemory: new (config: string, state: string, report: () => void, workspaceRoot?: string) => HostObserver;
             };

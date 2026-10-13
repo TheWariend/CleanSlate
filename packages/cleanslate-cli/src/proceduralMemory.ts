@@ -45,7 +45,7 @@ export class CliProceduralMemory {
 			if (!this.configFile) {
 				return;
 			}
-			const moduleName = process.env.CLEANSLATE_MUSCLEMEMORY_NODE_MODULE ?? 'musclememory/node';
+			const moduleName = process.env.CLEANSLATE_MUSCLEMEMORY_NODE_MODULE ?? '@thewariend/musclememory/node';
 			const sdk = await import(path.isAbsolute(moduleName) ? pathToFileURL(moduleName).href : moduleName) as HostMemoryModule;
 			const state = process.env.CLEANSLATE_MUSCLEMEMORY_STATE ?? path.join(getCleanSlateHome(), 'musclememory-private');
 			this.observer = new sdk.CleanSlateHostMemory(this.configFile, state, this.report, this.workspaceRoot);
