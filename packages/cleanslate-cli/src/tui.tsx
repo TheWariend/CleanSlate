@@ -3,6 +3,7 @@
  * Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import * as path from 'node:path';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import {
@@ -18,6 +19,7 @@ import { CleanSlateStreamReveal, REVEAL_TICK_MS } from '@cleanslate/sdk/agent/cl
 import { sanitizeToolResultForRenderer } from '@cleanslate/sdk/agent/cleanSlateToolResultPromptSerializer.js';
 import { getCleanSlateContextDefaults, resolveCleanSlateReasoningLevelOptions } from '@cleanslate/sdk/protocol/cleanSlateModelCapabilities.js';
 import { CliProjectContext } from './projectContext.js';
+import { CliProceduralMemory, withMemory } from './proceduralMemory.js';
 import {
 	CliWorkspaceReview,
 	cliTurnDiffReviews,
@@ -1467,6 +1469,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 	const [transcriptEpoch, setTranscriptEpoch] = useState(0);
 	const initialTaskStarted = useRef(false);
 	const projectContext = useMemo(() => new CliProjectContext(args.cwd), [args.cwd]);
+	const proceduralMemory = useMemo(() => new CliProceduralMemory(path.resolve(args.cwd)), [args.cwd]);
 	const workspaceReview = useMemo(() => new CliWorkspaceReview(args.cwd), [args.cwd]);
 	const commandQuery = input.match(/^\/(\S*)$/)?.[1]?.toLowerCase();
 	const commandPaletteFilter = useMemo(
@@ -1578,7 +1581,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 		approvalQueue.cancel();
 		runtimeRef.current?.dispose();
 		const permissionPolicy = new CliPermissionPolicy(activePermissionMode);
-		const runtime = new CleanSlateNodeAgentRuntime({
+		const runtime = proceduralMemory.attach(new CleanSlateNodeAgentRuntime({
 			rootPath: args.cwd,
 			workspaceStorageHome: getCleanSlateWorkspaceStorageHome(),
 			browserHeadless: false,
@@ -1608,7 +1611,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 				args.apiKey = token;
 				onCredentialChange?.('cleanslate', token);
 			},
-			additionalContext: task => projectContext.build(task),
+			additionalContext: task => withMemory(projectContext.build(task), proceduralMemory, task),
 			onAgentEvent: event => {
 				if (event.type === 'child_agent') {
 					setWorkers(previous => updateWorkers(previous, { type: event.eventType, agent: event.agent, streamPart: event.streamPart, delta: event.delta }));
@@ -1668,7 +1671,7 @@ export function CleanSlateTui({ args, store, initialSession, initialTask, onConf
 					});
 				}
 			}
-		});
+		}));
 		runtime.restoreSessionSnapshot(targetSession.runtimeSnapshot);
 		runtimeRef.current = runtime;
 		return runtime;

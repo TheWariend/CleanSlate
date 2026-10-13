@@ -23,6 +23,7 @@ import { CleanSlateModelSetupTui, CleanSlateSetupTui, ICliSetupResult } from './
 import { clearInteractiveScreen, enterInteractiveScreen, suppressEngineLogs } from './terminalScreen.js';
 import { CleanSlateTui } from './tui.js';
 import { CliProjectContext } from './projectContext.js';
+import { CliProceduralMemory, withMemory } from './proceduralMemory.js';
 import { cliDoctorReport } from './doctor.js';
 import { CliPermissionPolicy } from './permissions.js';
 import { formatManagedUsage } from './usage.js';
@@ -574,7 +575,9 @@ async function runOneShot(
 	};
 	process.on('SIGINT', onSigint);
 
-	const runtime = new CleanSlateNodeAgentRuntime({
+	const memory = new CliProceduralMemory(path.resolve(args.cwd),
+		() => process.stderr.write('MuscleMemory is unavailable or queued an upload; the agent continues.\n'));
+	const runtime = memory.attach(new CleanSlateNodeAgentRuntime({
 		rootPath: path.resolve(args.cwd),
 		workspaceStorageHome: getCleanSlateWorkspaceStorageHome(),
 		sessionId: session.id,
@@ -599,7 +602,7 @@ async function runOneShot(
 			azureEmbeddingApiVersion: args.azureEmbeddingApiVersion,
 			azureEmbeddingDeploymentName: args.azureEmbeddingDeploymentName
 		}),
-		additionalContext: task => new CliProjectContext(args.cwd).build(task),
+		additionalContext: task => withMemory(new CliProjectContext(args.cwd).build(task), memory, task),
 		resolveAttachments: task => new CliProjectContext(args.cwd).imageAttachments(task).map(attachment => ({
 			type: 'image_url',
 			image_url: { url: attachment.dataUrl }
@@ -614,7 +617,7 @@ async function runOneShot(
 				process.stderr.write(event.chunk);
 			}
 		}
-	});
+	}));
 	runtime.restoreSessionSnapshot(session.runtimeSnapshot);
 
 	const state = { wroteText: false };
