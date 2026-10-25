@@ -48,10 +48,12 @@ Prefer adding code in the `cleanSlate` directories over modifying upstream files
 
 ### Tests
 
+The [regression QA guide](vscode-fork/test/cleanslate/README.md) documents the required CI gate, browser and desktop scenarios, visual baselines, failure artifacts, and local commands. Feature changes should extend the relevant scenarios so later work keeps checking the behavior.
+
 ```bash
-npm run test-node          # Node unit tests
-npm run eslint             # Lint
-npm run precommit          # Hygiene checks (headers, formatting)
+# From the repository root, after installing both dependency trees:
+npm run test:qa            # Package tests, checks, fresh editor build and UI/desktop suites
+npm run lint:qa            # SDK, CLI, CleanSlate integration and QA correctness checks
 ```
 
 CleanSlate's unit tests live in `src/vs/workbench/contrib/cleanSlate/test/`. Agent-loop changes should come with a test — the loop's stop conditions, plan-mode barriers, and tool-argument handling are all covered there, and regressions in them are hard to spot by hand.

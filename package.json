@@ -9,6 +9,8 @@
     "packages/cleanslate-cli"
   ],
   "scripts": {
+    "lint:qa": "node vscode-fork/node_modules/eslint/bin/eslint.js packages vscode-fork/src/vs/workbench/contrib/cleanSlate vscode-fork/src/vs/workbench/services/cleanSlate vscode-fork/src/vs/editor/browser/cleanSlate vscode-fork/test/cleanslate --no-inline-config --max-warnings 0",
+    "test:qa": "npm test && npm run typecheck && npm run lint:qa && npm --prefix vscode-fork test",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"

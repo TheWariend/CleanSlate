@@ -41,8 +41,13 @@ env:
   GITHUB_TOKEN: ${{ github.token }}
 
 jobs:
+  ci:
+    name: Validate before release
+    uses: ./.github/workflows/ci.yml
+
   build-macos:
     name: Build macOS app
+    needs: ci
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'macos' || inputs.target == 'all' }}
     runs-on: macos-14
     defaults:

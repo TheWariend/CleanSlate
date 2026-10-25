@@ -1,0 +1,249 @@
+name: CleanSlate CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  workflows:
+    name: Workflow validation
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate GitHub Actions configuration
+        run: docker run --rm -v "$GITHUB_WORKSPACE:/repo" -w /repo rhysd/actionlint:1.7.7 -shellcheck= -pyflakes=
+
+  packages:
+    name: SDK and CLI (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: vscode-fork/.nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspace dependencies
+        id: install
+        run: npm ci
+
+      - name: Type check SDK and CLI
+        run: npm run typecheck
+
+      - name: Install Chromium for the real SDK browser scenario
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && matrix.os == 'ubuntu-22.04' }}
+        run: |
+          npm exec -- playwright install --with-deps chromium
+          node -e "require('fs').appendFileSync(process.env.GITHUB_ENV, 'CLEANSLATE_BROWSER_EXECUTABLE=' + require('playwright').chromium.executablePath() + '\n')"
+
+      - name: Build and test SDK and CLI
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          CLEANSLATE_BROWSER_E2E: ${{ matrix.os == 'ubuntu-22.04' && '1' || '0' }}
+          CLEANSLATE_BROWSER_HEADLESS: 'true'
+        run: npm test
+
+  editor:
+    name: VS Code fork
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    outputs:
+      compiled: ${{ steps.compile.outcome == 'success' }}
+    defaults:
+      run:
+        working-directory: vscode-fork
+    env:
+      VSCODE_QUALITY: stable
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: vscode-fork/.nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            vscode-fork/package-lock.json
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libx11-dev libx11-xcb-dev libxkbfile-dev libnotify-bin libkrb5-dev libgtk-3-0 libgbm1 libasound2 xvfb
+
+      - name: Configure npm retries
+        run: |
+          npm config set fetch-retries 5
+          npm config set fetch-retry-mintimeout 20000
+          npm config set fetch-retry-maxtimeout 120000
+
+      - name: Install editor dependencies
+        run: npm ci
+
+      - name: Install workspaces and build the shared SDK
+        working-directory: .
+        run: |
+          npm ci
+          npm run build --workspace @cleanslate/sdk
+
+      - name: Compile editor and extensions
+        id: compile
+        run: npm run compile:diagnostic
+
+      - name: Save compiled modules for browser QA
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-modules
+          path: |
+            vscode-fork/out
+            packages/cleanslate-sdk/dist
+          compression-level: 1
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Run editor Node tests
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: npm run test-node
+
+      - name: Test desktop host and IPC integration
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: npm run test:integration
+
+      - name: Download the development Electron runtime
+        id: electron
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: npm run electron
+
+      - name: Test real desktop user journeys
+        if: ${{ !cancelled() && steps.electron.outcome == 'success' }}
+        run: xvfb-run -a npm run test:desktop
+
+      - name: Test embedded browser and SQLite persistence
+        if: ${{ !cancelled() && steps.electron.outcome == 'success' }}
+        run: xvfb-run -a .build/electron/cleanslate test/cleanslate/hosted-browser-electron.mjs --no-sandbox
+
+      - name: Check introduced whitespace errors
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        working-directory: .
+        run: git diff --check HEAD^ HEAD
+
+      - name: Lint SDK, CLI, editor integration and QA
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        working-directory: .
+        run: npm run lint:qa
+
+      - name: Check native type boundaries
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: node build/checker/layersChecker.ts
+
+      - name: Check class field initialization
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: npm run define-class-fields-check
+
+      - name: Check public API declarations
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: npm run vscode-dts-compile-check
+
+      - name: Check Trusted Types
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: |
+          npm run tsec-compile-check
+          node build/cleanslate/test/verify-workbench-trusted-types.mjs
+
+      - name: Test build scripts
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: npm run test-build-scripts
+
+      - name: Upload desktop QA evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-qa
+          path: vscode-fork/test/cleanslate/results
+          retention-days: 14
+
+  ui:
+    name: UI scenarios and visual regressions
+    needs: editor
+    if: ${{ !cancelled() && needs.editor.outputs.compiled == 'true' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    # Keep browser, fonts and OS identical to the reviewed screenshot baselines.
+    container: mcr.microsoft.com/playwright:v1.58.2-noble
+    env:
+      CI: 'true'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: vscode-fork/.nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            vscode-fork/package-lock.json
+
+      - name: Install browser QA dependencies
+        run: |
+          npm ci --ignore-scripts
+          npm --prefix vscode-fork ci --ignore-scripts
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: editor-modules
+
+      - name: Run browser scenarios and screenshot comparisons
+        working-directory: vscode-fork
+        run: npm run test:ui
+
+      - name: Upload browser QA evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-qa
+          path: vscode-fork/test/cleanslate/results
+          retention-days: 14
+          if-no-files-found: error
+
+  regression-gate:
+    name: Regression gate
+    needs: [workflows, packages, editor, ui]
+    if: ${{ always() }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every QA area to pass
+        env:
+          PACKAGES_RESULT: ${{ needs.packages.result }}
+          EDITOR_RESULT: ${{ needs.editor.result }}
+          UI_RESULT: ${{ needs.ui.result }}
+          WORKFLOWS_RESULT: ${{ needs.workflows.result }}
+        run: |
+          if [[ "$PACKAGES_RESULT" != success || "$EDITOR_RESULT" != success || "$UI_RESULT" != success || "$WORKFLOWS_RESULT" != success ]]; then
+            echo "::error::Regression checks did not all pass: packages=$PACKAGES_RESULT editor=$EDITOR_RESULT ui=$UI_RESULT workflows=$WORKFLOWS_RESULT"
+            exit 1
+          fi

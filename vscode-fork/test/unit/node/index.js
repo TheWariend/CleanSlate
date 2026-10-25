@@ -35,8 +35,13 @@ function collectTestFiles(root) {
 	return files.sort();
 }
 
+// Browser suites need a real DOM and are discovered by test:ui instead.
 const root = path.resolve('out/vs/workbench/contrib/cleanSlate/test');
-Promise.all(collectTestFiles(root).map(file => import(pathToFileURL(file).href))).then(() => {
+const files = collectTestFiles(root).filter(file => !/(^|[/\\])(browser|electron-browser)([/\\])/.test(path.relative(root, file)));
+if (!files.length) {
+	throw new Error(`No compiled CleanSlate tests found in ${root}. Compile the editor first.`);
+}
+Promise.all(files.map(file => import(pathToFileURL(file).href))).then(() => {
 	if (typeof global.run === 'function') {
 		global.run();
 	}

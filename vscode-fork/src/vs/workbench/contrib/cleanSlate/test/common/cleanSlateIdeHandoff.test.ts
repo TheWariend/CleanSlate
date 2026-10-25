@@ -181,6 +181,8 @@ suite('CleanSlate live IDE handoff', () => {
 
 	test('hidden task views keep recording messages without painting detached UI', async () => {
 		const { owner, settle } = createPair();
+		// This test exercises detached transcript ownership, with no DOM to paint.
+		owner.createDetachedMessageElement = () => ({ dataset: {} });
 		const renderer = owner.createSessionScopedRenderer(owner.activeSession, {
 			isVisible: () => false,
 			addMessage: () => assert.fail('Hidden view received a paint call')
@@ -282,6 +284,7 @@ function createPair() {
 	const create = (surface: string, running: boolean): any => {
 		const provider = Object.create(CleanSlateChatSessionProvider.prototype);
 		Object.assign(provider, {
+			externalHostCalls: new Map(), externalQuestions: new Map(), externalRuns: new Map(), handoffs: new Map(),
 			providerId: surface, surface, running, activeSessionId: 'chat', activeSessionRevision: 0,
 			sessions: new Map(), sideChats: new Map(), sideChatRenderers: new Map(),
 			hostedChildren: new Map(), hostedChildSequences: new Map(),

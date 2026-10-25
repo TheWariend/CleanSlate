@@ -8,6 +8,7 @@ import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { CleanSlateAnthropicMessageAdapter } from '@cleanslate/sdk/node/cleanSlateAnthropicMessageAdapter.js';
 import { NodeCleanSlateMainService } from '../../../../services/cleanSlate/node/core/cleanSlateMainService.js';
 import { CleanSlateProviderSchemaNormalizer } from '@cleanslate/sdk/node/cleanSlateProviderSchemaNormalizer.js';
+import { toGeminiContents } from '@cleanslate/sdk/protocol/cleanSlateProviderTranscript.js';
 
 suite('CleanSlate provider transcript formatting', () => {
 	function createService(): any {
@@ -17,7 +18,7 @@ suite('CleanSlate provider transcript formatting', () => {
 		return service;
 	}
 
-	const parallelToolMessages = [
+	const parallelToolMessages: Parameters<typeof toGeminiContents>[0] = [
 		{
 			role: 'assistant',
 			content: '',
@@ -63,7 +64,7 @@ suite('CleanSlate provider transcript formatting', () => {
 	});
 
 	test('replays Gemini tool history as text instead of native function parts', () => {
-		const { contents } = createService().toGeminiContents(parallelToolMessages);
+		const { contents } = toGeminiContents(parallelToolMessages);
 
 		assert.strictEqual(contents.length, 2);
 		assert.strictEqual(contents[0].role, 'model');
@@ -83,7 +84,7 @@ suite('CleanSlate provider transcript formatting', () => {
 	});
 
 	test('does not replay Gemini function calls natively even when thought signatures are present', () => {
-		const { contents } = createService().toGeminiContents([
+		const { contents } = toGeminiContents([
 			{
 				role: 'assistant',
 				content: '',
@@ -104,7 +105,7 @@ suite('CleanSlate provider transcript formatting', () => {
 	});
 
 	test('replays unsigned Gemini tool history as text instead of invalid native function calls', () => {
-		const { contents } = createService().toGeminiContents([
+		const { contents } = toGeminiContents([
 			{
 				role: 'assistant',
 				content: '',

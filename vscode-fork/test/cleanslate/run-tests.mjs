@@ -83,6 +83,7 @@ const files = readdirSync(TESTDIR)
 	.filter(f => f.endsWith('.test.js'))
 	.filter(f => !filter || f.includes(filter))
 	.sort();
+if (!files.length) { throw new Error(`No compiled tests found in ${TESTDIR}`); }
 
 let loadFailures = 0;
 for (const f of files) {
@@ -98,5 +99,5 @@ console.log(`\nloaded ${files.length - loadFailures}/${files.length} test files\
 
 mocha.run(failures => {
 	console.log(`\n== load failures: ${loadFailures} | test failures: ${failures} ==`);
-	process.exitCode = 0; // report, don't gate — the caller reads the summary
+	process.exitCode = failures || loadFailures ? 1 : 0;
 });

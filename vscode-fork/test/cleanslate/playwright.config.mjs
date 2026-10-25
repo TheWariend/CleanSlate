@@ -1,0 +1,34 @@
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+	testDir: './ui',
+	globalSetup: './prepare-ui.mjs',
+	fullyParallel: false,
+	forbidOnly: !!process.env.CI,
+	updateSnapshots: 'none',
+	retries: 0,
+	workers: process.env.CI ? 2 : 1,
+	timeout: 60_000,
+	outputDir: './results/ui',
+	snapshotPathTemplate: '{testDir}/snapshots/{projectName}/{testFilePath}/{arg}{ext}',
+	reporter: [['list'], ['html', { outputFolder: './results/ui-report', open: 'never' }], ['junit', { outputFile: './results/ui.xml' }]],
+	use: {
+		browserName: 'chromium',
+		channel: process.env.PLAYWRIGHT_CHANNEL,
+		locale: 'en-US',
+		timezoneId: 'UTC',
+		deviceScaleFactor: 1,
+		actionTimeout: 10_000,
+		navigationTimeout: 10_000,
+		screenshot: 'only-on-failure',
+		trace: 'retain-on-failure',
+		video: 'off',
+	},
+	expect: { timeout: 5000, toHaveScreenshot: { animations: 'disabled', maxDiffPixelRatio: 0.002 } },
+	projects: [
+		{ name: 'dark', testIgnore: /legacy\.spec/, use: { colorScheme: 'dark', viewport: { width: 1280, height: 800 } } },
+		{ name: 'light', testIgnore: /legacy\.spec/, use: { colorScheme: 'light', viewport: { width: 1280, height: 800 } } },
+		{ name: 'narrow', testMatch: /composer\.spec/, use: { colorScheme: 'dark', viewport: { width: 420, height: 760 } } },
+		{ name: 'legacy', testMatch: /legacy\.spec/, use: { viewport: { width: 1280, height: 800 } } },
+	],
+});

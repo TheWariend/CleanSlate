@@ -1,7 +1,7 @@
 // Run after transpiling the transcript renderer: node test/cleanslate/transcript-markdown-browser.mjs
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { chromium } from 'playwright';
+import { chromium } from '@playwright/test';
 
 const fork = new URL('../../', import.meta.url);
 const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL });

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { chromium } from '@playwright/test';
 import { CleanSlateHostedAgentRuntime } from '../../../packages/cleanslate-sdk/dist/node/cleanSlateHostedAgentRuntime.js';
 
 const activityUpdates = [];

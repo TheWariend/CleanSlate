@@ -23,7 +23,7 @@ suite('CleanSlateService provider capabilities', () => {
 					};
 				}
 			} as any,
-			{ info() { }, error() { } } as any
+			{ info() { }, error() { }, debug() { }, warn() { } } as any
 		);
 
 		const capabilities = service.getProviderCapabilities('gemini');
@@ -96,7 +96,7 @@ suite('CleanSlateService provider capabilities', () => {
 				getResolvedConfiguration: async () => ({ provider: 'openai', providers: { openai: { model: 'gpt-5.4', apiKey: 'sk-test' } } })
 			} as any,
 			{} as any,
-			{ info() { }, error() { } } as any
+			{ info() { }, error() { }, debug() { }, warn() { } } as any
 		);
 
 		assert.strictEqual(service.getProviderCapabilities('openai').nativeToolCalls, true);
@@ -290,7 +290,7 @@ suite('CleanSlateService provider capabilities', () => {
 					};
 				}
 			} as any,
-			{ info() { }, error() { } } as any
+			{ info() { }, error() { }, debug() { }, warn() { } } as any
 		);
 
 		const stream = await service.chat(
@@ -361,7 +361,7 @@ suite('CleanSlateService provider capabilities', () => {
 					};
 				}
 			} as any,
-			{ info() { }, error() { } } as any
+			{ info() { }, error() { }, debug() { }, warn() { } } as any
 		);
 
 		const stream = await service.chat([{ role: 'user', content: 'hi' }]);
@@ -416,7 +416,7 @@ suite('CleanSlateService provider capabilities', () => {
 					};
 				}
 			} as any,
-			{ info() { }, error() { } } as any
+			{ info() { }, error() { }, debug() { }, warn() { } } as any
 		);
 
 		const stream = await service.chat([{ role: 'user', content: 'hi' }]);
@@ -467,7 +467,7 @@ suite('CleanSlateService provider capabilities', () => {
 					};
 				}
 			} as any,
-			{ info() { }, error() { } } as any
+			{ info() { }, error() { }, debug() { }, warn() { } } as any
 		);
 
 		const stream = await service.chat([{ role: 'user', content: 'hi' }]);
@@ -685,7 +685,7 @@ suite('CleanSlateService provider capabilities', () => {
 					};
 				}
 			} as any,
-			{ info() { }, error() { } } as any
+			{ info() { }, error() { }, debug() { }, warn() { } } as any
 		);
 
 		const stream = await service.chat([{ role: 'user', content: 'hi' }]);
@@ -732,7 +732,7 @@ suite('CleanSlateService provider capabilities', () => {
 					};
 				}
 			} as any,
-			{ info() { }, error() { } } as any
+			{ info() { }, error() { }, debug() { }, warn() { } } as any
 		);
 
 		const stream = await service.chat([{ role: 'user', content: 'hi' }]);
@@ -762,7 +762,7 @@ suite('CleanSlateService provider capabilities', () => {
 					};
 				}
 			} as any,
-			{ info() { }, error() { } } as any
+			{ info() { }, error() { }, debug() { }, warn() { } } as any
 		);
 
 		const stream = await service.chat([{ role: 'user', content: 'hi' }]);

@@ -14,3 +14,6 @@ compile_output.txt
 ts_errors*.txt
 launch_error.log
 node_modules/
+
+# Local and CI regression reports (reviewed UI baselines stay tracked).
+vscode-fork/test/cleanslate/results/

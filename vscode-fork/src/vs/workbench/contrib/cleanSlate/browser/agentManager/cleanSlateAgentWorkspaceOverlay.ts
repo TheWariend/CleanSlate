@@ -9,8 +9,6 @@ import { FileAccess } from '../../../../../base/common/network.js';
 import { Action } from '../../../../../base/common/actions.js';
 import { renderCleanSlateEnvironment } from './cleanSlateEnvironmentView.js';
 import { readCleanSlateEnvironmentGit, runCleanSlateEnvironmentGitAction, openCleanSlateEnvironmentUrl, formatCleanSlateEnvironmentUsage } from './cleanSlateEnvironmentModel.js';
-import { isWeb } from '../../../../../base/common/platform.js';
-import { INativeHostService } from '../../../../../platform/native/common/native.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { hash } from '../../../../../base/common/hash.js';
 import * as json from '../../../../../base/common/json.js';
@@ -1229,9 +1227,9 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			},
 			onWorktree: path => { if (current()) { this.startNewChat({ id: URI.file(path).toString(), label: basename(URI.file(path)), folderUri: URI.file(path), description: path }); this.renderEnvironment(); } },
 			onChanges: () => { if (current()) { this.setReviewScopeMode('working'); this.selectRightPaneTab('review', true); } },
-			onOpenUrl: url => openCleanSlateEnvironmentUrl(url, href => isWeb
-				? this.openerService.open(URI.parse(href), { openExternal: true, allowContributedOpeners: false, fromUserGesture: true, fromWorkspace: true })
-				: this.instantiationService.invokeFunction(accessor => accessor.get(INativeHostService).openExternal(href)))
+			onOpenUrl: url => openCleanSlateEnvironmentUrl(url, href => this.openerService.open(URI.parse(href), {
+				openExternal: true, allowContributedOpeners: false, fromUserGesture: true, fromWorkspace: true
+			}))
 		});
 	}
 

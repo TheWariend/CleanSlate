@@ -35,6 +35,7 @@ suite('CleanSlateMessageSubmitController', () => {
 		};
 
 		const sidebarViewModel = {
+			answerExternalQuestion: () => false,
 			getActiveSessionId: () => activeSessionId,
 			hasPendingCommandApproval: () => false,
 			getIsGenerating: () => false,

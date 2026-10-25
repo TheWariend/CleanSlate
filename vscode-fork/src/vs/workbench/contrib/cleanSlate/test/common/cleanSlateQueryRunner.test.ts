@@ -2669,7 +2669,7 @@ suite('CleanSlateQueryRunner', () => {
 		// Phase metadata is preserved when available, but missing phase metadata
 		// never authorizes the host to discard a normal assistant text block.
 		assert.strictEqual(resetCount, 0);
-		assert.deepStrictEqual(reasoningBlocks, []);
+		assert.deepStrictEqual(reasoningBlocks, ['Checking whether another range is needed.']);
 		assert.strictEqual(visibleText, 'Checked the remaining range. Unphased provider text. The real answer streams after the extra read.');
 		assert.strictEqual(parts.some((part: any) => part.type === 'task_complete'), true);
 	});
