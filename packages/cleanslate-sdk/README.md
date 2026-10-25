@@ -17,6 +17,34 @@ npm install @cleanslate/sdk
 
 Node 20 or later.
 
+## Agent extensions
+
+Hosts can register trusted, in-process extensions without rebuilding CleanSlate. The stable v1 contract supports task-context contribution and ordered observation of runtime stream parts.
+
+```ts
+import { CleanSlateNodeAgentRuntime } from '@cleanslate/sdk/node';
+
+const runtime = new CleanSlateNodeAgentRuntime({
+  rootPath: process.cwd(),
+  configuration,
+  extensions: [{
+    apiVersion: 1,
+    id: 'memory.example',
+    permissions: ['context:read', 'stream:read'],
+    provideContext: run => `Memory for: ${run.task}`,
+    onStreamPart: (_run, part) => observe(part),
+  }],
+  extensionHostOptions: {
+    grantedPermissions: {
+      'memory.example': ['context:read', 'stream:read'],
+    },
+    onError: event => console.warn(event.extensionId, event.hook),
+  },
+});
+```
+
+Permissions are deny-by-default and require both extension declaration and a host grant. `context:read` permits `provideContext`; `stream:read` permits lifecycle and stream hooks. Hooks run in registration order, extension failures are isolated from the agent, and every started run ends exactly once with `completed`, `cancelled`, or `failed`. Extensions are trusted code in the host process; this API is a capability boundary, not a process sandbox. Future incompatible contracts will use a different `apiVersion`.
+
 ## External agents over ACP
 
 The workspace version exposes portable contracts and conversation handoff through

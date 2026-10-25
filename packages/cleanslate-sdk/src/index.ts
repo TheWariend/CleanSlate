@@ -119,6 +119,15 @@ export {
 	CLEANSLATE_GENERAL_PROFILE
 } from './agent/cleanSlateDomainProfile.js';
 export type { ICleanSlateDomainProfile } from './agent/cleanSlateDomainProfile.js';
+export { CLEANSLATE_AGENT_EXTENSION_API_VERSION, CleanSlateAgentExtensionHost } from './agent/cleanSlateAgentExtensions.js';
+export type {
+	CleanSlateAgentExtensionPermission,
+	CleanSlateAgentRunEntryPoint,
+	ICleanSlateAgentExtensionHostOptions,
+	ICleanSlateAgentExtensionRun,
+	ICleanSlateAgentExtensionRunOutcome,
+	ICleanSlateAgentExtensionV1
+} from './agent/cleanSlateAgentExtensions.js';
 export { CleanSlateEditService } from './services/cleanSlateEditService.js';
 export { CleanSlateDiffService } from './services/cleanSlateDiffService.js';
 

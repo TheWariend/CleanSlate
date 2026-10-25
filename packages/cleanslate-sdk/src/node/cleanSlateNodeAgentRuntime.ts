@@ -5,9 +5,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 import { CleanSlateAgentExecutionSupport } from '../agent/cleanSlateAgentExecutionSupport.js';
 import { CleanSlateAgentParsingSupport } from '../agent/cleanSlateAgentParsing.js';
 import { CleanSlateAgentSession } from '../agent/cleanSlateAgentSession.js';
+import { CleanSlateAgentExtensionHost, type CleanSlateAgentRunEntryPoint, type ICleanSlateAgentExtensionHostOptions, type ICleanSlateAgentExtensionRun, type ICleanSlateAgentExtensionV1 } from '../agent/cleanSlateAgentExtensions.js';
 import { CleanSlateStreamPart } from '../agent/cleanSlateAgentTypes.js';
 import { CleanSlateExecutionBudget } from '../agent/cleanSlateExecutionBudget.js';
 import { AgentPhase, parseSlashCommand } from '../agent/cleanSlatePrompts.js';
@@ -75,6 +77,9 @@ export interface ICleanSlateNodeAgentRuntimeOptions {
 	sessionId?: string;
 	/** Deterministic host context such as project instructions and @mentioned files. */
 	additionalContext?: string | ((task: string) => string | Promise<string>);
+	/** Trusted in-process extensions. Each requested capability also requires an explicit host grant. */
+	extensions?: readonly ICleanSlateAgentExtensionV1[];
+	extensionHostOptions?: ICleanSlateAgentExtensionHostOptions;
 	/** Host-owned permission policy evaluated before every native tool. */
 	approveTool?: (request: { toolName: string; category?: string; input: unknown }) => boolean | Promise<boolean>;
 	/** Multimodal parts explicitly attached by the host for a user turn. */
@@ -254,6 +259,8 @@ export class CleanSlateNodeAgentRuntime {
 	private readonly agentCoordinator: CleanSlateAgentCoordinator;
 	private readonly sideChats = new Map<string, ICleanSlateNodeSideChat>();
 	private readonly sessionId: string;
+	private readonly extensionHost: CleanSlateAgentExtensionHost | undefined;
+	private activeExtensionRun: ICleanSlateAgentExtensionRun | undefined;
 	private readonly contextService = {
 		_serviceBrand: undefined,
 		getContext: async () => ({ activeFile: undefined, openFiles: [] })
@@ -262,6 +269,9 @@ export class CleanSlateNodeAgentRuntime {
 	constructor(private readonly options: ICleanSlateNodeAgentRuntimeOptions) {
 		this.rootPath = path.resolve(options.rootPath);
 		this.sessionId = options.sessionId?.trim() || `cli-${process.pid}-${Date.now()}`;
+		this.extensionHost = options.extensions?.length
+			? new CleanSlateAgentExtensionHost(options.extensions, options.extensionHostOptions ?? { grantedPermissions: {} })
+			: undefined;
 		this.mainService = options.mainService ?? new NodeCleanSlateMainService(this.rootPath);
 		this.configService = new NodeConfigurationService(options.configuration, this.mainService, options.onManagedTokenRefresh, options.managedSessionExpiredMessage, options.fetcher, options.managedTokenCoordinator);
 		this.managedTokenCoordinator = this.configService.managedTokenCoordinator;
@@ -336,7 +346,7 @@ export class CleanSlateNodeAgentRuntime {
 	}
 
 	async *run(task: string, signal?: AbortSignal): AsyncIterable<CleanSlateStreamPart> {
-		yield* this.runInPhase(task, AgentPhase.EXECUTION, signal);
+		yield* this.runWithExtensions('run', task, signal, () => this.runInPhase(task, AgentPhase.EXECUTION, signal));
 	}
 
 	async configureRun(configuration: ICleanSlateConfiguration, agentDefinition?: AgentDefinition): Promise<void> {
@@ -346,7 +356,7 @@ export class CleanSlateNodeAgentRuntime {
 	}
 
 	async *plan(task: string, signal?: AbortSignal): AsyncIterable<CleanSlateStreamPart> {
-		yield* this.runInPhase(task, AgentPhase.PLANNING, signal);
+		yield* this.runWithExtensions('plan', task, signal, () => this.runInPhase(task, AgentPhase.PLANNING, signal));
 	}
 
 	private async *runInPhase(task: string, phase: AgentPhase, signal?: AbortSignal): AsyncIterable<CleanSlateStreamPart> {
@@ -379,11 +389,15 @@ export class CleanSlateNodeAgentRuntime {
 	}
 
 	async *resumePendingQuestion(answer: string, signal?: AbortSignal): AsyncIterable<CleanSlateStreamPart> {
+		const objective = this.agentSession.getSnapshot()?.objective?.trim() || 'Continue the current task.';
+		yield* this.runWithExtensions('resumePendingQuestion', objective, signal, () => this.resumePendingQuestionCore(answer, objective, signal));
+	}
+
+	private async *resumePendingQuestionCore(answer: string, objective: string, signal?: AbortSignal): AsyncIterable<CleanSlateStreamPart> {
 		const pending = this.agentSession.resumePendingQuestion(answer);
 		if (!pending) {
 			throw new Error('There is no pending agent question to resume.');
 		}
-		const objective = pending.objective?.trim() || 'Continue the current task.';
 		this.threadService.addMessage('user', answer);
 		this.taskSessionService.resumeCurrentTask();
 		const phase = pending.phase === AgentPhase.PLANNING ? AgentPhase.PLANNING : AgentPhase.EXECUTION;
@@ -392,11 +406,14 @@ export class CleanSlateNodeAgentRuntime {
 	}
 
 	async *approvePlan(signal?: AbortSignal): AsyncIterable<CleanSlateStreamPart> {
+		const objective = this.agentSession.getSnapshot()?.objective?.trim() || 'Continue the current task.';
+		yield* this.runWithExtensions('approvePlan', objective, signal, () => this.approvePlanCore(objective, signal));
+	}
+
+	private async *approvePlanCore(objective: string, signal?: AbortSignal): AsyncIterable<CleanSlateStreamPart> {
 		if (!this.taskSessionService.isAwaitingApproval()) {
 			throw new Error('There is no pending plan to approve.');
 		}
-		const snapshot = this.agentSession.getSnapshot();
-		const objective = snapshot?.objective?.trim() || 'Continue the current task.';
 		this.taskSessionService.approvePlan();
 		const approvalMessages = this.agentSession.continueWithLatestUserMessage([
 			{
@@ -500,6 +517,40 @@ export class CleanSlateNodeAgentRuntime {
 
 	getManagedEntitlements(): Promise<ICleanSlateManagedEntitlements> {
 		return this.configService.getManagedEntitlements();
+	}
+
+	private async *runWithExtensions(
+		entryPoint: CleanSlateAgentRunEntryPoint,
+		task: string,
+		signal: AbortSignal | undefined,
+		streamFactory: () => AsyncIterable<CleanSlateStreamPart>
+	): AsyncIterable<CleanSlateStreamPart> {
+		const run: ICleanSlateAgentExtensionRun = {
+			sessionId: this.sessionId,
+			runId: randomUUID(),
+			entryPoint,
+			task,
+			startedAt: Date.now()
+		};
+		this.activeExtensionRun = run;
+		let error: unknown;
+		await this.extensionHost?.start(run);
+		try {
+			for await (const part of streamFactory()) {
+				await this.extensionHost?.stream(run, part);
+				yield part;
+			}
+		} catch (caught) {
+			error = caught;
+			throw caught;
+		} finally {
+			this.activeExtensionRun = undefined;
+			await this.extensionHost?.end(run, {
+				status: signal?.aborted ? 'cancelled' : error ? 'failed' : 'completed',
+				endedAt: Date.now(),
+				error: error instanceof Error ? error.message : error === undefined ? undefined : String(error)
+			});
+		}
 	}
 
 	private async *runMessages(
@@ -625,10 +676,14 @@ export class CleanSlateNodeAgentRuntime {
 		const additional = typeof this.options.additionalContext === 'function'
 			? await this.options.additionalContext(task)
 			: this.options.additionalContext;
+		const extensionContext = this.activeExtensionRun
+			? await this.extensionHost?.provideContext(this.activeExtensionRun)
+			: '';
 		return [
 			`Workspace root: ${this.rootPath}`,
 			instructions?.trim() ? `Agent instructions:\n${instructions.trim()}` : '',
-			additional?.trim()
+			additional?.trim(),
+			extensionContext?.trim()
 		].filter(Boolean).join('\n\n');
 	}
 
