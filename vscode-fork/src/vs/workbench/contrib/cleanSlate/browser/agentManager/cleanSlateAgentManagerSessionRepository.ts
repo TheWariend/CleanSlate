@@ -16,6 +16,7 @@ export interface ICleanSlateAgentManagerSessionLoadResult {
 
 /** Loads and merges Agent Manager sessions across global and legacy workspace stores. */
 export class CleanSlateAgentManagerSessionRepository {
+	private readonly richnessCache = new WeakMap<ICleanSlateSessionSnapshot, number>();
 	constructor(
 		private readonly mainService: ICleanSlateMainService,
 		private readonly sessionMapper: CleanSlateAgentManagerSessionMapper,
@@ -91,13 +92,17 @@ export class CleanSlateAgentManagerSessionRepository {
 	}
 
 	private getSessionRichness(session: ICleanSlateSessionSnapshot): number {
+		const cached = this.richnessCache.get(session);
+		if (cached !== undefined) { return cached; }
 		const messages = session.transcript?.length ? session.transcript : session.history;
-		return messages.reduce((total, message) => {
+		const richness = messages.reduce((total, message) => {
 			if (message.isInternalState) {
 				return total;
 			}
 			return total + Math.max(message.content?.trim().length ?? 0, message.renderPayload?.trim().length ?? 0);
 		}, 0);
+		this.richnessCache.set(session, richness);
+		return richness;
 	}
 
 	public async loadActive(entry: ICleanSlateWorkspaceEntry, isDeleted: (session: ICleanSlateSessionSnapshot) => boolean): Promise<ICleanSlateSessionSnapshot | undefined> {

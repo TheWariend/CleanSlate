@@ -115,16 +115,17 @@ export class CleanSlateAgentManagerSessionMapper {
 		const messages = session.transcript?.length
 			? session.transcript
 			: session.history;
-		const visibleMessages = messages.filter(message =>
-			!message.isInternalState
-			&& (
+		let visibleCount = 0;
+		for (const message of messages) {
+			if (!message.isInternalState && (
 				typeof message.content === 'string' && message.content.trim().length > 0
 				|| typeof message.renderPayload === 'string' && message.renderPayload.trim().length > 0
 				|| Array.isArray(message.images) && message.images.length > 0
-			)
-		);
-		return visibleMessages.length > 1
-			|| visibleMessages.some(message => message.role !== 'user');
+			)) {
+				if (++visibleCount > 1 || message.role !== 'user') { return true; }
+			}
+		}
+		return false;
 	}
 
 	private toPersistedMessages(messages: readonly ICleanSlateSessionMessage[]): ICleanSlatePersistedThreadMessage[] {
@@ -149,14 +150,14 @@ export class CleanSlateAgentManagerSessionMapper {
 		history: readonly ICleanSlateSessionMessage[],
 		transcript: readonly ICleanSlateSessionMessage[]
 	): boolean {
-		return [...history, ...transcript].some(message =>
+		const isVisible = (message: ICleanSlateSessionMessage) =>
 			!message.isInternalState
 			&& (
 				typeof message.content === 'string' && message.content.trim().length > 0
 				|| typeof message.renderPayload === 'string' && message.renderPayload.trim().length > 0
 				|| Array.isArray(message.images) && message.images.length > 0
-			)
-		);
+			);
+		return history.some(isVisible) || transcript.some(isVisible);
 	}
 
 	private toSessionMessage(message: ICleanSlatePersistedThreadMessage | undefined): ICleanSlateSessionMessage | undefined {

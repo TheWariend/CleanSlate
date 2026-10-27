@@ -156,10 +156,20 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
         const db = await this.getDb();
         const rows = await this.all<IThreadSessionRow>(
             db,
-            `SELECT s.*, CASE WHEN lower(trim(s.title)) IN ('agent', 'untitled chat', '') THEN
-                (SELECT m.content FROM ThreadMessages m WHERE m.sessionId = s.id
+            `SELECT s.id, s.parentSessionId, s.createdAt, s.workspaceId, s.projectRoot, s.workDir,
+                s.status, s.sessionKey, s.title, s.savedAt, s.updatedAt, s.workspaceName,
+                s.planMode, s.reasoningLevel, s.transcriptVersion, s.runtime, s.externalAgent,
+                s.externalAgentSessionId,
+                CASE WHEN lower(trim(s.title)) IN ('agent', 'untitled chat', '') THEN coalesce(
+                (SELECT substr(trim(m.content), 1, 256) FROM ThreadMessages m WHERE m.sessionId = s.id
                  AND m.role = 'user' AND coalesce(m.isInternalState, 0) = 0 AND trim(m.content) <> ''
-                 ORDER BY m.sequence LIMIT 1) END AS firstUserContent
+                 ORDER BY m.sequence LIMIT 1),
+                (SELECT substr(trim(json_extract(m.value, '$.content')), 1, 256)
+                 FROM json_each(CASE WHEN json_valid(s.transcript) THEN s.transcript ELSE '[]' END) m
+                 WHERE json_extract(m.value, '$.role') = 'user'
+                 AND coalesce(json_extract(m.value, '$.isInternalState'), 0) = 0
+                 AND trim(json_extract(m.value, '$.content')) <> '' LIMIT 1)
+                ) END AS firstUserContent
              FROM ThreadSessions s ORDER BY s.updatedAt DESC`
         );
         return rows.map(row => this.summarizeSession(row));
@@ -901,10 +911,7 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
         if (/^(agent|untitled chat)$/i.test(title)) {
             // Old hosted sessions may have persisted the placeholder. Resolve it
             // during lightweight listing, before anyone opens the conversation.
-            const transcript = this.fromJson(row.transcript) as ICleanSlatePersistedSession['transcript'];
-            const prompt = row.firstUserContent || (Array.isArray(transcript)
-                ? transcript.find(message => message.role === 'user' && !message.isInternalState && message.content?.trim())?.content
-                : undefined);
+            const prompt = row.firstUserContent;
             title = prompt?.trim().replace(/\s+/g, ' ').slice(0, 90) || title;
         }
         return {

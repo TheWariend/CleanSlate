@@ -12,6 +12,9 @@ import { toPersistableCleanSlateTranscriptPayload } from '../../runtime/cleanSla
 import { CleanSlateTranscriptRenderer } from '../../renderers/cleanSlateTranscriptRenderer.js';
 import { parseCleanSlateUserSelectionDisplay } from '../../viewModel/cleanSlateChatViewHelpers.js';
 import { formatChatErrorMessage } from '../../runtime/cleanSlateStreamingResponseParser.js';
+import { localize } from '../../../../../../../nls.js';
+
+type RestorableMessage = { id?: string; role: string; content: string; isInternalState?: boolean; renderPayload?: string; images?: string[] };
 
 export class CleanSlateTranscriptView {
 	readonly element: HTMLElement;
@@ -29,6 +32,9 @@ export class CleanSlateTranscriptView {
 	private scrollButtonDismissed = false;
 	private transportStatusElement: HTMLElement | undefined;
 	private hostedRestore: { id: string; prefix: string; target: HTMLElement } | undefined;
+	private restoredWindow: { history: readonly RestorableMessage[]; fallback?: string; live: boolean; sessionId?: string; count: number } | undefined;
+	private isExpandingHistory = false;
+	private static readonly HISTORY_PAGE_SIZE = 60;
 	private lastWrittenTop = 0;
 	// How far the settled position may differ from the last value we wrote before
 	// an arriving scroll event counts as the user's rather than ours.
@@ -97,6 +103,7 @@ export class CleanSlateTranscriptView {
 
 	clear(showEmptyState = false): void {
 		this.hostedRestore = undefined;
+		this.restoredWindow = undefined;
 		this.cancelPendingScroll();
 		this.transcriptRenderer.disposeMarkdownRenders();
 		this.contentResizeObserver?.disconnect();
@@ -114,14 +121,21 @@ export class CleanSlateTranscriptView {
 	}
 
 	restore(
-		history: readonly { id?: string; role: string; content: string; isInternalState?: boolean; renderPayload?: string; images?: string[] }[],
+		history: readonly RestorableMessage[],
 		fallbackAssistantContent?: string,
-		isLiveSession = false
+		isLiveSession = false,
+		sessionId?: string
 	): void {
+		const count = this.restoredWindow && this.restoredWindow.sessionId === sessionId
+			? this.restoredWindow.count : CleanSlateTranscriptView.HISTORY_PAGE_SIZE;
+		const window = { history, fallback: fallbackAssistantContent, live: isLiveSession, sessionId, count };
+		const visibleHistory = history.slice(Math.max(0, history.length - count));
+		const sameSession = this.restoredWindow?.sessionId === sessionId;
+		this.restoredWindow = window;
 		const tail = history.at(-1);
 		const hostedId = tail?.role === 'assistant' && tail.id?.startsWith('hosted-') ? tail.id : undefined;
-		const prefix = hostedId ? JSON.stringify(history.slice(0, -1)) : undefined;
-		if (hostedId && tail?.renderPayload && this.hostedRestore?.id === hostedId
+		const prefix = hostedId ? JSON.stringify(visibleHistory.slice(0, -1)) : undefined;
+		if (sameSession && hostedId && tail?.renderPayload && this.hostedRestore?.id === hostedId
 			&& this.hostedRestore.prefix === prefix && this.hostedRestore.target.isConnected) {
 			try {
 				this.isRestoringLiveSession = isLiveSession;
@@ -137,6 +151,7 @@ export class CleanSlateTranscriptView {
 		const enteringHostedId = isLiveSession && hostedId && !displayedIds.has(hostedId)
 			&& previousMessageId && displayedIds.has(previousMessageId) ? hostedId : undefined;
 		this.clear();
+		this.restoredWindow = window;
 		// History restoration can create hundreds of blocks in one synchronous pass.
 		// Mark it as a bulk render so persisted content does not replay live-entry
 		// animations and compete with layout/markdown work during navigation.
@@ -145,10 +160,11 @@ export class CleanSlateTranscriptView {
 		this.isRestoringLiveSession = isLiveSession;
 		this.restoreTailPlanningQuestion = undefined;
 		this.restoreAnsweredQuestions.clear();
-		this.collectAnsweredPlanningQuestions(history);
+		this.collectAnsweredPlanningQuestions(visibleHistory);
 		let stats: { renderedCount: number; assistantCount: number };
 		try {
-			stats = this.renderSessionHistory(history, enteringHostedId);
+			if (history.length > count) { this.renderEarlierMessagesButton(history.length - count); }
+			stats = this.renderSessionHistory(visibleHistory, enteringHostedId);
 			if (stats.assistantCount === 0 && typeof fallbackAssistantContent === 'string' && fallbackAssistantContent.trim().length > 0) {
 				if (this.renderAssistantHistoryMessage({ content: fallbackAssistantContent })) {
 					stats.renderedCount++;
@@ -169,7 +185,7 @@ export class CleanSlateTranscriptView {
 		const pendingQuestion = this.restoreTailPlanningQuestion;
 		this.restoreTailPlanningQuestion = undefined;
 		this.restoreAnsweredQuestions.clear();
-		if (pendingQuestion) {
+		if (pendingQuestion && !this.isExpandingHistory) {
 			this.onPlanningQuestion(pendingQuestion);
 		}
 		this.scrollToBottom(true);
@@ -178,6 +194,28 @@ export class CleanSlateTranscriptView {
 				.find(element => element.dataset.cleanSlateTranscriptId === hostedId);
 			if (target) { this.hostedRestore = { id: hostedId, prefix, target }; }
 		}
+	}
+
+	private renderEarlierMessagesButton(remaining: number): void {
+		const button = dom.append(this.element, dom.$('button.cleanSlate-load-earlier-messages')) as HTMLButtonElement;
+		button.type = 'button';
+		button.textContent = localize('cleanSlate.chat.loadEarlier', 'Show earlier messages ({0})', remaining);
+		button.onclick = () => {
+			const window = this.restoredWindow;
+			if (!window) { return; }
+			const previousHeight = this.element.scrollHeight;
+			const previousTop = this.element.scrollTop;
+			window.count += CleanSlateTranscriptView.HISTORY_PAGE_SIZE;
+			this.isExpandingHistory = true;
+			try { this.restore(window.history, window.fallback, window.live, window.sessionId); }
+			finally { this.isExpandingHistory = false; }
+			this.cancelPendingScroll();
+			this.cancelPinnedScroll();
+			this.userScrolled = true;
+			this.element.scrollTop = previousTop + this.element.scrollHeight - previousHeight;
+			this.lastWrittenTop = this.element.scrollTop;
+			this.updateScrollToBottomButton();
+		};
 	}
 
 	private collectAnsweredPlanningQuestions(

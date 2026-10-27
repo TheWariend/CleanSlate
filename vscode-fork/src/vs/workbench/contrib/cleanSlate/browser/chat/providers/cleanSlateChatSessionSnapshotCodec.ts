@@ -13,6 +13,10 @@ import {
 
 /** Owns defensive cloning and structural equality for persisted chat-session state. */
 export class CleanSlateChatSessionSnapshotCodec {
+	private readonly transcriptCache = new WeakMap<readonly ICleanSlateSessionMessage[], {
+		source: ICleanSlateSessionMessage[];
+		transcript: ICleanSlateTranscriptMessage[];
+	}>();
 	public cloneHistory(history: readonly ICleanSlateSessionMessage[]): ICleanSlateSessionMessage[] {
 		return cloneCleanSlateSessionMessages(history).map(message => ({
 			role: message.role,
@@ -48,7 +52,14 @@ export class CleanSlateChatSessionSnapshotCodec {
 	}
 
 	public cloneTranscript(history: readonly ICleanSlateSessionMessage[]): ICleanSlateTranscriptMessage[] {
-		return normalizeCleanSlateTranscriptOrder(cloneCleanSlateSessionMessages(history).map(message => ({
+		const cached = this.transcriptCache.get(history);
+		if (cached && this.areHistoriesEqual(history, cached.source)
+			&& history.every((message, index) => (message as ICleanSlateTranscriptMessage).id
+				=== (cached.source[index] as ICleanSlateTranscriptMessage).id)) {
+			return cloneCleanSlateSessionMessages(cached.transcript);
+		}
+		const source = cloneCleanSlateSessionMessages(history);
+		const transcript = normalizeCleanSlateTranscriptOrder(source.map(message => ({
 			id: typeof (message as ICleanSlateTranscriptMessage).id === 'string' ? (message as ICleanSlateTranscriptMessage).id : generateUuid(),
 			role: message.role,
 			content: message.content,
@@ -56,6 +67,8 @@ export class CleanSlateChatSessionSnapshotCodec {
 			renderPayload: message.renderPayload,
 			images: message.images
 		})));
+		this.transcriptCache.set(history, { source, transcript });
+		return cloneCleanSlateSessionMessages(transcript);
 	}
 
 	public cloneObject<T>(snapshot: T | undefined): T | undefined {

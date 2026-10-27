@@ -612,7 +612,7 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
             ? fallbackAssistantContent
             : this.sidebarViewModel.getLastAssistantTurn();
 
-        this.transcriptView.restore(history, assistantFallback, this.sidebarViewModel.getIsGenerating());
+        this.transcriptView.restore(history, assistantFallback, this.sidebarViewModel.getIsGenerating(), this.sidebarViewModel.getActiveSessionId());
         const transport = this.sessionProvider.getHostedTransportStatus();
         if (transport?.state === 'retrying') { this.transcriptView.showTransportRetry(transport); }
         else if (transport !== null) { this.transcriptView.clearTransportRetry(); }

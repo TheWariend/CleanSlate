@@ -511,6 +511,20 @@ export const CLEANSLATE_CHAT_STYLES = `
                 background: transparent;
 			}
 
+			.cleanSlate-load-earlier-messages {
+				flex-shrink: 0;
+				align-self: center;
+				padding: 7px 14px;
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 8px;
+				background: var(--vscode-editorWidget-background);
+				color: var(--vscode-foreground);
+				font: inherit;
+				cursor: pointer;
+			}
+			.cleanSlate-load-earlier-messages:hover { background: var(--vscode-list-hoverBackground); }
+			.cleanSlate-load-earlier-messages:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+
 			.cleanSlate-transcript-bottom-fade {
 				position: absolute;
 				z-index: 4;

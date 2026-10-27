@@ -1472,6 +1472,14 @@ registerThemingParticipant((_theme, collector) => {
 				content: none;
 			}
 
+		.cleanSlate-agent-manager-session-loading {
+			flex: 0 0 18px;
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			color: var(--vscode-focusBorder);
+		}
+
 		.cleanSlate-agent-manager-session-running {
 			width: 18px;
 			flex: 0 0 18px;

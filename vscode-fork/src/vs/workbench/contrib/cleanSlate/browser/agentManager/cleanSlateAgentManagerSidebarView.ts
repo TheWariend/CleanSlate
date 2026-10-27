@@ -29,8 +29,29 @@ export interface ICleanSlateAgentManagerSidebarRenderOptions {
 export class CleanSlateAgentManagerSidebarView {
 
 	private readonly projectElements = new Map<string, HTMLElement>();
+	private readonly prefetchTimers = new WeakMap<HTMLButtonElement, number>();
+	private loadingSessionId: string | undefined;
 
 	constructor(private readonly container: HTMLElement) { }
+
+	setLoadingSession(sessionId: string | undefined): void {
+		this.loadingSessionId = sessionId;
+		for (const chat of this.container.querySelectorAll<HTMLButtonElement>('.cleanSlate-agent-manager-session')) {
+			this.updateLoadingIndicator(chat);
+		}
+	}
+
+	private updateLoadingIndicator(chat: HTMLButtonElement): void {
+		const loading = chat.dataset.sessionId === this.loadingSessionId;
+		chat.setAttribute('aria-busy', String(loading));
+		const existing = chat.querySelector('.cleanSlate-agent-manager-session-loading');
+		if (!loading) { existing?.remove(); return; }
+		if (existing) { return; }
+		const indicator = dom.append(chat, dom.$('span.cleanSlate-agent-manager-session-loading'));
+		indicator.setAttribute('role', 'status');
+		indicator.setAttribute('aria-label', localize('cleanSlate.agentManager.openingChat', 'Opening chat…'));
+		dom.append(indicator, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.loading)}.codicon-modifier-spin`));
+	}
 
 	updatePullRequest(sessionId: string, state: string): void {
 		for (const chat of this.container.querySelectorAll<HTMLButtonElement>('button.cleanSlate-agent-manager-session')) {
@@ -149,7 +170,7 @@ export class CleanSlateAgentManagerSidebarView {
 		const nextChats: HTMLElement[] = [];
 		for (let index = 0; index < group.sessions.length; index++) {
 			const session = group.sessions[index];
-			nextChats.push(this.renderSession(existingChats.get(session.id), session, group.sessions.slice(Math.max(0, index - 1), index + 2), groupEntry, groupKey, options));
+			nextChats.push(this.renderSession(existingChats.get(session.id), session, groupEntry, groupKey, options));
 		}
 		this.reconcileChildren(chats, nextChats);
 		return project;
@@ -158,7 +179,6 @@ export class CleanSlateAgentManagerSidebarView {
 	private renderSession(
 		existingChat: HTMLButtonElement | undefined,
 		session: ICleanSlateSessionSnapshot,
-		prefetchSessions: readonly ICleanSlateSessionSnapshot[],
 		groupEntry: ICleanSlateWorkspaceEntry | undefined,
 		groupKey: string,
 		options: ICleanSlateAgentManagerSidebarRenderOptions
@@ -167,17 +187,33 @@ export class CleanSlateAgentManagerSidebarView {
 		const chat = existingChat ?? dom.$('button.cleanSlate-agent-manager-session') as HTMLButtonElement;
 		chat.type = 'button';
 		chat.dataset.sessionId = session.id;
+		this.updateLoadingIndicator(chat);
 		chat.dataset.workspaceKey = groupKey;
 		chat.classList.toggle('active', session.id === options.activeSessionId);
 		chat.classList.toggle('running', isRunning);
-		const prefetch = () => options.onPrefetchSessions(prefetchSessions);
-		chat.onpointerenter = prefetch;
-		chat.onpointerdown = prefetch;
-		chat.onfocus = prefetch;
+		const targetWindow = dom.getWindow(chat);
+		const cancelPrefetch = () => {
+			const timer = this.prefetchTimers.get(chat);
+			if (timer !== undefined) { targetWindow.clearTimeout(timer); this.prefetchTimers.delete(chat); }
+		};
+		cancelPrefetch();
+		const schedulePrefetch = () => {
+			cancelPrefetch();
+			this.prefetchTimers.set(chat, targetWindow.setTimeout(() => {
+				this.prefetchTimers.delete(chat);
+				if (chat.isConnected) { options.onPrefetchSessions([session]); }
+			}, 120));
+		};
+		chat.onpointerenter = schedulePrefetch;
+		chat.onpointerleave = cancelPrefetch;
+		chat.onblur = cancelPrefetch;
+		chat.onpointerdown = () => { cancelPrefetch(); options.onPrefetchSessions([session]); };
+		chat.onfocus = schedulePrefetch;
 		chat.onclick = () => options.onRestoreSession(session, groupEntry);
 		const chatCopy = chat.querySelector<HTMLElement>('.session-copy') ?? dom.append(chat, dom.$('.session-copy'));
 		const title = chatCopy.querySelector<HTMLElement>('.session-title') ?? dom.append(chatCopy, dom.$('.session-title'));
-		title.textContent = session.title || localize('cleanSlate.agentManager.untitled', 'Untitled chat');
+		const titleText = session.title || localize('cleanSlate.agentManager.untitled', 'Untitled chat');
+		if (title.textContent !== titleText) { title.textContent = titleText; }
 		const runningIndicator = chat.querySelector<HTMLElement>('.cleanSlate-agent-manager-session-running')
 			?? dom.append(chat, dom.$('span.cleanSlate-agent-manager-session-running'));
 		this.updateSessionRunningIndicator(chat, isRunning, runningIndicator);

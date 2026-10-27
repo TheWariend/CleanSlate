@@ -24,10 +24,13 @@ import {
     rememberCleanSlateDeletedSessionId
 } from './cleanSlateChatDeletionStore.js';
 import { CleanSlateChatSessionProvider } from './cleanSlateChatSessionProvider.js';
+import { CleanSlateChatSessionSnapshotCodec } from './cleanSlateChatSessionSnapshotCodec.js';
 
 const CLEANSLATE_HISTORY_STORAGE_KEY = 'cleanSlate.chat.archivedSessions';
 
 export class CleanSlateChatHistoryProvider {
+    private readonly snapshotCodec = new CleanSlateChatSessionSnapshotCodec();
+    private readonly recentArchivedSnapshots = new Map<string, ICleanSlateSessionSnapshot>();
     private archivedSessions: ICleanSlateSessionSnapshot[] = [];
     private readonly deletedSessionIds: Set<string>;
     private readonly deletedProjectCutoffs: Map<string, number>;
@@ -41,12 +44,13 @@ export class CleanSlateChatHistoryProvider {
     constructor(
         private readonly storageService: IStorageService,
         private readonly workspaceContextService: IWorkspaceContextService,
-        private readonly cleanSlateMainService: ICleanSlateMainService
+        private readonly cleanSlateMainService: ICleanSlateMainService,
+        private readonly threadIndexOnly = false
     ) {
         this.deletedSessionIds = loadCleanSlateDeletedSessionIds(this.storageService);
         this.deletedProjectCutoffs = loadCleanSlateDeletedProjectCutoffs(this.storageService);
         this.deletedBefore = loadCleanSlateDeletedBefore(this.storageService);
-		this.archivedSessions = this.loadArchivedSessions().filter(session => !session.parentSessionId && !this.isDeletedSession(session));
+		this.archivedSessions = this.threadIndexOnly ? [] : this.loadArchivedSessions().filter(session => !session.parentSessionId && !this.isDeletedSession(session));
         this.persistArchivedSessions();
         this.readyPromise = this.initializePersistentArchivedSessions();
     }
@@ -109,10 +113,40 @@ export class CleanSlateChatHistoryProvider {
     }
 
     archiveCurrentSession(sessionProvider: CleanSlateChatSessionProvider): void {
-        this.upsertArchivedSession(this.getCurrentSessionSnapshot(sessionProvider));
+        this.archiveSessionIfChanged(this.getCurrentSessionSnapshot(sessionProvider));
+    }
+
+    archiveSessionIfChanged(snapshot: ICleanSlateSessionSnapshot): void {
+        const existing = this.recentArchivedSnapshots.get(snapshot.id) ?? this.archivedSessions.find(session => session.id === snapshot.id);
+        const executionState = normalizeCleanSlateSessionExecutionState(snapshot);
+        // Visiting a stopped chat does not change its content. Avoid serializing the
+        // entire archive and rewriting SQLite on every back-and-forth navigation.
+        if (existing && !snapshot.isGenerating && !existing.isGenerating
+            && existing.status === snapshot.status && existing.title === snapshot.title
+            && existing.planMode === executionState.planMode && existing.reasoningLevel === executionState.reasoningLevel
+            && existing.projectRoot === snapshot.projectRoot && existing.workDir === snapshot.workDir
+            && existing.externalAgentSessionId === snapshot.externalAgentSessionId
+            && this.snapshotCodec.areHistoriesEqual(existing.history, snapshot.history)
+            && this.snapshotCodec.areTranscriptsEqual(existing.transcript ?? [], snapshot.transcript ?? [])) {
+            return;
+        }
+        this.upsertArchivedSession(snapshot);
     }
 
     upsertArchivedSession(snapshot: ICleanSlateSessionSnapshot | undefined): void {
+        if (this.threadIndexOnly) {
+            if (!snapshot || snapshot.parentSessionId || this.isDeletedSession(snapshot) || !this.hasVisibleSessionContent(snapshot)) { return; }
+            this.recentArchivedSnapshots.delete(snapshot.id);
+            this.recentArchivedSnapshots.set(snapshot.id, snapshot);
+            if (this.recentArchivedSnapshots.size > 24) { this.recentArchivedSnapshots.delete(this.recentArchivedSnapshots.keys().next().value!); }
+            const id = snapshot.id;
+            this.archivedSessions = [this.toThreadIndexSnapshot(snapshot), ...this.archivedSessions.filter(session => session.id !== id)].slice(0, 50);
+            // SQLite is the durable source. Never serialize every imported chat
+            // into workspace state again just because one chat changed.
+            this.queueArchiveSession(snapshot);
+            this._onDidChangeState.fire();
+            return;
+        }
         snapshot = this.cloneSnapshot(snapshot);
 		if (!snapshot || snapshot.parentSessionId || !this.hasVisibleSessionContent(snapshot)) {
             return;
@@ -167,6 +201,7 @@ export class CleanSlateChatHistoryProvider {
 	}
 
     removeArchivedSession(sessionId: string): void {
+        this.recentArchivedSnapshots.delete(sessionId);
         rememberCleanSlateDeletedSessionId(this.storageService, this.deletedSessionIds, sessionId);
         this.archivedSessions = this.archivedSessions.filter(session => session.id !== sessionId);
         this.persistArchivedSessions();
@@ -362,6 +397,7 @@ export class CleanSlateChatHistoryProvider {
     }
 
     private persistArchivedSessions(): void {
+        if (this.threadIndexOnly) { return; }
         this.storageService.store(
             CLEANSLATE_HISTORY_STORAGE_KEY,
             JSON.stringify(this.archivedSessions),
@@ -458,6 +494,14 @@ export class CleanSlateChatHistoryProvider {
 
     private async initializePersistentArchivedSessions(): Promise<void> {
         try {
+            if (this.threadIndexOnly) {
+                const sessions = await this.cleanSlateMainService.listThreadSessions();
+                this.archivedSessions = sessions.map(session => this.fromPersistedSession(session))
+                    .filter((session): session is ICleanSlateSessionSnapshot => !!session && !session.parentSessionId && !this.isDeletedSession(session))
+                    .map(session => this.toThreadIndexSnapshot(session));
+                this._onDidChangeState.fire();
+                return;
+            }
             const persisted = await this.cleanSlateMainService.listArchivedThreadSessions(this.getWorkspaceId());
             const dbSessions = persisted
                 .map(session => this.fromPersistedSession(session))
@@ -478,6 +522,11 @@ export class CleanSlateChatHistoryProvider {
         } catch (error) {
             console.warn('[CleanSlate] Failed to initialize persisted archived sessions:', error);
         }
+    }
+
+    private toThreadIndexSnapshot(snapshot: ICleanSlateSessionSnapshot): ICleanSlateSessionSnapshot {
+        return { ...snapshot, history: [{ role: 'user', content: snapshot.title }], transcript: undefined,
+            taskState: undefined, threadState: undefined, agentRuntimeState: undefined, agent: undefined };
     }
 
     private mergeArchivedSessions(
@@ -541,7 +590,7 @@ export class CleanSlateChatHistoryProvider {
             createdAt: snapshot.createdAt,
             title: snapshot.title,
             savedAt: snapshot.savedAt,
-            updatedAt: Date.now(),
+            updatedAt: snapshot.updatedAt ?? snapshot.savedAt,
             workspaceId: snapshot.workspaceId,
             projectRoot: snapshot.projectRoot,
             workDir: snapshot.workDir,
@@ -557,7 +606,7 @@ export class CleanSlateChatHistoryProvider {
                 renderPayload: message.renderPayload,
                 images: message.images
             })),
-            transcript: normalizeCleanSlateTranscriptOrder(snapshot.transcript?.length
+            transcript: this.snapshotCodec.cloneTranscript(snapshot.transcript?.length
                 ? snapshot.transcript
                 : deriveCleanSlateTranscriptFromHistory(snapshot.history)).map(message => ({
                     id: message.id,

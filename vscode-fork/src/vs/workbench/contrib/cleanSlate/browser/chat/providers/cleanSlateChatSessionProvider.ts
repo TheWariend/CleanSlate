@@ -261,7 +261,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
     private requestLiveSessionSync(): Promise<void> {
         return this.cleanSlateMainService.publishThreadSession({
             originId: this.providerId,
-            session: this.toPersistedSession(this.buildSessionSnapshot(this.activeSession)),
+            session: this.toPersistedSession(this.buildCurrentSessionSummary()),
             request: 'sync',
             surface: this.surface === 'agentManager' ? 'agentManager' : 'ide'
         });
@@ -831,6 +831,23 @@ export class CleanSlateChatSessionProvider extends Disposable {
         return this.buildSessionSnapshot(this.activeSession, this.activeSession.workspaceName ?? workspaceName, planMode, reasoningLevel);
     }
 
+    buildCurrentSessionSummary(workspaceName?: string): ICleanSlateSessionSnapshot {
+        const session = this.activeSession;
+        const title = this.ensureSessionTitle(session);
+        const now = Date.now();
+        const isGenerating = this.isLiveSessionRunning(session);
+        return {
+            id: session.id, parentSessionId: session.parentSessionId, createdAt: session.createdAt,
+            title, savedAt: now, updatedAt: now, workspaceId: session.workspaceId,
+            projectRoot: session.projectRoot, workDir: session.workDir,
+            workspaceName: session.workspaceName ?? workspaceName, sessionKey: session.id,
+            status: isGenerating ? 'running' : this.getRestoredSessionStatus(session.status),
+            isGenerating, planMode: session.planMode, reasoningLevel: session.reasoningLevel,
+            history: this.hasCurrentSessionContent() ? [{ role: 'user', content: title }] : [],
+            runtime: session.runtime, externalAgent: session.externalAgent, externalAgentSessionId: session.externalAgentSessionId
+        };
+    }
+
     private buildSessionSnapshot(
         session: ICleanSlateLiveSession,
         workspaceName?: string,
@@ -1351,6 +1368,9 @@ export class CleanSlateChatSessionProvider extends Disposable {
         if (ownedSession && this.runState.isRunning(ownedSession.id)) {
             return;
         }
+		// Unopened chats need only sidebar metadata. Do not clone every full import
+		// or background broadcast into a runtime merely to display its title.
+		if (!ownedSession && !(update.makeActive && this.surface === 'ide')) { return; }
 
         const restored = this.fromPersistedSession(update.session);
         const snapshot = restored && update.live ? {
