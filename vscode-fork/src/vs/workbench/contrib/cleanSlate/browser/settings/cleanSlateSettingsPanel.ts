@@ -87,7 +87,12 @@ export class CleanSlateSettingsPanel {
 	private sectionRoot: HTMLElement | undefined;
 	private sidebarHeader: ((parent: HTMLElement) => void) | undefined;
 	private activeSection: SettingSectionId = 'general';
+	private disposed = false;
 	private saveCounter = 0;
+	private cachedConfiguration: ICleanSlateConfiguration | undefined;
+	private cachedUsage: ICleanSlateManagedEntitlements | undefined;
+	private renderGeneration = 0;
+	private usageRequest = 0;
 	private usageError: string | undefined;
 	private usageFetchedAt: number | undefined;
 	private resetCountdownHandle: number | undefined;
@@ -152,33 +157,62 @@ export class CleanSlateSettingsPanel {
 		this.saveStatus = el;
 	}
 
-	async render(options: { preserveScroll?: boolean; restoreScrollTop?: number; scrollToSection?: SettingSectionId } = {}): Promise<void> {
+	async render(options: { preserveScroll?: boolean; restoreScrollTop?: number; scrollToSection?: SettingSectionId; navigation?: boolean } = {}): Promise<void> {
+		if (this.disposed) { return; }
+		const generation = ++this.renderGeneration;
 		const previousScrollTop = options.restoreScrollTop ?? this.content?.scrollTop ?? 0;
 		if (options.scrollToSection) {
 			this.activeSection = options.scrollToSection;
 		}
-		const config = await this.configService.getResolvedConfiguration();
+		const config = options.navigation && this.cachedConfiguration
+			? this.cachedConfiguration : await this.configService.getResolvedConfiguration();
+		if (this.disposed || generation !== this.renderGeneration) { return; }
+		this.cachedConfiguration = config;
 		const account = this.configService.getManagedAccount();
-		const usage = account ? await this.configService.getManagedEntitlements().catch(error => {
-			this.usageError = error instanceof Error ? error.message : String(error);
+		if (!account) { this.cachedUsage = undefined; this.usageError = undefined; }
+		const draw = () => {
+			const managedAccess = config.provider === 'cleanslate'
+				? this.resolveManagedAccessFromResult(config, this.cachedUsage, this.usageError)
+				: undefined;
+			this.stopResetCountdown();
+			dom.clearNode(this.content);
+			this.renderContent(config, managedAccess, this.cachedUsage, account);
+		};
+		if (!this.sidebar.childElementCount) { this.renderSidebar(); }
+		for (const item of this.sidebar.querySelectorAll<HTMLElement>('.cleanSlate-settings-nav-item')) {
+			item.classList.toggle('active', item.dataset.section === this.activeSection);
+		}
+		draw();
+		if (options.preserveScroll || options.restoreScrollTop !== undefined) {
+			this.restoreContentScrollTop(previousScrollTop);
+		} else {
+			this.content.scrollTop = 0;
+		}
+		// Navigation uses the current snapshot; explicit refreshes still fetch live usage.
+		if (options.navigation || !account) { return; }
+		const usageRequest = ++this.usageRequest;
+		const usage = await this.configService.getManagedEntitlements().catch(error => {
+			if (!this.disposed && usageRequest === this.usageRequest) {
+				this.usageError = error instanceof Error ? error.message : String(error);
+			}
 			return undefined;
-		}) : undefined;
+		});
+		if (this.disposed || usageRequest !== this.usageRequest || !this.configService.getManagedAccount()) { return; }
+		this.cachedUsage = usage;
 		if (usage) {
 			this.usageError = undefined;
 			this.usageFetchedAt = Date.now();
 		}
-		const managedAccess = config.provider === 'cleanslate'
-			? this.resolveManagedAccessFromResult(config, usage, this.usageError)
-			: undefined;
-		this.stopResetCountdown();
-		dom.clearNode(this.sidebar);
-		dom.clearNode(this.content);
-
-		this.renderSidebar();
-		this.renderContent(config, managedAccess, usage, account);
-
-		if (options.preserveScroll || options.restoreScrollTop !== undefined) {
-			this.restoreContentScrollTop(previousScrollTop);
+		if (generation !== this.renderGeneration) {
+			if (this.activeSection === 'general' || this.activeSection === 'usage' || this.activeSection === 'models') {
+				await this.render({ navigation: true, preserveScroll: true });
+			}
+			return;
+		}
+		if (this.activeSection === 'general' || this.activeSection === 'usage' || this.activeSection === 'models') {
+			const scrollTop = this.content.scrollTop;
+			draw();
+			this.restoreContentScrollTop(scrollTop);
 		}
 	}
 
@@ -209,8 +243,9 @@ export class CleanSlateSettingsPanel {
 			dom.append(item, dom.$('span')).textContent = section.label;
 			item.dataset.section = section.id;
 			item.onclick = () => {
+				if (this.activeSection === section.id) { return; }
 				this.activeSection = section.id;
-				void this.render();
+				void this.render({ navigation: true });
 			};
 		}
 	}
@@ -227,6 +262,11 @@ export class CleanSlateSettingsPanel {
 			case 'verification': this.renderSection('verification', 'Verification', () => this.renderVerification(config)); break;
 			case 'indexing': this.renderSection('indexing', 'Indexing & Docs', () => this.renderIndexing(config)); break;
 		}
+	}
+
+	dispose(): void {
+		this.disposed = true;
+		this.stopResetCountdown();
 	}
 
 	private renderSection(id: SettingSectionId, title: string, render: () => void): void {
@@ -1321,6 +1361,7 @@ export class CleanSlateSettingsPanel {
 
 	private async updateConfiguration(config: Partial<ICleanSlateConfiguration>): Promise<void> {
 		await this.configService.updateConfiguration(config);
+		this.cachedConfiguration = undefined;
 		this.setSavedStatus();
 	}
 

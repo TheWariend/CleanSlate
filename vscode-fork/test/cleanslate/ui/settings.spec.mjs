@@ -67,3 +67,29 @@ test('models settings appearance @visual', async ({ page }) => {
 	await expect(page.locator('.cleanSlate-settings-content')).toContainText('qa-model');
 	await expect(page.locator('#fixture')).toHaveScreenshot('settings-models.png');
 });
+
+test('settings navigation stays immediate while live usage is pending', async ({ page }) => {
+	await page.evaluate(async () => {
+		qa.settings.dispose();
+		document.getElementById('fixture').replaceChildren();
+		await (await import('/qa/browser-fixtures.mjs')).mountSettings('pro');
+		globalThis.usageRequests = 0;
+		qa.settings.configService.getManagedEntitlements = () => {
+			usageRequests++;
+			return new Promise(resolve => { globalThis.finishUsage = resolve; });
+		};
+		void qa.settings.render();
+	});
+	await expect.poll(() => page.evaluate(() => usageRequests)).toBe(1);
+	for (const section of ['apiKeys', 'verification', 'agents', 'usage']) {
+		const current = await page.evaluate(section => {
+			document.querySelector(`.cleanSlate-settings-nav-item[data-section="${section}"]`).click();
+			return document.querySelector('.cleanSlate-settings-page-section').dataset.section;
+		}, section);
+		expect(current).toBe(section);
+	}
+	expect(await page.evaluate(() => usageRequests)).toBe(1);
+	await page.evaluate(() => finishUsage({ plan: { id: 'pro' }, can_use_managed_ai: true, models: [] }));
+	await expect(page.locator('.cleanSlate-settings-nav-item.active')).toHaveAttribute('data-section', 'usage');
+	await expect(page.locator('.cleanSlate-settings-page-section')).toHaveAttribute('data-section', 'usage');
+});
