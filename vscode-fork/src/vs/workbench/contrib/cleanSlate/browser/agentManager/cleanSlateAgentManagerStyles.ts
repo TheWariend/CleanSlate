@@ -3398,7 +3398,31 @@ registerThemingParticipant((_theme, collector) => {
 			flex: 0 0 auto;
 		}
 
+		@keyframes cleanSlateThreadSidebarEnter {
+			from {
+				opacity: 0;
+				transform: translateX(-18px);
+			}
+			to {
+				opacity: 1;
+				transform: translateX(0);
+			}
+		}
+
 		@media (prefers-reduced-motion: no-preference) {
+			.returning-to-thread:not(.browser-mode) .cleanSlate-agent-manager-nav {
+				animation: cleanSlateThreadSidebarEnter 280ms var(--cleanSlate-agent-manager-ease) backwards;
+			}
+
+			.cleanSlate-agent-manager-main > .cleanSlate-agent-manager-chat:not([hidden]) {
+				animation: cleanSlateAgentManagerSurfaceEnter 240ms var(--cleanSlate-agent-manager-ease) both;
+			}
+
+			.browser-mode .cleanSlate-browser-sidebar,
+			.cleanSlate-workspace-browser:not([hidden]) > .cleanSlate-workspace-browser-toolbar {
+				animation: cleanSlateAgentManagerSurfaceEnter 200ms var(--cleanSlate-agent-manager-ease) both;
+			}
+
 			.cleanSlate-agent-manager-surface {
 				animation: cleanSlateAgentManagerSurfaceEnter 180ms var(--cleanSlate-agent-manager-ease);
 			}

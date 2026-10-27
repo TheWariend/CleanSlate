@@ -3451,6 +3451,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		this.dismissAgentPicker();
 		this.composerDraftController.persistDraft();
 		this.activeWorkspaceBrowserTabId = id;
+		this.root?.classList.remove('returning-to-thread');
 		this.root?.classList.add('browser-mode');
 		this.cancelBrowserPaneLayout();
 		void this.browserAutomationService.setOpenBrowserVisible(false, this.getActiveAgentManagerBrowserSurface());
@@ -3462,6 +3463,10 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	}
 
 	private showThreadContent(): void {
+		if (this.activeWorkspaceBrowserTabId) {
+			this.root?.classList.add('returning-to-thread');
+			this.setLeftNavVisible(true);
+		}
 		this.activeWorkspaceBrowserTabId = undefined;
 		this.root?.classList.remove('browser-mode');
 		this.workspaceBrowser.setVisible(false);
