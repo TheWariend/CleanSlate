@@ -2731,7 +2731,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 			.cleanSlate-work-summary { margin: 0; color: var(--vscode-descriptionForeground); }
 			.cleanSlate-work-summary > summary { display: flex; align-items: center; gap: 9px; list-style: none; cursor: pointer; font-size: 13px; line-height: 24px; width: fit-content; border-radius: 4px; }
 			.cleanSlate-work-summary > summary::-webkit-details-marker { display: none; }
-			.cleanSlate-work-summary > summary::after { content: ''; width: 6px; height: 6px; border-top: 1.5px solid currentColor; border-right: 1.5px solid currentColor; transform: rotate(45deg); opacity: 0; transition: opacity 120ms ease, transform 120ms ease; }
+			.cleanSlate-work-summary > summary::after { content: ''; width: 6px; height: 6px; border-top: 1.5px solid currentColor; border-right: 1.5px solid currentColor; transform: rotate(45deg); opacity: 0.6; transition: opacity 120ms ease, transform 120ms ease; }
 			.cleanSlate-work-summary > summary:hover::after,
 			.cleanSlate-work-summary > summary:focus-visible::after,
 			.cleanSlate-work-summary[open] > summary::after { opacity: 1; }
@@ -2795,6 +2795,38 @@ export const CLEANSLATE_CHAT_STYLES = `
 				font-family: inherit;
 				font-size: inherit;
 				line-height: inherit;
+			}
+
+			/* CleanSlate links follow the neutral transcript palette. Explicitly
+			   style visited links so browser defaults and IDE link accents cannot
+			   turn review/file references purple on the dark chat surface. */
+			.cleanSlate-message-content .rendered-markdown a,
+			.cleanSlate-message-content .rendered-markdown a:link,
+			.cleanSlate-message-content .rendered-markdown a:visited,
+			.cleanSlate-tool-result .rendered-markdown a,
+			.cleanSlate-tool-result .rendered-markdown a:link,
+			.cleanSlate-tool-result .rendered-markdown a:visited {
+				color: var(--cleanSlate-link-foreground, inherit);
+				text-decoration: underline;
+				text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+				text-decoration-thickness: 1px;
+				text-underline-offset: 3px;
+			}
+
+			.cleanSlate-message-content .rendered-markdown a:hover,
+			.cleanSlate-message-content .rendered-markdown a:active,
+			.cleanSlate-tool-result .rendered-markdown a:hover,
+			.cleanSlate-tool-result .rendered-markdown a:active {
+				color: var(--cleanSlate-link-foreground, inherit);
+				text-decoration-color: currentColor;
+			}
+
+			.cleanSlate-message-content .rendered-markdown a:focus-visible,
+			.cleanSlate-tool-result .rendered-markdown a:focus-visible {
+				outline: 1px solid currentColor;
+				outline-offset: 3px;
+				border-radius: 2px;
+				text-decoration-color: currentColor;
 			}
 
 			.cleanSlate-message-content .rendered-markdown p {

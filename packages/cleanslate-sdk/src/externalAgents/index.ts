@@ -5,3 +5,4 @@
 
 export * from './externalAgentTypes.js';
 export { createExternalAgentHandoffPrompt } from './handoff.js';
+export { coalesceExternalAgentTranscript, externalAgentDisplayText } from './externalAgentPresentation.js';

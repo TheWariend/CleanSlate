@@ -24,6 +24,7 @@ import { CleanSlateWebActivityRenderer } from './cleanSlateWebActivityRenderer.j
 import { CleanSlateTranscriptFileRenderer } from './cleanSlateTranscriptFileRenderer.js';
 import { CleanSlateStreamingText } from './cleanSlateStreamingText.js';
 import { getCleanSlateHostToolPresentation, getCleanSlateExternalFileMutationBlocks, getCleanSlateExternalBrowserPresentation, getCleanSlateExternalToolOutput, isCleanSlateReasoningVisuallyStreaming } from './cleanSlateActivityPresentation.js';
+import { externalAgentDisplayText } from '@cleanslate/sdk/externalAgents/externalAgentPresentation.js';
 
 interface ICleanSlateAssistantMarkdownStreamState {
     renderedContent: string;
@@ -97,7 +98,18 @@ export class CleanSlateTranscriptRenderer {
         targetMessage?: HTMLElement,
         onDidRender?: () => void
     ): void {
-        const normalizedData = normalizeChatResponse(data);
+        const displayText = (text: string) => externalAgentDisplayText(text, isStreaming);
+        const displayBlock = (block: InteractionBlock): InteractionBlock => ({
+            ...block,
+            content: ['assistant_text', 'summary', 'reasoning'].includes(block.type) && typeof block.content === 'string' ? displayText(block.content) : block.content,
+            blocks: block.blocks?.map(displayBlock)
+        });
+        const normalizedData = normalizeChatResponse({
+            ...data,
+            response: typeof data.response === 'string' ? displayText(data.response) : data.response,
+            summary: Array.isArray(data.summary) ? data.summary.map(displayText) : typeof data.summary === 'string' ? displayText(data.summary) : data.summary,
+            timeline: data.timeline?.map(displayBlock)
+        });
         const displayData = applyCleanSlateAgentDisplayPolicy(normalizedData, {
             isStreaming,
             preserveTimeline: normalizedData.transcriptStatus === 'completed'
@@ -187,7 +199,9 @@ export class CleanSlateTranscriptRenderer {
 			const children = Array.from(transcript.children) as HTMLElement[];
 			const finalAnswer = children.filter(element => element.matches('.type-assistant_text')).at(-1);
 			const activity = children.filter(element => element !== finalAnswer && !element.matches('.type-summary, .type-finish, .type-turn, .status-failed, .status-interrupted') && !element.querySelector('.status-failed, .status-interrupted'));
-			if (activity.length) {
+			// Narration alone is already readable. Only offer a work disclosure when
+			// the turn actually contains reasoning or tool activity.
+			if (activity.some(element => !element.matches('.type-assistant_text'))) {
 				const disclosure = previousActivity ?? document.createElement('details');
 				disclosure.className = 'cleanSlate-work-summary';
 				disclosure.open = activityExpanded;

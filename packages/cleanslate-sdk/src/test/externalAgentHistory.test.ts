@@ -105,11 +105,37 @@ test('Codex canonical messages avoid event duplicates and preserve tool context'
 		assert.equal(session.history[0].content, 'Fix it');
 		assert.ok(session.history[1].content.includes('workspace'));
 		assert.equal(session.history[2].content, 'All done');
+		assert.equal(session.transcript?.length, 2);
+		const display = JSON.parse(session.transcript![1].renderPayload!);
+		assert.deepEqual(display.timeline.map((block: { type: string }) => block.type), ['tool', 'assistant_text']);
+		assert.equal(display.timeline[0].output, 'workspace');
 		const otherHome = join(f.directory, 'other-codex');
 		await mkdir(join(otherHome, 'sessions'), { recursive: true });
 		await writeFile(join(otherHome, 'sessions', 'rollout-tools.jsonl'), await readFile(found.sessions[0].path));
 		const other = await discoverExternalAgentHistory({ source: 'codex', dataHome: otherHome });
 		assert.notEqual(found.sessions[0].id, other.sessions[0].id);
+	} finally { await rm(f.directory, { recursive: true, force: true }); }
+});
+
+test('Codex navigation metadata does not become a chat title or a visible user prompt', async () => {
+	const f = await fixture();
+	try {
+		const marker = '<external_codex_apps_open_page>{"page_id":null}</external_codex_apps_open_page>';
+		const file = join(f.codex, 'sessions', '2026', 'rollout-navigation.jsonl');
+		const original = jsonl([
+			{ type: 'session_meta', payload: { id: 'navigation', source: 'cli' } },
+			{ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: marker }] } },
+			{ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Fix Store' }] } },
+			{ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Fixed Store' }] } }
+		]);
+		await writeFile(file, original);
+		await writeFile(join(f.codex, 'session_index.jsonl'), jsonl([{ id: 'navigation', thread_name: marker }]));
+		const { sessions: [entry] } = await discoverExternalAgentHistory({ source: 'codex', dataHome: f.codex });
+		assert.equal(entry.title, 'Fix Store');
+		const { session } = await readExternalAgentHistory({ ...entry, title: marker });
+		assert.equal(session.title, 'Fix Store');
+		assert.deepEqual(session.history.map(message => message.content), ['Fix Store', 'Fixed Store']);
+		assert.equal(await readFile(file, 'utf8'), original);
 	} finally { await rm(f.directory, { recursive: true, force: true }); }
 });
 

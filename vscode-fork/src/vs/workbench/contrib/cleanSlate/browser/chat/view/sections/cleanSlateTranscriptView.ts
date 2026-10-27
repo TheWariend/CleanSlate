@@ -13,6 +13,7 @@ import { CleanSlateTranscriptRenderer } from '../../renderers/cleanSlateTranscri
 import { parseCleanSlateUserSelectionDisplay } from '../../viewModel/cleanSlateChatViewHelpers.js';
 import { formatChatErrorMessage } from '../../runtime/cleanSlateStreamingResponseParser.js';
 import { localize } from '../../../../../../../nls.js';
+import { coalesceExternalAgentTranscript, externalAgentDisplayText } from '@cleanslate/sdk/externalAgents/externalAgentPresentation.js';
 
 type RestorableMessage = { id?: string; role: string; content: string; isInternalState?: boolean; renderPayload?: string; images?: string[] };
 
@@ -778,20 +779,21 @@ export class CleanSlateTranscriptView {
 	): { renderedCount: number; assistantCount: number } {
 		let renderedCount = 0;
 		let assistantCount = 0;
-		const normalizedHistory = normalizeCleanSlateTranscriptOrder(history);
+		const normalizedHistory = coalesceExternalAgentTranscript(normalizeCleanSlateTranscriptOrder(history));
 
 		for (const message of normalizedHistory) {
 			if (message.role === 'user') {
 				// Any user turn after a question means it was answered — supersede it so
 				// the picker is not re-surfaced even if no assistant continuation exists yet.
 				this.restoreTailPlanningQuestion = undefined;
-				if (message.isInternalState || !message.content.trim() || isCleanSlateControlTranscriptMessage(message)) {
+				const displayContent = externalAgentDisplayText(message.content);
+				if (message.isInternalState || !displayContent.trim() || isCleanSlateControlTranscriptMessage(message)) {
 					continue;
 				}
 				const selectionDisplay = parseCleanSlateUserSelectionDisplay(message.renderPayload);
 				const element = selectionDisplay
 					? this.addUserSelectionMessage(selectionDisplay, message.images)
-					: this.addMessage(message.content, 'user', message.images);
+					: this.addMessage(displayContent, 'user', message.images);
 				if (message.id) {
 					element.dataset.cleanSlateTranscriptId = message.id;
 				}
@@ -841,7 +843,7 @@ export class CleanSlateTranscriptView {
 			}
 		}
 
-		const content = typeof message.content === 'string' ? message.content.trim() : '';
+		const content = typeof message.content === 'string' ? externalAgentDisplayText(message.content).trim() : '';
 		if (!content) {
 			return false;
 		}
@@ -879,11 +881,12 @@ export class CleanSlateTranscriptView {
 
 	private hasRenderableAssistantPayload(parsed: ChatResponse): boolean {
 		const hasSummary = Array.isArray(parsed.summary)
-			? parsed.summary.some(summary => typeof summary === 'string' && summary.trim().length > 0)
-			: (typeof parsed.summary === 'string' && parsed.summary.trim().length > 0);
+			? parsed.summary.some(summary => typeof summary === 'string' && externalAgentDisplayText(summary).trim().length > 0)
+			: (typeof parsed.summary === 'string' && externalAgentDisplayText(parsed.summary).trim().length > 0);
 		const hasSteps = Array.isArray(parsed.to_do) && parsed.to_do.length > 0;
 		const hasPlanningQuestion = !!normalizePlanningQuestion(parsed.planning_question);
-		const hasTimeline = Array.isArray(parsed.timeline) && parsed.timeline.length > 0;
+		const hasTimeline = Array.isArray(parsed.timeline) && parsed.timeline.some(block =>
+			!['assistant_text', 'summary', 'reasoning'].includes(block.type) || externalAgentDisplayText(block.content ?? '').trim().length > 0);
 		const hasCodeSnippet = typeof parsed.code_snippet === 'string' && parsed.code_snippet.trim().length > 0;
 
 		return hasSummary || hasSteps || hasPlanningQuestion || hasTimeline || hasCodeSnippet;

@@ -13,6 +13,7 @@ import { Transform } from 'node:stream';
 import * as zlib from 'node:zlib';
 import type { IExternalAgentHistoryDiscovery, IExternalAgentHistoryEntry, IExternalAgentHistoryQuery } from '../../externalAgents/externalAgentTypes.js';
 import type { ICleanSlatePersistedSession, ICleanSlatePersistedThreadMessage } from '../../protocol/cleanSlateAI.js';
+import { coalesceExternalAgentTranscript, externalAgentDisplayText } from '../../externalAgents/externalAgentPresentation.js';
 
 type RecordValue = Record<string, any>;
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
@@ -86,11 +87,12 @@ function visibleText(content: unknown): string {
 }
 
 function isHarnessMessage(text: string): boolean {
-	return /^(?:# AGENTS\.md instructions|AGENTS\.md instructions|<environment_context>|<permissions instructions>|<turn_aborted>|<system-reminder>|\[Request interrupted)/.test(text.trim());
+	return /^(?:# AGENTS\.md instructions|AGENTS\.md instructions|<environment_context>|<permissions instructions>|<turn_aborted>|<system-reminder>|\[Request interrupted)/.test(text.trim())
+		|| text.trimStart().startsWith('<external_codex_apps_open_page>') && !externalAgentDisplayText(text).trim();
 }
 
 function promptTitle(text: string): string {
-	return isHarnessMessage(text) ? '' : text.trim().split('\n')[0].replace(/^#+\s*/, '').slice(0, 100);
+	return isHarnessMessage(text) ? '' : externalAgentDisplayText(text).trim().split('\n')[0].replace(/^#+\s*/, '').slice(0, 100);
 }
 
 async function inspectFile(source: 'claude' | 'codex', dataHome: string, file: string, titles: Map<string, string>): Promise<IExternalAgentHistoryEntry | undefined> {
@@ -125,7 +127,7 @@ async function inspectFile(source: 'claude' | 'codex', dataHome: string, file: s
 	if (!sessionId || source === 'claude' && !conversation) { return; }
 	return {
 		id: externalAgentHistoryId(source, dataHome, sessionId), source, sessionId, dataHome, path: file,
-		title: titles.get(sessionId) || title || `${source === 'claude' ? 'Claude' : 'Codex'} conversation`, cwd,
+		title: externalAgentDisplayText(titles.get(sessionId) ?? '').trim() || title || `${source === 'claude' ? 'Claude' : 'Codex'} conversation`, cwd,
 		createdAt, updatedAt: info.mtimeMs
 	};
 }
@@ -217,7 +219,7 @@ export async function readExternalAgentHistory(entry: IExternalAgentHistoryEntry
 	if (!verified || verified.sessionId !== entry.sessionId || verified.id !== entry.id) { throw new Error('Conversation identity changed. Scan the folder again.'); }
 	const records: RecordValue[] = [];
 	const warnings: string[] = [];
-	let title = entry.title;
+	let title = externalAgentDisplayText(entry.title).trim() || verified.title;
 	for await (const line of jsonLines(file)) {
 		if (line.type === '$invalid') { if (!warnings.length) { warnings.push('Some incomplete or invalid history lines were skipped.'); } continue; }
 		if (entry.source === 'claude' && (line.type === 'custom-title' || line.type === 'ai-title')) { title = string(line.customTitle ?? line.aiTitle) || title; }
@@ -320,7 +322,7 @@ export async function readExternalAgentHistory(entry: IExternalAgentHistoryEntry
 			id: verified.id, title, createdAt: verified.createdAt, updatedAt: verified.updatedAt, savedAt: verified.updatedAt,
 			workspaceId: cwd, projectRoot: cwd, workDir: cwd,
 			workspaceName: cwd ? path.basename(cwd) : undefined, status: 'detached', isGenerating: false,
-			history, transcript: history, transcriptVersion: 1, runtime: 'external',
+			history, transcript: coalesceExternalAgentTranscript(history), transcriptVersion: 1, runtime: 'external',
 			externalAgent: { transport: 'acp', agentId: entry.source, dataHome: root }, externalAgentSessionId: verified.sessionId
 		}, warnings
 	};

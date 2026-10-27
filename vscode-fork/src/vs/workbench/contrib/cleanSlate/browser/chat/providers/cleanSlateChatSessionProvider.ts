@@ -56,6 +56,7 @@ import { CleanSlateChatSessionSnapshotCodec } from './cleanSlateChatSessionSnaps
 import { CLEANSLATE_HOSTED_AGENT_OWNER } from '@cleanslate/sdk/protocol/cleanSlateAI.js';
 import { ICleanSlateBrowserAutomationService } from '../../core/cleanSlateBrowserAutomationService.js';
 import { IExternalAgentConfig, IExternalAgentEvent } from '../../../../../services/cleanSlate/common/externalAgents/externalAgentTypes.js';
+import { externalAgentDisplayText } from '@cleanslate/sdk/externalAgents/externalAgentPresentation.js';
 import { createExternalAgentHandoffPrompt, createExternalAgentHostPrompt } from '@cleanslate/sdk/externalAgents/handoff.js';
 import { CleanSlateDiffService } from '@cleanslate/sdk/services/cleanSlateDiffService.js';
 import { CleanSlateFilesModifiedService, type ICleanSlateFileChange } from '@cleanslate/sdk/agent/cleanSlateFilesModifiedService.js';
@@ -2074,13 +2075,13 @@ export class CleanSlateChatSessionProvider extends Disposable {
     }
 
     private deriveStableTitleText(activeObjective: string, history: readonly { role: string; content: string }[]): string {
-        const firstUserMessage = history.find(message => message.role === 'user' && message.content.trim().length > 0)?.content ?? '';
-        return normalizeCleanSlateVisibleWhitespace(getCleanSlateVisibleUserRequestText(firstUserMessage || activeObjective));
+        const firstUserMessage = history.filter(message => message.role === 'user').map(message => externalAgentDisplayText(message.content)).find(content => content.trim()) ?? '';
+        return normalizeCleanSlateVisibleWhitespace(getCleanSlateVisibleUserRequestText(firstUserMessage || externalAgentDisplayText(activeObjective)));
     }
 
     private isPlaceholderTitle(title: string): boolean {
-        const normalized = title.trim().toLowerCase();
-        return normalized === 'agent' || normalized === 'untitled chat';
+        const normalized = externalAgentDisplayText(title).trim().toLowerCase();
+        return !normalized || normalized === 'agent' || normalized === 'untitled chat';
     }
 
 	private createSessionScopedRenderer(session: ICleanSlateLiveSession, renderer: IResponseRenderer, forceVisible = false): IResponseRenderer {

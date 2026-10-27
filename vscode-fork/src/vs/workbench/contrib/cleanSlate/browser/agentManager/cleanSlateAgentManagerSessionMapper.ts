@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { localize } from '../../../../../nls.js';
+import { externalAgentDisplayText } from '@cleanslate/sdk/externalAgents/externalAgentPresentation.js';
 import type { ICleanSlatePersistedSession, ICleanSlatePersistedThreadMessage } from '../../../../services/cleanSlate/common/core/cleanSlateAI.js';
 import { deriveCleanSlateTranscriptFromHistory, normalizeCleanSlateSessionExecutionState, type ICleanSlateSessionMessage, type ICleanSlateSessionSnapshot, type ICleanSlateTranscriptMessage } from '../chat/types/cleanSlateChatSessionTypes.js';
 
@@ -35,9 +36,7 @@ export class CleanSlateAgentManagerSessionMapper {
 		}
 		const savedAt = Number.isFinite(session.savedAt) ? session.savedAt : Date.now();
 		const updatedAt = Number.isFinite(session.updatedAt) ? session.updatedAt : savedAt;
-		const title = typeof session.title === 'string' && session.title.trim()
-			? session.title
-			: this.deriveSessionTitle(history);
+		const title = (typeof session.title === 'string' ? externalAgentDisplayText(session.title).trim() : '') || this.deriveSessionTitle(history);
 		const executionState = normalizeCleanSlateSessionExecutionState(session);
 		return {
 			id: session.id,
@@ -185,8 +184,8 @@ export class CleanSlateAgentManagerSessionMapper {
 	}
 
 	private deriveSessionTitle(history: readonly ICleanSlateSessionMessage[]): string {
-		const firstUserMessage = history.find(message => message.role === 'user' && message.content.trim());
-		const title = firstUserMessage?.content.trim().replace(/\s+/g, ' ');
+		const title = history.filter(message => message.role === 'user')
+			.map(message => externalAgentDisplayText(message.content).trim().replace(/\s+/g, ' ')).find(Boolean);
 		return title
 			? title.slice(0, 90)
 			: localize('cleanSlate.agentManager.untitled', 'Untitled chat');
