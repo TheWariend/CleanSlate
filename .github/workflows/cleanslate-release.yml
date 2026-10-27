@@ -128,36 +128,7 @@ jobs:
       - name: Smoke test packaged macOS app
         run: node build/cleanslate/test/smoke-packaged-app.mjs --app "$GITHUB_WORKSPACE/VSCode-darwin-arm64/CleanSlate.app"
 
-      - name: Import macOS signing certificate
-        env:
-          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          RUNNER_TEMP_KEYCHAIN_PASSWORD: cleanslate-build-keychain
-        run: |
-          set -euo pipefail
-          if [ -z "${MACOS_CERTIFICATE_BASE64:-}" ] || [ -z "${MACOS_CERTIFICATE_PASSWORD:-}" ]; then
-            echo "Missing MACOS_CERTIFICATE_BASE64 or MACOS_CERTIFICATE_PASSWORD secret." >&2
-            exit 1
-          fi
-          security create-keychain -p "$RUNNER_TEMP_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/buildagent.keychain"
-          security set-keychain-settings -lut 21600 "$RUNNER_TEMP/buildagent.keychain"
-          security unlock-keychain -p "$RUNNER_TEMP_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/buildagent.keychain"
-          echo "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
-          security import "$RUNNER_TEMP/certificate.p12" -k "$RUNNER_TEMP/buildagent.keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security list-keychains -d user -s "$RUNNER_TEMP/buildagent.keychain" $(security list-keychains -d user | sed 's/[ "]//g')
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$RUNNER_TEMP_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/buildagent.keychain"
-          identity="$(security find-identity -v -p codesigning "$RUNNER_TEMP/buildagent.keychain" | grep 'Developer ID Application' | grep -oEi '([0-9A-F]{40})' | head -n 1)"
-          if [ -z "$identity" ]; then
-            echo "No macOS codesigning identity found in imported certificate." >&2
-            exit 1
-          fi
-          echo "CODESIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
-
-      - name: Codesign macOS app
-        env:
-          AGENT_TEMPDIRECTORY: ${{ runner.temp }}
-          VSCODE_ARCH: arm64
-        run: DEBUG=electron-osx-sign* node build/darwin/sign.ts "$GITHUB_WORKSPACE"
+      # Signing is temporarily disabled while the Apple Developer account is renewed.
 
       - name: Stage macOS artifacts
         env:
@@ -168,34 +139,6 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "$GITHUB_WORKSPACE/VSCode-darwin-arm64/CleanSlate.app" "$CLEANSLATE_RELEASE_DIR/CleanSlate-darwin-arm64.zip"
           node build/darwin/create-dmg.ts "$GITHUB_WORKSPACE" "$CLEANSLATE_RELEASE_DIR"
           mv "$CLEANSLATE_RELEASE_DIR/VSCode-darwin-arm64.dmg" "$CLEANSLATE_RELEASE_DIR/CleanSlate-darwin-arm64.dmg"
-
-      - name: Notarize macOS artifacts
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          set -euo pipefail
-          if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" ] || [ -z "${APPLE_TEAM_ID:-}" ]; then
-            echo "Missing APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, or APPLE_TEAM_ID secret." >&2
-            exit 1
-          fi
-          zip="$CLEANSLATE_RELEASE_DIR/CleanSlate-darwin-arm64.zip"
-          dmg="$CLEANSLATE_RELEASE_DIR/CleanSlate-darwin-arm64.dmg"
-          codesign --force --timestamp --sign "$CODESIGN_IDENTITY" "$dmg"
-          xcrun notarytool submit "$zip" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait
-          xcrun notarytool submit "$dmg" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait
-          xcrun stapler staple "$dmg"
-          xcrun stapler validate "$dmg"
-          spctl -a -vvv -t install "$dmg"
 
       - name: Create update manifest
         env:
@@ -228,7 +171,7 @@ jobs:
           if gh release view "$tag" --repo "$RELEASES_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$tag" "$CLEANSLATE_RELEASE_DIR"/* --repo "$RELEASES_REPOSITORY" --clobber
           else
-            gh release create "$tag" "$CLEANSLATE_RELEASE_DIR"/* --repo "$RELEASES_REPOSITORY" --title "CleanSlate $tag" --notes "CleanSlate desktop release."
+            gh release create "$tag" "$CLEANSLATE_RELEASE_DIR"/* --repo "$RELEASES_REPOSITORY" --title "CleanSlate $tag" --notes "CleanSlate desktop release for Apple Silicon (arm64). This build is unsigned and not notarized while our Apple Developer account is being renewed. macOS Gatekeeper may block opening it; signed automatic upgrades may also reject it."
           fi
 
       # Tag last, so a failed build leaves no tag behind and the same version
@@ -253,7 +196,7 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          notes="Download the signed and notarized macOS build from https://github.com/${RELEASES_REPOSITORY}/releases/tag/${RELEASE_TAG}."
+          notes="Download the unsigned, unnotarized Apple Silicon macOS build from https://github.com/${RELEASES_REPOSITORY}/releases/tag/${RELEASE_TAG}."
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --latest --title "CleanSlate $RELEASE_VERSION" --notes "$notes"
           else
