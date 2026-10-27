@@ -20,6 +20,8 @@ export interface ICleanSlateAgentManagerShellBuildOptions {
 	readonly isLeftNavVisible: () => boolean;
 	readonly onToggleLeftNav: () => void;
 	readonly onNewChat: () => void;
+	readonly onNewThread: () => void;
+	readonly onNewBrowserTab: () => void;
 	readonly onSearchInput: () => void;
 	readonly onOpenSettings: () => void;
 	readonly onSignIn: () => Promise<void>;
@@ -36,7 +38,7 @@ export interface ICleanSlateAgentManagerShellParts {
 	readonly workspaceList: HTMLElement;
 	readonly navResizeHandle: HTMLElement;
 	readonly main: HTMLElement;
-	readonly titleElement: HTMLElement;
+	readonly threadTabs: HTMLElement;
 	readonly updateButton: HTMLButtonElement;
 	readonly rightPaneToggleButton: HTMLButtonElement;
 	readonly rightResizeHandle: HTMLElement;
@@ -60,7 +62,7 @@ export class CleanSlateAgentManagerShellView {
 
 	build(root: HTMLElement, options: ICleanSlateAgentManagerShellBuildOptions): ICleanSlateAgentManagerShellParts {
 		let leftNavToggleButton: HTMLButtonElement | undefined;
-		let titleElement!: HTMLElement;
+		let threadTabs!: HTMLElement;
 		let updateButton!: HTMLButtonElement;
 		let rightPaneToggleButton!: HTMLButtonElement;
 
@@ -69,7 +71,7 @@ export class CleanSlateAgentManagerShellView {
 			const titlebarMain = dom.append(root, dom.$('.cleanSlate-agent-manager-integrated-titlebar-main'));
 			leftNavToggleButton = this.buildTitlebarToggle(titlebarNav, options);
 			const header = this.buildHeader(titlebarMain, true, options);
-			titleElement = header.titleElement;
+			threadTabs = header.threadTabs;
 			updateButton = header.updateButton;
 			rightPaneToggleButton = header.rightPaneToggleButton;
 		} else {
@@ -83,7 +85,7 @@ export class CleanSlateAgentManagerShellView {
 
 		if (!options.integratedTitlebar) {
 			const header = this.buildHeader(options.titlebarHeaderHost ?? main, Boolean(options.titlebarHeaderHost), options);
-			titleElement = header.titleElement;
+			threadTabs = header.threadTabs;
 			updateButton = header.updateButton;
 			rightPaneToggleButton = header.rightPaneToggleButton;
 		}
@@ -101,7 +103,7 @@ export class CleanSlateAgentManagerShellView {
 			workspaceList: navParts.workspaceList,
 			navResizeHandle,
 			main,
-			titleElement,
+			threadTabs,
 			updateButton,
 			rightPaneToggleButton,
 			rightResizeHandle,
@@ -352,11 +354,25 @@ export class CleanSlateAgentManagerShellView {
 		parent: HTMLElement,
 		inWindowTitlebar: boolean,
 		options: ICleanSlateAgentManagerShellBuildOptions
-	): { readonly titleElement: HTMLElement; readonly updateButton: HTMLButtonElement; readonly rightPaneToggleButton: HTMLButtonElement } {
+	): { readonly threadTabs: HTMLElement; readonly updateButton: HTMLButtonElement; readonly rightPaneToggleButton: HTMLButtonElement } {
 		const header = dom.append(parent, dom.$('.cleanSlate-agent-manager-header'));
 		header.classList.toggle('in-window-titlebar', inWindowTitlebar);
 		const titlebar = dom.append(header, dom.$('.cleanSlate-agent-manager-titlebar'));
-		const titleElement = dom.append(titlebar, dom.$('.cleanSlate-agent-manager-title'));
+		const threadTabs = dom.append(titlebar, dom.$('.cleanSlate-agent-manager-thread-tabs'));
+		threadTabs.setAttribute('role', 'tablist');
+		threadTabs.setAttribute('aria-label', localize('cleanSlate.agentManager.threadTabs', 'Threads'));
+		const newThread = dom.append(titlebar, dom.$('button.cleanSlate-agent-manager-new-thread')) as HTMLButtonElement;
+		newThread.type = 'button';
+		newThread.title = localize('cleanSlate.agentManager.newThread', 'New thread');
+		newThread.setAttribute('aria-label', newThread.title);
+		dom.append(newThread, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.add)}`));
+		newThread.onclick = options.onNewThread;
+		const browserTab = dom.append(titlebar, dom.$('button.cleanSlate-agent-manager-new-browser')) as HTMLButtonElement;
+		browserTab.type = 'button';
+		browserTab.title = localize('cleanSlate.agentManager.newBrowserTab', 'New browser tab');
+		browserTab.setAttribute('aria-label', browserTab.title);
+		dom.append(browserTab, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.globe)}`));
+		browserTab.onclick = options.onNewBrowserTab;
 
 		const actions = dom.append(header, dom.$('.cleanSlate-agent-manager-header-actions'));
 		const updateButton = dom.append(actions, dom.$('button.cleanSlate-agent-manager-update.hidden')) as HTMLButtonElement;
@@ -376,6 +392,6 @@ export class CleanSlateAgentManagerShellView {
 		dom.append(rightPaneToggleButton, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.layoutSidebarRightOff)}`));
 		rightPaneToggleButton.onclick = options.onToggleRightPane;
 
-		return { titleElement, updateButton, rightPaneToggleButton };
+		return { threadTabs, updateButton, rightPaneToggleButton };
 	}
 }

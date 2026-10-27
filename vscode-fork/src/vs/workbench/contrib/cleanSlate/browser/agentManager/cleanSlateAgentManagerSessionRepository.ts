@@ -32,7 +32,7 @@ export class CleanSlateAgentManagerSessionRepository {
 		const byId = new Map<string, ICleanSlateSessionSnapshot>();
 		const titleSources = new Map<string, ICleanSlateSessionSnapshot>();
 		const insert = (session: ICleanSlateSessionSnapshot | undefined, preferIncoming = false): void => {
-			if (!session || session.parentSessionId || isDeleted(session)) {
+			if (!session || session.parentSessionId || isDeleted(session) || !this.sessionMapper.hasVisibleSessionContent(session)) {
 				return;
 			}
 			const titleSource = titleSources.get(session.id);

@@ -16,6 +16,7 @@ import { Disposable, DisposableStore, IReference, toDisposable } from '../../../
 import { basename, extUri, isEqualOrParent } from '../../../../../base/common/resources.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
+import { generateUuid } from '../../../../../base/common/uuid.js';
 import { ICodeEditor } from '../../../../../editor/browser/editorBrowser.js';
 import { ICodeEditorService } from '../../../../../editor/browser/services/codeEditorService.js';
 import { localize } from '../../../../../nls.js';
@@ -44,6 +45,7 @@ import { IWorkingCopyService } from '../../../../services/workingCopy/common/wor
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { ISCMService } from '../../../scm/common/scm.js';
 import { ITerminalService, type ITerminalInstance } from '../../../terminal/browser/terminal.js';
+import { IBrowserViewWorkbenchService } from '../../../browserView/common/browserView.js';
 import {
 	ICleanSlateArtifactService,
 	ICleanSlateConfigurationService,
@@ -103,6 +105,8 @@ import { CleanSlateAgentManagerProjectProvider } from './cleanSlateAgentManagerP
 import { CleanSlateAgentManagerRightPaneView } from './cleanSlateAgentManagerRightPaneView.js';
 import { CleanSlateAgentManagerSessionMapper } from './cleanSlateAgentManagerSessionMapper.js';
 import { CleanSlateAgentManagerShellView } from './cleanSlateAgentManagerShellView.js';
+import { CleanSlateAgentManagerThreadTabsView } from './cleanSlateAgentManagerThreadTabsView.js';
+import { CleanSlateWorkspaceBrowser } from './cleanSlateWorkspaceBrowser.js';
 import { CleanSlateAgentManagerSidebarView } from './cleanSlateAgentManagerSidebarView.js';
 import { CleanSlateAgentManagerStartupLoadingView } from './cleanSlateAgentManagerStartupLoadingView.js';
 import { CleanSlateAgentManagerWorkspacePickerView } from './cleanSlateAgentManagerWorkspacePickerView.js';
@@ -187,7 +191,11 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	private workspaceList!: HTMLElement;
 	private projectSidebarView: CleanSlateAgentManagerSidebarView | undefined;
 	private searchInput!: HTMLInputElement;
-	private titleElement!: HTMLElement;
+	private threadTabsElement: HTMLElement | undefined;
+	private openWorkspaceTabIds: string[] = [];
+	private activeWorkspaceBrowserTabId: string | undefined;
+	private readonly workspaceBrowser: CleanSlateWorkspaceBrowser;
+	private readonly threadContentId = `cleanSlate-thread-${generateUuid()}`;
 	private chatSurface!: HTMLElement;
 	private progressList!: HTMLElement;
 	private startupLoadingOverlay: HTMLElement | undefined;
@@ -281,6 +289,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	private readonly sessionMapper = new CleanSlateAgentManagerSessionMapper();
 	private readonly sessionRepository: CleanSlateAgentManagerSessionRepository;
 	private readonly shellView = new CleanSlateAgentManagerShellView();
+	private readonly threadTabsView = new CleanSlateAgentManagerThreadTabsView();
 	private readonly startupLoadingView = new CleanSlateAgentManagerStartupLoadingView();
 	private readonly workspacePickerView = this._register(new CleanSlateAgentManagerWorkspacePickerView());
 
@@ -323,8 +332,22 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		@IUpdateService private readonly updateService: IUpdateService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@ITextModelService private readonly textModelService: ITextModelService,
+		@IBrowserViewWorkbenchService browserViewWorkbenchService: IBrowserViewWorkbenchService,
 	) {
 		super();
+		this.workspaceBrowser = this._register(new CleanSlateWorkspaceBrowser(browserViewWorkbenchService, this.storageService));
+		this._register(this.workspaceBrowser.onDidOpenTab(({ id, background }) => {
+			if (!this.openWorkspaceTabIds.includes(id)) { this.openWorkspaceTabIds.push(id); }
+			if (!background) { this.showWorkspaceBrowserTab(id); }
+			else { this.renderThreadTabs(); }
+		}));
+		this._register(this.workspaceBrowser.onDidChange(() => this.renderThreadTabs()));
+		this._register(this.workspaceBrowser.onDidRequestCloseTab(id => void this.closeThreadTab(id)));
+		this._register(this.workspaceBrowser.onDidRequestShowThread(() => {
+			this.showThreadContent();
+			this.renderThreadTabs();
+			this.composerView?.focus();
+		}));
 		this.sessionRepository = new CleanSlateAgentManagerSessionRepository(cleanSlateMainService, this.sessionMapper, this.projectProvider);
 
 		for (const sessionId of loadCleanSlateDeletedSessionIds(this.storageService)) {
@@ -608,6 +631,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		}
 		ensureCleanSlateChatStyles(this.root);
 		this.buildShell(this.root);
+		if (this.activeWorkspaceBrowserTabId) { this.showWorkspaceBrowserTab(this.activeWorkspaceBrowserTabId); }
 		// Cover the freshly rebuilt shell before it is revealed. The active session
 		// can still belong to the previously viewed project until hydration finishes.
 		this.showStartupLoadingState();
@@ -624,10 +648,12 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		this.layoutRightPane();
 		this.scheduleBrowserPaneLayout();
 		this.layoutTerminalPane();
+		this.workspaceBrowser.layout();
 	}
 
 	focus(): void {
-		this.composerView?.focus();
+		if (this.activeWorkspaceBrowserTabId) { this.workspaceBrowser.focusAddress(); }
+		else { this.composerView?.focus(); }
 	}
 
 	isVisible(): boolean {
@@ -645,6 +671,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	}
 
 	hide(): void {
+		this.workspaceBrowser.setVisible(false);
 		this.saveRightPaneStateForActiveSession();
 		this.composerDraftController.persistDraft();
 		this.annotationController.dispose(this.root);
@@ -673,6 +700,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	}
 
 	override dispose(): void {
+		this.workspaceBrowser.setVisible(false);
 		this.saveRightPaneStateForActiveSession();
 		this.annotationController.dispose(this.root);
 		this.shellDisposables.clear();
@@ -752,6 +780,8 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 				this.startNewChat();
 				void this.showNewChatAgentPicker();
 			},
+			onNewThread: () => this.startNewChat(),
+			onNewBrowserTab: () => void this.workspaceBrowser.openTab().catch(error => this.notificationService.error(String(error))),
 			onSearchInput: () => void this.renderProjectTree(),
 			onOpenSettings: () => this.openSettingsFromAgentManager(),
 			onSignIn: () => openCleanSlateSignIn(this.openerService, this.notificationService),
@@ -773,7 +803,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		this.searchInput = shell.searchInput;
 		this.workspaceList = shell.workspaceList;
 		this.projectSidebarView = new CleanSlateAgentManagerSidebarView(this.workspaceList);
-		this.titleElement = shell.titleElement;
+		this.threadTabsElement = shell.threadTabs;
 		this.bindUpdateButton(shell.updateButton);
 		this.bindUpdateMenuItem(shell.updateMenuItem, shell.updateBadge);
 		this.rightPaneToggleButton = shell.rightPaneToggleButton;
@@ -791,7 +821,10 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			this.renderEnvironment();
 		};
 		this.bindNavResize(shell.navResizeHandle);
+		shell.main.id = this.threadContentId;
+		shell.main.setAttribute('role', 'tabpanel');
 		this.buildMain(shell.main);
+		this.workspaceBrowser.mount(shell.main, shell.leftNav);
 		this.environmentHost = dom.append(shell.main, dom.$('aside.cleanSlate-environment-host'));
 		this.environmentHost.hidden = true;
 		this.environmentVisible = false;
@@ -1088,11 +1121,12 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 
 	private clampNavWidth(width: number): number {
 		const rootWidth = this.root?.clientWidth ?? 0;
+		const min = CLEANSLATE_AGENT_MANAGER_NAV_WIDTH_MIN;
 		const maxByRoot = rootWidth > 0
-			? Math.max(CLEANSLATE_AGENT_MANAGER_NAV_WIDTH_MIN, rootWidth - CLEANSLATE_AGENT_MANAGER_MAIN_WIDTH_MIN)
+			? Math.max(min, rootWidth - CLEANSLATE_AGENT_MANAGER_MAIN_WIDTH_MIN)
 			: CLEANSLATE_AGENT_MANAGER_NAV_WIDTH_MAX;
 		const max = Math.min(CLEANSLATE_AGENT_MANAGER_NAV_WIDTH_MAX, maxByRoot);
-		return Math.max(CLEANSLATE_AGENT_MANAGER_NAV_WIDTH_MIN, Math.min(max, Math.round(width)));
+		return Math.max(min, Math.min(max, Math.round(width)));
 	}
 
 	private bindNavResize(handle: HTMLElement): void {
@@ -1157,10 +1191,11 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		const version = ++this.environmentRenderVersion;
 		const host = this.environmentHost;
 		if (!host) { return; }
-		host.hidden = !this.environmentVisible;
-		host.parentElement?.classList.toggle('environment-visible', this.environmentVisible);
+		const visible = this.environmentVisible && !this.activeWorkspaceBrowserTabId;
+		host.hidden = !visible;
+		host.parentElement?.classList.toggle('environment-visible', visible);
 		this.environmentToggle?.setAttribute('aria-pressed', String(this.environmentVisible));
-		if (!this.environmentVisible) { return; }
+		if (!visible) { return; }
 		const snapshot = this.sidebarViewModel.getCurrentSessionSnapshot();
 		const sessionId = snapshot.id;
 		const root = snapshot.workDir || snapshot.projectRoot || this.selectedWorkspaceEntry?.folderUri?.fsPath;
@@ -1569,6 +1604,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			return;
 		}
 		this.settingsPanelVisible = true;
+		this.workspaceBrowser.setVisible(false);
 		this.cancelBrowserPaneLayout();
 		void this.browserAutomationService.setOpenBrowserVisible(false, this.getActiveAgentManagerBrowserSurface());
 		this.root?.classList.add('settings-panel-open');
@@ -1605,6 +1641,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			dom.clearNode(this.settingsOverlay);
 		}
 		this.layoutRightPane();
+		if (this.activeWorkspaceBrowserTabId) { this.workspaceBrowser.setVisible(true); }
 	}
 
 	private async publishActiveSessionForIdeHandoff(): Promise<void> {
@@ -1947,10 +1984,11 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	}
 
 	private updateRightPaneChrome(): void {
-		this.root?.classList.toggle('right-pane-visible', this.rightPaneVisible);
-		this.rightPane?.classList.toggle('visible', this.rightPaneVisible);
+		const visible = this.rightPaneVisible && !this.activeWorkspaceBrowserTabId;
+		this.root?.classList.toggle('right-pane-visible', visible);
+		this.rightPane?.classList.toggle('visible', visible);
 		this.rightPane?.classList.toggle('launcher', this.rightPaneActiveTab === undefined);
-		this.rightResizeHandle?.classList.toggle('visible', this.rightPaneVisible);
+		this.rightResizeHandle?.classList.toggle('visible', visible);
 		if (this.rightPaneTabsEl) {
 			this.rightPaneView.renderTabStrip(this.rightPaneTabsEl, this.rightPaneOpenTabs, this.rightPaneActiveTab, {
 				onSelect: tab => this.selectRightPaneTab(tab, true),
@@ -1972,10 +2010,11 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		this.setRightPaneWidth(this.getCurrentRightPaneWidth(), false);
 		this.scheduleBrowserPaneLayout();
 		this.layoutTerminalPane();
+		this.workspaceBrowser.layout();
 	}
 
 	private scheduleBrowserPaneLayout(): void {
-		if (this.settingsPanelVisible || !this.browserPaneActive || !this.rightPaneVisible || !this.rightPaneBody || !this.root || this.root.classList.contains('hidden')) {
+		if (this.activeWorkspaceBrowserTabId || this.settingsPanelVisible || !this.browserPaneActive || !this.rightPaneVisible || !this.rightPaneBody || !this.root || this.root.classList.contains('hidden')) {
 			return;
 		}
 		if (typeof this.browserPaneLayoutFrame === 'number') {
@@ -2011,7 +2050,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	}
 
 	private layoutBrowserPane(retryOnInvalid = true): void {
-		if (this.settingsPanelVisible || !this.browserPaneActive || !this.rightPaneVisible || !this.rightPaneBody || !this.root) {
+		if (this.activeWorkspaceBrowserTabId || this.settingsPanelVisible || !this.browserPaneActive || !this.rightPaneVisible || !this.rightPaneBody || !this.root) {
 			return;
 		}
 		const rect = (this.browserPaneViewport ?? this.rightPaneBody).getBoundingClientRect();
@@ -2040,7 +2079,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			// The screen may have switched while the asynchronous native layout
 			// request was in flight. Settings owns the full Agent Manager surface,
 			// so a late right-pane composition must not cross that route boundary.
-			if (this.settingsPanelVisible) {
+			if (this.settingsPanelVisible || this.activeWorkspaceBrowserTabId) {
 				return this.browserAutomationService.setOpenBrowserVisible(false, this.getActiveAgentManagerBrowserSurface());
 			}
 			return undefined;
@@ -2994,6 +3033,8 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	}
 
 	private startNewChat(entry: ICleanSlateWorkspaceEntry | undefined = this.selectedWorkspaceEntry ?? this.getCurrentWorkspaceEntry()): void {
+		this.rememberActiveThread();
+		this.showThreadContent();
 		this.workspaceSelectionRequest++;
 		this.invalidateWorkspaceDataCache();
 		this.saveRightPaneStateForActiveSession();
@@ -3117,6 +3158,8 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	}
 
 	private startNewChatWithExternalAgent(entry: ICleanSlateWorkspaceEntry | undefined, agentId: string): void {
+		this.rememberActiveThread();
+		this.showThreadContent();
 		this.workspaceSelectionRequest++;
 		this.invalidateWorkspaceDataCache();
 		this.saveRightPaneStateForActiveSession();
@@ -3147,6 +3190,8 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	}
 
 	private async restoreSession(session: ICleanSlateSessionSnapshot, entry?: ICleanSlateWorkspaceEntry, fromNavigation = false): Promise<void> {
+		this.rememberActiveThread();
+		this.showThreadContent();
 		const request = ++this.workspaceSelectionRequest;
 		if (fromNavigation && session.id === this.sidebarViewModel.getActiveSessionId()) {
 			this.selectedWorkspaceEntry = this.projectProvider.getWorkspaceEntryForSession(session, this.workspaceEntries, entry);
@@ -3165,7 +3210,6 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		const provisionalEntry = this.projectProvider.getWorkspaceEntryForSession(session, this.workspaceEntries, entry);
 		this.selectedWorkspaceEntry = provisionalEntry;
 		this.rememberActiveSessionForWorkspace(provisionalEntry, session.id);
-		this.titleElement.textContent = session.title || localize('cleanSlate.agentManager.defaultTitle', 'Agent workspace');
 		this.projectSidebarView?.updateActiveState(
 			session.id,
 			this.projectProvider.getWorkspaceEntryKey(provisionalEntry),
@@ -3220,7 +3264,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 
 	private hydrateSession(summary: ICleanSlateSessionSnapshot): Promise<ICleanSlateSessionSnapshot> {
 		const cached = this.sessionCache.get(summary.id);
-		if (cached && (this.hydratedSessionIds.has(summary.id) || this.sessionMapper.hasHydratedConversationContent(cached))) {
+		if (cached && (this.openWorkspaceTabIds.includes(summary.id) || this.hydratedSessionIds.has(summary.id) || this.sessionMapper.hasHydratedConversationContent(cached))) {
 			this.hydratedSessionIds.add(summary.id);
 			return Promise.resolve(this.sessionMapper.mergeSessionTitle(cached, summary));
 		}
@@ -3323,11 +3367,121 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		if (!this.root) {
 			return;
 		}
-		this.titleElement.textContent = this.sessionProvider.getCurrentTitle()
-			|| localize('cleanSlate.agentManager.defaultTitle', 'Agent workspace');
+		this.renderThreadTabs();
 		this.hideProgress();
 		this.updatePendingEdits();
 		this.updateComposerWorkspaceSelectorState();
+	}
+
+	private rememberActiveThread(): void {
+		const session = this.sidebarViewModel.getCurrentSessionSnapshot();
+		if (this.isDeletedSession(session)) {
+			return;
+		}
+		this.sessionCache.set(session.id, session);
+		if (!this.activeWorkspaceBrowserTabId && !this.openWorkspaceTabIds.includes(session.id)) {
+			this.openWorkspaceTabIds.push(session.id);
+		}
+	}
+
+	private renderThreadTabs(): void {
+		if (!this.threadTabsElement || !this.root) {
+			return;
+		}
+		this.rememberActiveThread();
+		const browserTabs = this.workspaceBrowser.getTabs();
+		const tabs = this.openWorkspaceTabIds.flatMap(id => {
+			const browser = browserTabs.find(tab => tab.id === id);
+			if (browser) {
+				return id === this.workspaceBrowser.activeTabId ? [{ ...browser, title: localize('cleanSlate.browser.workspaceTitle', 'Browser'), closable: false }] : [];
+			}
+			const session = this.sessionCache.get(id);
+			return session ? [{
+				id,
+				title: session.history.length || session.transcript?.length
+					? session.title || localize('cleanSlate.agentManager.newThread', 'New thread')
+					: localize('cleanSlate.agentManager.newThread', 'New thread'),
+				running: this.sidebarViewModel.isSessionRunning(id)
+			}] : [];
+		});
+		this.threadTabsView.render(this.threadTabsElement, tabs, this.activeWorkspaceBrowserTabId ?? this.sidebarViewModel.getActiveSessionId(), {
+			contentId: this.threadContentId,
+			onSelect: id => this.selectThreadTab(id),
+			onClose: id => void this.closeThreadTab(id)
+		});
+	}
+
+	private async selectThreadTab(id: string): Promise<void> {
+		if (this.workspaceBrowser.hasTab(id)) { this.showWorkspaceBrowserTab(id); return; }
+		const session = this.sessionCache.get(id);
+		if (session && this.openWorkspaceTabIds.includes(id)) {
+			this.dismissAgentPicker();
+			await this.restoreSession(session, undefined, true);
+		}
+	}
+
+	private async closeThreadTab(id: string): Promise<void> {
+		const index = this.openWorkspaceTabIds.indexOf(id);
+		if (index < 0) {
+			return;
+		}
+		const active = id === (this.activeWorkspaceBrowserTabId ?? this.sidebarViewModel.getActiveSessionId());
+		if (active) {
+			const fallback = this.openWorkspaceTabIds[index + 1] ?? this.openWorkspaceTabIds[index - 1];
+			if (fallback) {
+				await this.selectThreadTab(fallback);
+			} else {
+				this.startNewChat();
+			}
+			if (id === (this.activeWorkspaceBrowserTabId ?? this.sidebarViewModel.getActiveSessionId())) {
+				return;
+			}
+		}
+		// Closing a tab leaves the conversation and any live run in session history.
+		this.openWorkspaceTabIds = this.openWorkspaceTabIds.filter(sessionId => sessionId !== id);
+		this.workspaceBrowser.closeTab(id);
+		this.renderThreadTabs();
+		if (active) {
+			this.threadTabsElement?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+		}
+	}
+
+	private showWorkspaceBrowserTab(id: string): void {
+		this.workspaceSelectionRequest++;
+		this.dismissAgentPicker();
+		this.composerDraftController.persistDraft();
+		this.activeWorkspaceBrowserTabId = id;
+		this.root?.classList.add('browser-mode');
+		this.cancelBrowserPaneLayout();
+		void this.browserAutomationService.setOpenBrowserVisible(false, this.getActiveAgentManagerBrowserSurface());
+		this.updateWorkspaceChrome();
+		if (this.chatSurface) { this.chatSurface.hidden = true; }
+		this.workspaceBrowser.activate(id);
+		this.workspaceBrowser.setVisible(!!this.root && !this.settingsPanelVisible);
+		this.renderThreadTabs();
+	}
+
+	private showThreadContent(): void {
+		this.activeWorkspaceBrowserTabId = undefined;
+		this.root?.classList.remove('browser-mode');
+		this.workspaceBrowser.setVisible(false);
+		if (this.chatSurface) { this.chatSurface.hidden = false; }
+		this.updateWorkspaceChrome();
+		this.layoutRightPane();
+	}
+
+	private updateWorkspaceChrome(): void {
+		const browser = !!this.activeWorkspaceBrowserTabId;
+		const actions = this.rightPaneToggleButton?.parentElement;
+		if (actions) {
+			actions.classList.toggle('browser-controls-hidden', browser);
+			actions.inert = browser;
+		}
+		if (this.environmentHost) {
+			this.environmentHost.hidden = browser || !this.environmentVisible;
+			this.environmentHost.parentElement?.classList.toggle('environment-visible', !browser && this.environmentVisible);
+		}
+		this.updateRightPaneChrome();
 	}
 
 	private refreshLastAssistantMessageFromHistory(): void {
@@ -3597,6 +3751,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			return;
 		}
 		this.rememberSessions([snapshot]);
+		this.renderThreadTabs();
 		const workspaceEntry = snapshot.id === this.sidebarViewModel.getActiveSessionId()
 			? this.projectProvider.getWorkspaceEntryForSession(snapshot, this.workspaceEntries)
 			: undefined;
@@ -3957,6 +4112,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			this.rightPaneTerminalsBySession.get(session.id)?.dispose();
 			this.rightPaneTerminalsBySession.delete(session.id);
 			this.sessionCache.delete(session.id);
+			this.openWorkspaceTabIds = this.openWorkspaceTabIds.filter(id => id !== session.id);
 			for (const [workspaceKey, activeSessionId] of this.activeSessionByWorkspaceKey) {
 				if (activeSessionId === session.id) {
 					this.activeSessionByWorkspaceKey.delete(workspaceKey);
@@ -3965,6 +4121,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		}
 		await this.rememberGlobalClearIfNoKnownSessionsRemain(deletedAt);
 		if (!deletedActiveSession) {
+			this.renderThreadTabs();
 			this.renderSessions();
 			return;
 		}

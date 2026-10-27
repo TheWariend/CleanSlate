@@ -11,6 +11,30 @@ import { CleanSlateAgentManagerProjectProvider } from '../../browser/agentManage
 import type { ICleanSlateSessionSnapshot } from '../../browser/chat/types/cleanSlateChatSessionTypes.js';
 
 suite('CleanSlate chat navigation', () => {
+	test('keeps unsent draft tabs out of sidebar history until the first message', async () => {
+		const draft: ICleanSlateSessionSnapshot = {
+			id: 'draft', title: 'Agent', savedAt: 1, planMode: false, reasoningLevel: 'medium', history: [],
+			transcript: [{ role: 'system', content: 'Internal context', isInternalState: true }]
+		};
+		const repository = new CleanSlateAgentManagerSessionRepository({ listThreadSessions: async () => [] } as any,
+			new CleanSlateAgentManagerSessionMapper(), new CleanSlateAgentManagerProjectProvider());
+		const load = () => repository.load([], [draft], [draft], () => false, false);
+		assert.deepStrictEqual((await load()).sessions, []);
+		assert.strictEqual(draft.title, 'Agent', 'Filtering must keep the draft available to its tab');
+		draft.history.push({ role: 'user', content: 'Implement search' });
+		assert.deepStrictEqual((await load()).sessions.map(session => session.id), ['draft']);
+	});
+
+	test('includes a submitted image-only thread in sidebar history', async () => {
+		const session: ICleanSlateSessionSnapshot = {
+			id: 'image-thread', title: 'Image request', savedAt: 1, planMode: false, reasoningLevel: 'medium',
+			history: [{ role: 'user', content: '', images: ['data:image/png;base64,test'] }]
+		};
+		const repository = new CleanSlateAgentManagerSessionRepository({ listThreadSessions: async () => [] } as any,
+			new CleanSlateAgentManagerSessionMapper(), new CleanSlateAgentManagerProjectProvider());
+		assert.deepStrictEqual((await repository.load([], [session], [], () => false, false)).sessions.map(session => session.id), ['image-thread']);
+	});
+
 	for (const cachedTitle of ['Agent', 'An earlier title']) {
 		test(`loads the saved old-chat title over '${cachedTitle}' without loading its conversation`, async () => {
 			const cached: ICleanSlateSessionSnapshot = {
