@@ -106,9 +106,8 @@ export class CleanSlateAgentManagerSessionMapper {
 	}
 
 	/**
-	 * Sidebar summaries intentionally contain only the first user prompt. Treat a
-	 * snapshot as a warm conversation only when it contains data beyond that
-	 * summary, mirroring OpenCode's "messages already present" navigation gate.
+	 * A sidebar preview alone does not mean conversation history is loaded.
+	 * Require additional visible messages or a visible non-user message.
 	 */
 	hasHydratedConversationContent(session: ICleanSlateSessionSnapshot): boolean {
 		const messages = session.transcript?.length

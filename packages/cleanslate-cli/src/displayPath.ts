@@ -14,8 +14,8 @@ import path from 'node:path';
  * matters because the header is the part of the CLI that ends up in
  * screenshots, screen shares and bug reports.
  *
- * Anything outside the home directory is left alone: shortening it would be
- * misleading, and there is no name to hide.
+ * Paths outside the current home directory are left unchanged and may still
+ * contain personal information.
  */
 export function displayPath(target: string, home: string = os.homedir()): string {
 	if (!target) {
@@ -32,8 +32,8 @@ export function displayPath(target: string, home: string = os.homedir()): string
 		return '~';
 	}
 
-	// Only abbreviate a real path segment, so `/Users/mazin-old` is not
-	// mistaken for something under `/Users/mazin`.
+	// Only abbreviate a real path segment, so `/Users/example-old` is not
+	// mistaken for something under `/Users/example`.
 	const prefix = normalizedHome + path.sep;
 	if (normalizedTarget.startsWith(prefix)) {
 		return '~' + path.sep + normalizedTarget.slice(prefix.length);
