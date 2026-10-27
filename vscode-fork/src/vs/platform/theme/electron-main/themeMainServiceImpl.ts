@@ -322,7 +322,8 @@ export class ThemeMainService extends Disposable implements IThemeMainService {
 	private updateBackgroundColor(windowId: number, splash: IPartsSplash): void {
 		for (const window of getAllWindowsExcludingOffscreen()) {
 			if (window.id === windowId) {
-				window.setBackgroundColor(splash.colorInfo.background);
+				// Theme changes must preserve the native material behind macOS navigation.
+				window.setBackgroundColor(isMacintosh ? '#00000000' : splash.colorInfo.background);
 				break;
 			}
 		}

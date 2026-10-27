@@ -108,6 +108,43 @@ test('first launch, settings navigation and returning to the chat retain the com
 	await expect(input).toHaveValue('Draft that must survive settings');
 });
 
+test('macOS sidebar exposes native material through theme changes and keeps the canvas opaque', async ({ page, app }) => {
+	test.skip(process.platform !== 'darwin', 'Native sidebar material is macOS-specific.');
+	const manager = await openManager(page);
+	await expect(manager.locator('.cleanSlate-agent-manager-startup-loading')).toBeHidden();
+	const nativeBackground = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()
+		.find(window => window.webContents.getURL().includes('workbench'))?.getBackgroundColor());
+	const layerAlphas = () => page.evaluate(() => {
+		const canvas = document.createElement('canvas');
+		canvas.width = canvas.height = 1;
+		const context = canvas.getContext('2d');
+		return Object.fromEntries(Object.entries({
+			body: 'body', workbench: '.monaco-workbench', surface: '.cleanSlate-agent-manager-surface',
+			sidebar: '.cleanSlate-agent-manager-nav', canvas: '.cleanSlate-agent-manager-main',
+		}).map(([name, selector]) => {
+			context.clearRect(0, 0, 1, 1);
+			context.fillStyle = getComputedStyle(document.querySelector(selector)).backgroundColor;
+			context.fillRect(0, 0, 1, 1);
+			return [name, context.getImageData(0, 0, 1, 1).data[3]];
+		}));
+	});
+	const expectNativeSidebar = async () => {
+		// Electron omits alpha here; renderer layers below verify their transparency.
+		await expect.poll(nativeBackground).toBe('#000000');
+		await expect.poll(layerAlphas).toEqual({ body: 0, workbench: 0, surface: 0, sidebar: 51, canvas: 255 });
+	};
+	await expectNativeSidebar();
+	const settingsPath = join(await app.evaluate(({ app }) => app.getPath('userData')), 'User/settings.json');
+	const settings = JSON.parse(await (await import('node:fs/promises')).readFile(settingsPath, 'utf8'));
+	await writeFile(settingsPath, JSON.stringify({ ...settings, 'workbench.colorTheme': 'Default Light Modern' }));
+	await expect(page.locator('.monaco-workbench')).toHaveClass(/(?:^|\s)vs(?:\s|$)/);
+	await expectNativeSidebar();
+	await page.reload();
+	await openManager(page);
+	await expect(manager.locator('.cleanSlate-agent-manager-startup-loading')).toBeHidden();
+	await expectNativeSidebar();
+});
+
 test('Agent Manager can return to the editor, open a file, and come back', async ({ page }, testInfo) => {
 	const manager = await openManager(page);
 	const sidebarColor = await manager.locator('.cleanSlate-agent-manager-nav').evaluate(element => getComputedStyle(element).backgroundColor);

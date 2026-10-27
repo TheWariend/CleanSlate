@@ -9,6 +9,7 @@ registerThemingParticipant((_theme, collector) => {
 	collector.addRule(`
 		.monaco-workbench {
 			--cleanSlate-workspace-canvas-radius: 12px;
+			--cleanSlate-sidebar-background: var(--vscode-sideBar-background);
 		}
 
 		.monaco-workbench:not(.cleanSlate-agent-manager-host-active) { background-color: var(--vscode-sideBar-background); }
@@ -48,7 +49,7 @@ registerThemingParticipant((_theme, collector) => {
 			--cleanSlate-agent-manager-right-width: 440px;
 			--cleanSlate-agent-manager-ease: cubic-bezier(0.2, 0, 0, 1);
 			--cleanSlate-agent-manager-surface-bg: var(--vscode-editor-background);
-				--cleanSlate-agent-manager-nav-bg: var(--vscode-sideBar-background);
+				--cleanSlate-agent-manager-nav-bg: var(--cleanSlate-sidebar-background, var(--vscode-sideBar-background));
 				--cleanSlate-agent-manager-panel-bg: var(--vscode-editor-background);
 				--cleanSlate-agent-manager-card-bg: var(--vscode-input-background);
 				--cleanSlate-agent-manager-card-hover-bg: var(--vscode-list-hoverBackground);
@@ -81,6 +82,37 @@ registerThemingParticipant((_theme, collector) => {
 				font-family: var(--vscode-font-family);
 				overflow: hidden;
 			}
+
+		/* Reveal the native macOS sidebar material through every covering layer. */
+		body:has(.monaco-workbench.mac:not(.web)),
+		.monaco-workbench.mac:not(.web) {
+			background: transparent !important;
+		}
+
+		.monaco-workbench.mac:not(.web) {
+			--cleanSlate-sidebar-background: color-mix(in srgb, var(--vscode-sideBar-background) 20%, transparent);
+		}
+
+		.monaco-workbench.mac:not(.web).cleanSlate-agent-manager-host-active > .cleanSlate-agent-manager-surface {
+			background: transparent;
+		}
+
+		.monaco-workbench.mac:not(.web) .part.sidebar,
+		.monaco-workbench.mac:not(.web) .part.activitybar,
+		.monaco-workbench.mac:not(.web) .part.titlebar {
+			/* These parts also apply opaque theme colors as inline styles. */
+			background-color: var(--cleanSlate-sidebar-background) !important;
+		}
+
+		.monaco-workbench.mac:not(.web).cleanSlate-agent-manager-host-active .cleanSlate-agent-manager-integrated-titlebar-main {
+			background: transparent;
+		}
+
+		@media (prefers-reduced-transparency: reduce) {
+			.monaco-workbench.mac:not(.web) {
+				--cleanSlate-sidebar-background: var(--vscode-sideBar-background);
+			}
+		}
 
 		.cleanSlate-agent-manager-surface:focus,
 		.cleanSlate-agent-manager-surface:focus-visible {
