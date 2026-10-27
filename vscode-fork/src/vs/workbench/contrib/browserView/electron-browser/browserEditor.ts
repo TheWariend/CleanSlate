@@ -26,7 +26,7 @@ import { IEditorGroup } from '../../../services/editor/common/editorGroupsServic
 import { IEditorOptions } from '../../../../platform/editor/common/editor.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
-import { BrowserOverlayManager, BrowserOverlayType, IBrowserOverlayInfo } from './overlayManager.js';
+import { BrowserOverlayManager, BrowserOverlayType, IBrowserOverlayInfo } from '../browser/overlayManager.js';
 import { getZoomFactor, onDidChangeZoomLevel } from '../../../../base/browser/browser.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { Disposable, DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';

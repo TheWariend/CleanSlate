@@ -14,6 +14,7 @@ import { IV8Profile } from '../../profiling/common/profiling.js';
 import { AuthInfo, Credentials } from '../../request/common/request.js';
 import { IPartsSplash } from '../../theme/common/themeService.js';
 import { IColorScheme, IOpenedAuxiliaryWindow, IOpenedMainWindow, IOpenEmptyWindowOptions, IOpenWindowOptions, IPoint, IRectangle, IWindowOpenable } from '../../window/common/window.js';
+import { BrowserImportKind, IBrowserBookmarkImport, IBrowserImportSource, IBrowserProfileImport, IDefaultBrowserState } from './browserIntegration.js';
 
 export interface IToastOptions {
 	readonly id: string;
@@ -119,6 +120,14 @@ export interface ICommonNativeHostService {
 	readonly onDidTriggerWindowSystemContextMenu: Event<{ readonly windowId: number; readonly x: number; readonly y: number }>;
 
 	// Window
+	getBrowserImportSources(): Promise<IBrowserImportSource[]>;
+	chooseBrowserImportFolder(): Promise<IBrowserImportSource[] | undefined>;
+	importBrowserData(sourceIds: readonly string[], kinds: readonly BrowserImportKind[]): Promise<IBrowserProfileImport[]>;
+	importBrowserBookmarks(sourceId: string): Promise<IBrowserBookmarkImport>;
+	importBrowserBookmarksHTML(): Promise<IBrowserBookmarkImport | undefined>;
+	getDefaultBrowserState(): Promise<IDefaultBrowserState>;
+	setAsDefaultBrowser(): Promise<IDefaultBrowserState>;
+
 	getWindows(options: { includeAuxiliaryWindows: true }): Promise<Array<IOpenedMainWindow | IOpenedAuxiliaryWindow>>;
 	getWindows(options: { includeAuxiliaryWindows: false }): Promise<Array<IOpenedMainWindow>>;
 	getWindowCount(): Promise<number>;

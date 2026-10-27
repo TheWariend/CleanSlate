@@ -30,11 +30,11 @@ const nativeShortcuts = new Set([
 ]);
 
 /**
- * Painted wherever the page has not, so it shows as a seam beside the scrollbar and as
- * a flash before a page's first paint. White reads as a bright tear in the browser
- * pane, so this tracks the surrounding dark chrome instead.
+ * Pages with transparent canvases rely on the browser's default white background
+ * for their default black text. App chrome colors must not bleed into web content;
+ * pages that paint their own background or declare color-scheme still control it.
  */
-const VIEW_BACKGROUND_COLOR = '#1F1F1F';
+const VIEW_BACKGROUND_COLOR = '#FFFFFF';
 
 /**
  * Pages that style themselves dark but never declare `color-scheme` get Chromium's
@@ -43,6 +43,10 @@ const VIEW_BACKGROUND_COLOR = '#1F1F1F';
  * is the backstop for documents where the preload injection does not stick.
  */
 const DEFAULT_SCROLLBAR_CSS = ':root { scrollbar-color: rgba(135, 135, 135, 0.55) transparent; }';
+
+// Keep in sync with preload-browserView.ts. Remote pages must not turn their
+// headers into native window-drag regions that swallow hover and mouse clicks.
+const DISABLE_PAGE_DRAG_CSS = '*, *::before, *::after { -webkit-app-region: no-drag !important; }';
 
 /**
  * Represents a single browser view instance with its WebContentsView and all associated logic.
@@ -301,6 +305,7 @@ export class BrowserView extends Disposable {
 		// Re-applied per document: injected stylesheets do not survive a navigation.
 		webContents.on('dom-ready', () => {
 			webContents.insertCSS(DEFAULT_SCROLLBAR_CSS).catch(() => undefined);
+			webContents.insertCSS(DISABLE_PAGE_DRAG_CSS, { cssOrigin: 'user' }).catch(() => undefined);
 		});
 
 		webContents.on('render-process-gone', (_event, details) => {
@@ -586,13 +591,19 @@ export class BrowserView extends Disposable {
 			}
 		}
 
-		this._view.webContents.setZoomFactor(bounds.zoomFactor);
-		this._view.setBounds({
+		if (this._view.webContents.getZoomFactor() !== bounds.zoomFactor) {
+			this._view.webContents.setZoomFactor(bounds.zoomFactor);
+		}
+		const nextBounds = {
 			x: Math.round(bounds.x * bounds.zoomFactor),
 			y: Math.round(bounds.y * bounds.zoomFactor),
 			width: Math.round(bounds.width * bounds.zoomFactor),
 			height: Math.round(bounds.height * bounds.zoomFactor)
-		});
+		};
+		const current = this._view.getBounds();
+		if (current.x !== nextBounds.x || current.y !== nextBounds.y || current.width !== nextBounds.width || current.height !== nextBounds.height) {
+			this._view.setBounds(nextBounds);
+		}
 	}
 
 	/**
@@ -620,6 +631,8 @@ export class BrowserView extends Disposable {
 		if (!contentView) {
 			return;
 		}
+		// Keep native pointer tracking intact when the view is already on top.
+		if (contentView.children.at(-1) === this._view) { return; }
 		contentView.removeChildView(this._view);
 		contentView.addChildView(this._view);
 	}

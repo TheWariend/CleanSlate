@@ -201,7 +201,7 @@ export const config = {
 	darwinBundleURLTypes: [{
 		role: 'Viewer',
 		name: product.nameLong,
-		urlSchemes: [product.urlProtocol]
+		urlSchemes: [product.urlProtocol, 'http', 'https']
 	}],
 	darwinForceDarkModeSupport: true,
 	darwinCredits: darwinCreditsTemplate ? Buffer.from(darwinCreditsTemplate({ commit: commit, date: new Date().toISOString() })) : undefined,

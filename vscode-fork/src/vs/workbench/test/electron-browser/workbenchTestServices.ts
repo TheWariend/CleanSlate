@@ -62,6 +62,13 @@ export class TestSharedProcessService implements ISharedProcessService {
 }
 
 export class TestNativeHostService implements INativeHostService {
+	async getBrowserImportSources() { return []; }
+	async chooseBrowserImportFolder() { return undefined; }
+	async importBrowserData() { return []; }
+	async importBrowserBookmarks() { return { bookmarks: [], skipped: 0 }; }
+	async importBrowserBookmarksHTML() { return undefined; }
+	async getDefaultBrowserState() { return { isDefault: false, canSetDefault: false }; }
+	async setAsDefaultBrowser() { return this.getDefaultBrowserState(); }
 
 	declare readonly _serviceBrand: undefined;
 

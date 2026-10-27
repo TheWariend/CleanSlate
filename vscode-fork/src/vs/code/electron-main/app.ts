@@ -882,6 +882,12 @@ export class CodeApplication extends Disposable {
 	}
 
 	private async handleProtocolUrl(windowsMainService: IWindowsMainService, dialogMainService: IDialogMainService, urlService: IURLService, uri: URI, options?: IOpenURLOptions): Promise<boolean> {
+		if (uri.scheme === 'http' || uri.scheme === 'https') {
+			if (windowsMainService.getWindowCount() > 0) { return false; }
+			const window = (await windowsMainService.open({ context: OpenContext.LINK, cli: { ...this.environmentMainService.args }, forceNewWindow: true, forceEmpty: true })).at(0);
+			await window?.ready();
+			return window ? urlService.open(uri, options) : false;
+		}
 		this.logService.trace('app#handleProtocolUrl():', uri.toString(true), options);
 
 		// Support 'workspace' URLs (https://github.com/microsoft/vscode/issues/124263)

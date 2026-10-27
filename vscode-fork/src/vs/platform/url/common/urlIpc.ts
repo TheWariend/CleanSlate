@@ -50,6 +50,7 @@ export class URLHandlerRouter implements IClientRouter<string> {
 
 		if (Array.isArray(arg) && arg.length > 0) {
 			const uri = URI.revive(arg[0]);
+			if (uri.scheme === 'http' || uri.scheme === 'https') { return this.next.routeCall(hub, command, arg, cancellationToken); }
 
 			this.logService.trace('URLHandlerRouter#routeCall() with URI argument', uri.toString(true));
 

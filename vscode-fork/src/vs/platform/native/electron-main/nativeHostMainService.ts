@@ -49,12 +49,17 @@ import { IProxyAuthService } from './auth.js';
 import { AuthInfo, Credentials, IRequestService } from '../../request/common/request.js';
 import { randomPath } from '../../../base/common/extpath.js';
 import { CancellationTokenSource } from '../../../base/common/cancellation.js';
+import { BrowserImportKind, IBrowserBookmarkImport, IBrowserImportSource, IBrowserProfileImport, IDefaultBrowserState, parseBrowserBookmarksHTML } from '../common/browserIntegration.js';
+import { discoverBrowserImportSources, discoverInstalledBrowserApplications, matchBrowserApplication, importBrowserBookmarks, importBrowserData, publicBrowserImportSource, readBrowserApplicationIcon, readBrowserImportFile } from '../node/browserImport.js';
+import { getDefaultBrowserState, setAsDefaultBrowser } from './browserDefaults.js';
 
 export interface INativeHostMainService extends AddFirstParameterToFunctions<ICommonNativeHostService, Promise<unknown> /* only methods, not events */, number | undefined /* window ID */> { }
 
 export const INativeHostMainService = createDecorator<INativeHostMainService>('nativeHostMainService');
 
 export class NativeHostMainService extends Disposable implements INativeHostMainService {
+
+	private readonly browserImportRoots = new Set<string>();
 
 	declare readonly _serviceBrand: undefined;
 
@@ -566,6 +571,53 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 	async showOpenDialog(windowId: number | undefined, options: OpenDialogOptions & INativeHostOptions): Promise<OpenDialogReturnValue> {
 		const window = this.windowById(options?.targetWindowId, windowId);
 		return this.dialogMainService.showOpenDialog(options, window?.win ?? undefined);
+	}
+
+	async getBrowserImportSources(_windowId: number | undefined): Promise<IBrowserImportSource[]> {
+		const sources = await discoverBrowserImportSources(app.getPath('home'), process.platform, process.env, Array.from(this.browserImportRoots));
+		const applications = await discoverInstalledBrowserApplications(app.getPath('home'));
+		const icons = new Map<string, string>();
+		const result: IBrowserImportSource[] = [];
+		for (const source of sources) {
+			const application = matchBrowserApplication(source.browser, applications);
+			if (application && !icons.has(application.path)) {
+				const icon = await readBrowserApplicationIcon(application);
+				if (icon) { icons.set(application.path, icon); }
+				else {
+					try { const nativeIcon = await app.getFileIcon(application.path, { size: 'large' }); if (!nativeIcon.isEmpty()) { icons.set(application.path, nativeIcon.toDataURL()); } }
+					catch { /* A missing app icon does not prevent profile import. */ }
+				}
+			}
+			result.push({ ...publicBrowserImportSource(source), browser: application?.name ?? source.browser, icon: application ? icons.get(application.path) : undefined });
+		}
+		return result;
+	}
+
+	async chooseBrowserImportFolder(windowId: number | undefined): Promise<IBrowserImportSource[] | undefined> {
+		const result = await this.showOpenDialog(windowId, { title: localize('browser.chooseProfile', 'Choose a browser profile folder'), properties: ['openDirectory'] });
+		if (result.canceled || !result.filePaths[0]) { return undefined; }
+		this.browserImportRoots.add(result.filePaths[0]);
+		return this.getBrowserImportSources(windowId);
+	}
+
+	async importBrowserData(_windowId: number | undefined, sourceIds: readonly string[], kinds: readonly BrowserImportKind[]): Promise<IBrowserProfileImport[]> {
+		return importBrowserData(sourceIds, kinds, app.getPath('home'), Array.from(this.browserImportRoots));
+	}
+
+	async importBrowserBookmarks(_windowId: number | undefined, sourceId: string): Promise<IBrowserBookmarkImport> {
+		return importBrowserBookmarks(sourceId, app.getPath('home'));
+	}
+
+	async importBrowserBookmarksHTML(windowId: number | undefined): Promise<IBrowserBookmarkImport | undefined> {
+		const result = await this.showOpenDialog(windowId, { title: localize('browser.importBookmarks', 'Import bookmarks'), filters: [{ name: 'Bookmarks HTML', extensions: ['html', 'htm'] }], properties: ['openFile'] });
+		if (result.canceled || !result.filePaths[0]) { return undefined; }
+		return parseBrowserBookmarksHTML(await readBrowserImportFile(result.filePaths[0]));
+	}
+
+	async getDefaultBrowserState(_windowId: number | undefined): Promise<IDefaultBrowserState> { return getDefaultBrowserState(); }
+
+	async setAsDefaultBrowser(_windowId: number | undefined): Promise<IDefaultBrowserState> {
+		return setAsDefaultBrowser(this.environmentMainService.appRoot, this.environmentMainService.isBuilt, this.productService.nameShort);
 	}
 
 	async pickFileFolderAndOpen(windowId: number | undefined, options: INativeOpenDialogOptions): Promise<void> {

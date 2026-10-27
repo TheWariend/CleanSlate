@@ -244,6 +244,8 @@ export class BrowserOverlayManager extends Disposable implements IBrowserOverlay
 
 		// Check against all precomputed overlay rectangles
 		for (const overlay of this.overlays()) {
+			// A surface containing the browser is its host, not an obstruction above it.
+			if (overlay.element.contains(element)) { continue; }
 			const overlayRect = this.getRect(overlay.element);
 			if (overlayRect && this.isRectanglesOverlapping(elementRect, overlayRect)) {
 				overlappingOverlays.push({

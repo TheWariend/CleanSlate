@@ -19,6 +19,17 @@
 
 	const { contextBridge, webFrame } = require('electron');
 
+	// Website titlebars can declare native window-drag regions (including invisible
+	// headers over buttons). Electron then consumes pointer input before the page
+	// receives it. Only the workbench chrome should be able to drag this window.
+	// User-origin !important also overrides inline/dynamically added author styles.
+	const DISABLE_PAGE_DRAG_CSS = '*, *::before, *::after { -webkit-app-region: no-drag !important; }';
+	try {
+		webFrame.insertCSS(DISABLE_PAGE_DRAG_CSS, { cssOrigin: 'user' });
+	} catch (error) {
+		console.error(error);
+	}
+
 	// Pages that style themselves dark but never declare `color-scheme` still get
 	// Chromium's default light scrollbar, which reads as a bright seam against the
 	// browser pane. Default the viewport scrollbar to dark instead.
