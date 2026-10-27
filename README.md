@@ -45,8 +45,9 @@ The current release is **CleanSlate 1.1.0**. See the [release notes](https://git
 | -------- | -------- |
 | macOS (Apple Silicon) | [DMG](https://github.com/TheWariend/CleanSlate-Releases/releases/latest/download/CleanSlate-darwin-arm64.dmg) · [ZIP](https://github.com/TheWariend/CleanSlate-Releases/releases/latest/download/CleanSlate-darwin-arm64.zip) |
 
-Signing and notarization are temporarily disabled for new macOS builds while
-our Apple Developer account is being renewed. These builds may be blocked by
+Developer ID signing and notarization are temporarily disabled while our Apple
+Developer account is being renewed. New macOS builds use ad-hoc signatures to
+seal the app bundle; these do not identify a verified publisher. These builds may be blocked by
 macOS Gatekeeper and require manual installation; automatic updates from an
 existing signed installation may reject them. Check the release notes for the
 signing status of a particular build.

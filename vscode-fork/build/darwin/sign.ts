@@ -71,12 +71,13 @@ async function main(buildDir?: string): Promise<void> {
 	const tempDir = process.env['AGENT_TEMPDIRECTORY'];
 	const arch = process.env['VSCODE_ARCH'];
 	const identity = process.env['CODESIGN_IDENTITY'];
+	const adHoc = identity === '-';
 
 	if (!buildDir) {
 		throw new Error('$AGENT_BUILDDIRECTORY not set');
 	}
 
-	if (!tempDir) {
+	if (!tempDir && !adHoc) {
 		throw new Error('$AGENT_TEMPDIRECTORY not set');
 	}
 
@@ -90,11 +91,14 @@ async function main(buildDir?: string): Promise<void> {
 		ignore: shouldSkipSigning,
 		optionsForFile: (filePath) => ({
 			entitlements: getEntitlementsForFile(filePath),
-			hardenedRuntime: true,
+			// Ad-hoc code has no Team ID for hardened runtime library validation.
+			hardenedRuntime: !adHoc,
+			timestamp: adHoc ? 'none' : undefined,
 		}),
 		preAutoEntitlements: false,
 		preEmbedProvisioningProfile: false,
-		keychain: path.join(tempDir, 'buildagent.keychain'),
+		keychain: adHoc ? undefined : path.join(tempDir!, 'buildagent.keychain'),
+		identityValidation: adHoc ? false : undefined,
 		version: getElectronVersion(),
 		identity,
 	};
@@ -132,7 +136,7 @@ if (import.meta.main) {
 	main(process.argv[2]).catch(async err => {
 		console.error(err);
 		const tempDir = process.env['AGENT_TEMPDIRECTORY'];
-		if (tempDir) {
+		if (tempDir && process.env['CODESIGN_IDENTITY'] !== '-') {
 			const keychain = path.join(tempDir, 'buildagent.keychain');
 			const identities = await spawn('security', ['find-identity', '-p', 'codesigning', '-v', keychain]);
 			console.error(`Available identities:\n${identities}`);

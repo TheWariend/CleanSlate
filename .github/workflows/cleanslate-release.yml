@@ -128,7 +128,17 @@ jobs:
       - name: Smoke test packaged macOS app
         run: node build/cleanslate/test/smoke-packaged-app.mjs --app "$GITHUB_WORKSPACE/VSCode-darwin-arm64/CleanSlate.app"
 
-      # Signing is temporarily disabled while the Apple Developer account is renewed.
+      # Ad-hoc signatures seal the rebuilt Electron bundle without an Apple certificate.
+      - name: Ad-hoc sign macOS app
+        env:
+          VSCODE_ARCH: arm64
+          CODESIGN_IDENTITY: '-'
+        run: node build/darwin/sign.ts "$GITHUB_WORKSPACE"
+
+      - name: Verify and smoke test signed macOS bundle
+        run: |
+          codesign --verify --deep --strict --verbose=2 "$GITHUB_WORKSPACE/VSCode-darwin-arm64/CleanSlate.app"
+          node build/cleanslate/test/smoke-packaged-app.mjs --app "$GITHUB_WORKSPACE/VSCode-darwin-arm64/CleanSlate.app"
 
       - name: Stage macOS artifacts
         env:
@@ -171,7 +181,7 @@ jobs:
           if gh release view "$tag" --repo "$RELEASES_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$tag" "$CLEANSLATE_RELEASE_DIR"/* --repo "$RELEASES_REPOSITORY" --clobber
           else
-            gh release create "$tag" "$CLEANSLATE_RELEASE_DIR"/* --repo "$RELEASES_REPOSITORY" --title "CleanSlate $tag" --notes "CleanSlate desktop release for Apple Silicon (arm64). This build is unsigned and not notarized while our Apple Developer account is being renewed. macOS Gatekeeper may block opening it; signed automatic upgrades may also reject it."
+            gh release create "$tag" "$CLEANSLATE_RELEASE_DIR"/* --repo "$RELEASES_REPOSITORY" --title "CleanSlate $tag" --notes "CleanSlate desktop release for Apple Silicon (arm64). This build is ad-hoc signed, without a Developer ID certificate, and not notarized while our Apple Developer account is being renewed. macOS Gatekeeper may block opening it; signed automatic upgrades may also reject it."
           fi
 
       # Tag last, so a failed build leaves no tag behind and the same version
@@ -196,7 +206,7 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          notes="Download the unsigned, unnotarized Apple Silicon macOS build from https://github.com/${RELEASES_REPOSITORY}/releases/tag/${RELEASE_TAG}."
+          notes="Download the ad-hoc signed, unnotarized Apple Silicon macOS build from https://github.com/${RELEASES_REPOSITORY}/releases/tag/${RELEASE_TAG}."
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --latest --title "CleanSlate $RELEASE_VERSION" --notes "$notes"
           else
