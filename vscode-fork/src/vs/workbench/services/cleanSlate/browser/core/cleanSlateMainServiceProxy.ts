@@ -79,6 +79,9 @@ export class CleanSlateMainServiceProxy extends Disposable implements ICleanSlat
 		return this.channel.call('listExternalAgents');
 	}
 
+	discoverExternalAgentHistory(query?: import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentHistoryQuery): Promise<import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentHistoryDiscovery> { return this.channel.call('discoverExternalAgentHistory', query); }
+	importExternalAgentHistory(entry: import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentHistoryEntry): Promise<import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentHistoryImportResult> { return this.channel.call('importExternalAgentHistory', entry); }
+
 	startExternalAgentSession(request: IExternalAgentStartRequest): Promise<IExternalAgentSessionInfo> {
 		return this.channel.call('startExternalAgentSession', [request]);
 	}

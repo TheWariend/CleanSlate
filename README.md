@@ -132,6 +132,16 @@ application. Other agents can be registered explicitly by the user in settings;
 their installation, license terms, authentication, and usage charges remain the
 user's responsibility.
 
+Use **Settings → General → Import chats**, or **CleanSlate: Import Claude and
+Codex Chats** in the Command Palette, to select existing local conversations.
+Imports retain their project, original agent session ID, and account data
+folder. Choose a custom folder for additional accounts such as
+`.codex-account2`. Continue with the original agent, or use the agent picker to
+hand off to CleanSlate's built-in agent or another agent with the visible conversation as context.
+Repeated imports skip existing chats. Source files stay unchanged. Individual
+history files are limited to 64 MiB; compressed Codex history requires a host
+with zstd support.
+
 CleanSlate is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI, xAI,
 OpenCode, or any other external-agent provider. Product names and marks identify
 compatible third-party services only.

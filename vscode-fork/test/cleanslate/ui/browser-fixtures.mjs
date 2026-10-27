@@ -67,7 +67,7 @@ export async function mountSettings(state = 'signedOut') {
 		updateConfiguration: async value => { qa.config = { ...qa.config, ...value, providers: { ...qa.config.providers, ...value.providers } }; events.push({ name: 'save', value }); },
 	}, { getModels: async () => ['qa-model', 'qa-alternative'] }, {
 		signIn: async () => record('signIn')(), upgradeToPro: async () => record('upgrade')(), signOut: async () => record('signOut')(), manageAccount: async () => record('manageAccount')(),
-	}, { listExternalAgents: async () => [], getExternalAgentUsage: async () => ({}), registerExternalAgent: async () => record('registerAgent')() });
+	}, { listExternalAgents: async () => [], getExternalAgentUsage: async () => ({}), registerExternalAgent: async () => record('registerAgent')() }, undefined, async () => record('importChats')());
 	qa.settings.mount(root);
 	await qa.settings.render();
 	return qa;

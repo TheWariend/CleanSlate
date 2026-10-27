@@ -82,16 +82,24 @@ export class ExternalAgentService extends Disposable {
 		const existing = this.sessions.get(request.cleanSlateSessionId);
 		if (this.prompting.has(request.cleanSlateSessionId) && (request.modelSelection
 			|| existing?.config.agentId !== request.config.agentId || existing.cwd !== cwd
+			|| existing.config.dataHome !== request.config.dataHome
 			|| request.hostTools && this.hostOwners.get(request.cleanSlateSessionId) !== request.hostTools.ownerId)) {
 			throw new Error('Stop the current response before changing its agent, model, workspace, or IDE owner.');
 		}
 		if (existing && existing.config.agentId === request.config.agentId && existing.cwd === cwd
+			&& existing.config.dataHome === request.config.dataHome
 			&& (!request.hostTools || this.hostOwners.get(request.cleanSlateSessionId) === request.hostTools.ownerId)) {
 			if (request.modelSelection) { await existing.selectModel(request.modelSelection.configId, request.modelSelection.value); }
 			return { cleanSlateSessionId: request.cleanSlateSessionId, externalSessionId: existing.externalSessionId, config: existing.config, models: existing.models, controls: existing.controls };
 		}
 		await this.disposeSession(request.cleanSlateSessionId);
-		const launch = this.registry.resolve(request.config.agentId, env);
+		const resolved = this.registry.resolve(request.config.agentId, env);
+		if (request.config.dataHome && (!['claude', 'codex'].includes(request.config.agentId) || !path.isAbsolute(request.config.dataHome))) {
+			throw new Error('The agent account folder must be an absolute Claude or Codex data folder.');
+		}
+		const launch = request.config.dataHome ? {
+			...resolved, env: { ...resolved.env, [request.config.agentId === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME']: request.config.dataHome }
+		} : resolved;
 		const eventOwner = Symbol();
 		this.eventOwners.set(request.cleanSlateSessionId, eventOwner);
 		if (request.hostTools) { this.hostOwners.set(request.cleanSlateSessionId, request.hostTools.ownerId); }

@@ -112,6 +112,7 @@ export class CleanSlateSettingsPanel {
 		private readonly accountActions?: ICleanSlateSettingsAccountActions,
 		private readonly agentService?: Pick<ICleanSlateMainService, 'listExternalAgents' | 'getExternalAgentUsage' | 'registerExternalAgent'>,
 		private readonly browserServices?: ICleanSlateBrowserSettingsServices,
+		private readonly importChats?: () => Promise<void>,
 	) { }
 
 	/**
@@ -375,6 +376,7 @@ export class CleanSlateSettingsPanel {
 	private renderGeneral(usage?: ICleanSlateManagedEntitlements, account?: ICleanSlateManagedAccount): void {
 		const isFreePlan = !!usage && ((!usage.plan && !usage.managed_ai) || usage.plan?.id === 'free');
 		const group = this.createGroup();
+		if (this.importChats) { this.createGeneralRow(group, 'Import agent chats', 'Bring your local Claude and Codex conversations into CleanSlate. Continue with the original agent or hand off.', { label: 'Import chats', action: this.importChats, variant: 'secondary' }); }
 
 		if (!account) {
 			this.createGeneralRow(group, 'CleanSlate Account', 'Sign in to sync your subscription and billing.', { label: 'Sign in', action: this.accountActions?.signIn, variant: 'secondary', trailingIcon: 'link-external' });

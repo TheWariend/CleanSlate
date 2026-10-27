@@ -16,7 +16,7 @@
     "test-browser-no-install": "npm run test:ui",
     "test:ui": "node node_modules/@playwright/test/cli.js test --config test/cleanslate/playwright.config.mjs",
     "test:ui:container": "node test/cleanslate/run-ui-container.mjs",
-    "test:integration": "node --loader ./test/unit/node/ignore-css-loader.mjs test/cleanslate/hosted-agent-ipc.mjs",
+    "test:integration": "node --loader ./test/unit/node/ignore-css-loader.mjs test/cleanslate/hosted-agent-ipc.mjs && node --loader ./test/unit/node/ignore-css-loader.mjs test/cleanslate/agent-history-import.mjs",
     "test:desktop": "node node_modules/@playwright/test/cli.js test --config test/cleanslate/desktop.config.mjs",
     "test-node": "node --loader ./test/unit/node/ignore-css-loader.mjs ./node_modules/mocha/bin/mocha.js test/unit/node/index.js --delay --ui=tdd --timeout=5000 --exit",
     "test-extension": "vscode-test",

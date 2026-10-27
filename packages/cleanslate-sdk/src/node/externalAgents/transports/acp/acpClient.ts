@@ -102,7 +102,7 @@ export class AcpClient {
 		await this.connection.selectModel(this.externalSessionId, configId, value);
 	}
 
-	async start(cwd: string, existingSessionId?: string, servers: import('@agentclientprotocol/sdk').McpServer[] = []): Promise<string> {
+	async start(cwd: string, existingSessionId?: string, servers: import('@agentclientprotocol/sdk').McpServer[] = [], requireResume = false): Promise<string> {
 		if (existingSessionId) {
 			try {
 				// Loading may replay notifications before its response arrives.
@@ -110,7 +110,10 @@ export class AcpClient {
 				await this.connection.loadSession(existingSessionId, cwd, servers);
 				await this.eventQueue;
 				return existingSessionId;
-			} catch { this.externalSessionId = undefined; }
+			} catch (error) {
+				this.externalSessionId = undefined;
+				if (requireResume) { throw new Error('The original agent could not resume this imported conversation. Check its account and project folder, or hand the chat off to another agent.', { cause: error }); }
+			}
 		}
 		const response = await this.connection.newSession(cwd, servers);
 		this.externalSessionId = response.sessionId;

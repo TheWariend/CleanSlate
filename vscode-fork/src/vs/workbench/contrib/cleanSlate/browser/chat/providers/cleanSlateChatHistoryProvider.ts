@@ -244,6 +244,7 @@ export class CleanSlateChatHistoryProvider {
     }
 
     private isDeletedSession(session: ICleanSlateSessionSnapshot): boolean {
+		if (session.id.startsWith('import-') && this.deletedSessionIds.has(session.id) && !loadCleanSlateDeletedSessionIds(this.storageService).has(session.id)) { this.deletedSessionIds.delete(session.id); }
         const sessionTime = session.updatedAt ?? session.savedAt ?? session.createdAt;
         return this.deletedSessionIds.has(session.id)
             || isCleanSlateSessionDeletedByGlobalCutoff(this.deletedBefore, sessionTime)

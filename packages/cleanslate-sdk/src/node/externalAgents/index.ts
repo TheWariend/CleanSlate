@@ -6,3 +6,4 @@
 export * from '../../externalAgents/index.js';
 export { ExternalAgentService } from './externalAgentService.js';
 export { ExternalAgentRegistry, type IExternalAgentLaunchConfiguration } from './externalAgentRegistry.js';
+export { discoverExternalAgentHistory, readExternalAgentHistory } from './externalAgentHistory.js';

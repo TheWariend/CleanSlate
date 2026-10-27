@@ -148,6 +148,10 @@ export class CleanSlateMainChannel implements IServerChannel {
 				return this.service.getExternalAgentUsage(arg);
 			case 'listExternalAgents':
 				return this.service.listExternalAgents();
+			case 'discoverExternalAgentHistory':
+				return this.service.discoverExternalAgentHistory(arg);
+			case 'importExternalAgentHistory':
+				return this.service.importExternalAgentHistory(arg);
 			case 'registerExternalAgent':
 				return this.service.registerExternalAgent(arg);
 			case 'startExternalAgentSession':
@@ -233,6 +237,8 @@ export class CleanSlateMainChannelClient implements ICleanSlateMainService {
 
 	getExternalAgentUsage(agentId: string): Promise<import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentUsage> { return this.channel.call('getExternalAgentUsage', agentId); }
 	listExternalAgents(): Promise<IExternalAgentDescriptor[]> { return this.channel.call('listExternalAgents'); }
+	discoverExternalAgentHistory(query?: import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentHistoryQuery): Promise<import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentHistoryDiscovery> { return this.channel.call('discoverExternalAgentHistory', query); }
+	importExternalAgentHistory(entry: import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentHistoryEntry): Promise<import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentHistoryImportResult> { return this.channel.call('importExternalAgentHistory', entry); }
 	registerExternalAgent(value: import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentRegistration): Promise<void> { return this.channel.call('registerExternalAgent', value); }
 	startExternalAgentSession(request: IExternalAgentStartRequest): Promise<IExternalAgentSessionInfo> { return this.channel.call('startExternalAgentSession', [request]); }
 	promptExternalAgentSession(request: IExternalAgentPromptRequest): Promise<void> { return this.channel.call('promptExternalAgentSession', [request]); }

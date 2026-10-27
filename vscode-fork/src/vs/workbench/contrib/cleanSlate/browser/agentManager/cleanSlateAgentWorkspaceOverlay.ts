@@ -25,6 +25,7 @@ import { IClipboardService } from '../../../../../platform/clipboard/common/clip
 import { IFileDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
+import { showCleanSlateChatImport } from '../settings/cleanSlateChatImport.js';
 import { IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IMarkerService } from '../../../../../platform/markers/common/markers.js';
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
@@ -66,6 +67,7 @@ import { ICleanSlateCommandApprovalService } from '../core/cleanSlateCommandAppr
 import { CleanSlateChatComposerProvider, type ICleanSlateEditorSelectionReference } from '../chat/providers/cleanSlateChatComposerProvider.js';
 import {
 	isCleanSlateSessionDeletedByGlobalCutoff,
+	forgetCleanSlateDeletedSessionId,
 	isCleanSlateSessionDeletedByProjectCutoff,
 	loadCleanSlateDeletedBefore,
 	loadCleanSlateDeletedProjectCutoffs,
@@ -512,6 +514,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			this.renderSessions();
 		}));
 		this._register(cleanSlateMainService.onDidPublishThreadSession(update => {
+			if (update.originId === 'external-history-import') { forgetCleanSlateDeletedSessionId(this.storageService, this.deletedSessionIds, update.session.id); }
 			if (update.request) {
 				return;
 			}
@@ -1651,7 +1654,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			const first = this.workspaceBrowser.getTabs()[0];
 			if (first) { this.showWorkspaceBrowserTab(first.id); }
 			else { void this.workspaceBrowser.openTab().catch(error => this.notificationService.error(String(error))); }
-		} });
+		} }, () => this.instantiationService.invokeFunction(showCleanSlateChatImport));
 		panel.mount(this.settingsOverlay, {
 			initialSection: section,
 			openBrowserImport,

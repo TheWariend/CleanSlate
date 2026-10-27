@@ -29,6 +29,7 @@ import { getCleanSlateVisibleUserRequestText, normalizeCleanSlateVisibleWhitespa
 import { stringifyCleanSlateUserSelectionDisplay } from '../viewModel/cleanSlateChatViewHelpers.js';
 import {
     isCleanSlateSessionDeletedByGlobalCutoff,
+	forgetCleanSlateDeletedSessionId,
     isCleanSlateSessionDeletedByProjectCutoff,
     loadCleanSlateDeletedBefore,
     loadCleanSlateDeletedProjectCutoffs,
@@ -1299,6 +1300,13 @@ export class CleanSlateChatSessionProvider extends Disposable {
     }
 
     private applyPublishedThreadSession(update: ICleanSlateThreadSessionUpdate): void {
+		if (update.originId === 'external-history-import') {
+			forgetCleanSlateDeletedSessionId(this.storageService, this.deletedSessionIds, update.session.id);
+			if (this.surface !== 'agentManager') {
+				const imported = this.fromPersistedSession(update.session);
+				if (imported) { this.onDidUpdateInactiveSession?.(imported); }
+			}
+		}
         if (update.originId === this.providerId || (!update.request && update.live?.ownerId === this.providerId)) {
             return;
         }
@@ -1541,6 +1549,9 @@ export class CleanSlateChatSessionProvider extends Disposable {
 		this.storageService.remove(`cleanSlate.acp.context.${session.id}`, StorageScope.PROFILE);
 		session.externalAgent = config;
 		session.externalAgentSessionId = undefined;
+		// Rebuild Slate's next turn from the shared conversation after a handoff.
+		// A previous native runtime snapshot would omit intervening external turns.
+		session.agent.restoreRuntimeSnapshot(undefined);
 		if (session.controller.getHistory().length) {
 			const content = `Conversation handed off to ${name}.`;
 			session.threadService.addMessage('assistant', content);

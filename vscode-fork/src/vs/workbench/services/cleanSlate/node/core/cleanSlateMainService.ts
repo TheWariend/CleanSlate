@@ -91,6 +91,7 @@ import {
 import { CleanSlateOpenAIMessageAdapter } from '@cleanslate/sdk/node/cleanSlateOpenAIMessageAdapter.js';
 import { CleanSlateAnthropicMessageAdapter } from '@cleanslate/sdk/node/cleanSlateAnthropicMessageAdapter.js';
 import { ExternalAgentService } from '../externalAgents/externalAgentService.js';
+import { discoverExternalAgentHistory, readExternalAgentHistory } from '@cleanslate/sdk/node/externalAgents/externalAgentHistory.js';
 import {
 	IExternalAgentDescriptor,
 	IExternalAgentEvent,
@@ -266,6 +267,19 @@ export class NodeCleanSlateMainService extends Disposable implements ICleanSlate
 
 	async listExternalAgents(): Promise<IExternalAgentDescriptor[]> {
 		return this.externalAgents.listAgents(await this.resolveExternalAgentEnvironment());
+	}
+
+	async discoverExternalAgentHistory(query?: import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentHistoryQuery): Promise<import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentHistoryDiscovery> {
+		return discoverExternalAgentHistory(query, await this.resolveExternalAgentEnvironment());
+	}
+
+	async importExternalAgentHistory(entry: import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentHistoryEntry): Promise<import('../../common/externalAgents/externalAgentTypes.js').IExternalAgentHistoryImportResult> {
+		const { session: source, warnings } = await readExternalAgentHistory(entry);
+		// Import time puts deliberately restored chats after prior deletion cutoffs.
+		const session = { ...source, savedAt: Date.now(), updatedAt: Date.now() };
+		const imported = await this.threadPersistenceStore.importSession(session);
+		if (imported) { this._onDidPublishThreadSession.fire({ originId: 'external-history-import', session }); }
+		return { id: session.id, imported, warnings };
 	}
 
 	async startExternalAgentSession(request: IExternalAgentStartRequest): Promise<IExternalAgentSessionInfo> {

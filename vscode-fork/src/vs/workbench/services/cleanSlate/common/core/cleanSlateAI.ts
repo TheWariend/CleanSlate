@@ -72,6 +72,8 @@ export interface ICleanSlateArtifactService extends ICleanSlateArtifactServiceSh
 export const ICleanSlateArtifactService = createDecorator<ICleanSlateArtifactService>('cleanSlateArtifactService');
 
 export interface ICleanSlateMainService extends ICleanSlateMainServiceShape {
+	discoverExternalAgentHistory(query?: import('../externalAgents/externalAgentTypes.js').IExternalAgentHistoryQuery): Promise<import('../externalAgents/externalAgentTypes.js').IExternalAgentHistoryDiscovery>;
+	importExternalAgentHistory(entry: import('../externalAgents/externalAgentTypes.js').IExternalAgentHistoryEntry): Promise<import('../externalAgents/externalAgentTypes.js').IExternalAgentHistoryImportResult>;
 	readonly onDidEmitExternalAgentEvent: Event<IExternalAgentEvent>;
 	getExternalAgentUsage(agentId: string): Promise<import('../externalAgents/externalAgentTypes.js').IExternalAgentUsage>;
 	listExternalAgents(): Promise<IExternalAgentDescriptor[]>;

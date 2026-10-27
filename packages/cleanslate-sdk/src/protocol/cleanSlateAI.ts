@@ -339,7 +339,7 @@ export interface ICleanSlatePersistedSession {
     readonly agentRuntimeState?: ICleanSlateAgentRuntimeSnapshot;
     readonly agent?: unknown;
 	readonly runtime?: 'native' | 'external';
-	readonly externalAgent?: { readonly transport: 'acp'; readonly agentId: string };
+	readonly externalAgent?: import('../externalAgents/externalAgentTypes.js').IExternalAgentConfig;
 	readonly externalAgentSessionId?: string;
 }
 

@@ -21,6 +21,42 @@ export interface IExternalAgentUsage {
 export interface IExternalAgentConfig {
 	readonly transport: 'acp';
 	readonly agentId: string;
+	/** User-selected local account directory, retained when resuming imported history. */
+	readonly dataHome?: string;
+}
+
+export type ExternalAgentHistorySource = 'claude' | 'codex';
+
+export interface IExternalAgentHistoryQuery {
+	readonly source?: ExternalAgentHistorySource;
+	readonly dataHome?: string;
+	/** Restrict results to this local project and its descendant directories. */
+	readonly projectRoot?: string;
+	/** Also scan the standard home when a different account is configured. */
+	readonly includeDefaultHomes?: boolean;
+}
+
+export interface IExternalAgentHistoryEntry {
+	readonly id: string;
+	readonly source: ExternalAgentHistorySource;
+	readonly sessionId: string;
+	readonly dataHome: string;
+	readonly path: string;
+	readonly title: string;
+	readonly cwd?: string;
+	readonly createdAt: number;
+	readonly updatedAt: number;
+}
+
+export interface IExternalAgentHistoryDiscovery {
+	readonly sessions: readonly IExternalAgentHistoryEntry[];
+	readonly warnings: readonly string[];
+}
+
+export interface IExternalAgentHistoryImportResult {
+	readonly id: string;
+	readonly imported: boolean;
+	readonly warnings: readonly string[];
 }
 
 export interface IExternalAgentDescriptor {

@@ -33,7 +33,7 @@ export class ExternalAgentSession {
 		let client: AcpClient | undefined;
 		try {
 			client = await AcpClient.create(cleanSlateSessionId, cwd, launch, handlers);
-			await client.start(cwd, existingSessionId, hostTools?.servers);
+			await client.start(cwd, existingSessionId, hostTools?.servers, !!config.dataHome);
 		} catch (error) {
 			await client?.dispose();
 			await hostTools?.dispose();

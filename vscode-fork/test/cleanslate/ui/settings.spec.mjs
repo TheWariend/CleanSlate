@@ -53,6 +53,13 @@ test('custom agent form can be opened, cancelled and reopened', async ({ page })
 	await expectUsable(page.getByRole('button', { name: /Add agent$/ }));
 });
 
+test('signed-out users can import local chats from General settings', async ({ page }) => {
+	const button = page.getByRole('button', { name: 'Import chats', exact: true });
+	await expectUsable(button);
+	await button.click();
+	await expect.poll(() => page.evaluate(() => qa.events.filter(event => event.name === 'importChats').length)).toBe(1);
+});
+
 test('service failure leaves settings navigation and account recovery visible', async ({ page }) => {
 	await page.evaluate(async () => { document.getElementById('fixture').replaceChildren(); await (await import('/qa/browser-fixtures.mjs')).mountSettings('unavailable'); });
 	await page.locator('.cleanSlate-settings-nav-item').filter({ hasText: 'Models' }).click();
@@ -67,6 +74,7 @@ test('models settings appearance @visual', async ({ page }) => {
 	await expect(page.locator('.cleanSlate-settings-content')).toContainText('qa-model');
 	await expect(page.locator('#fixture')).toHaveScreenshot('settings-models.png');
 });
+
 
 test('settings navigation stays immediate while live usage is pending', async ({ page }) => {
 	await page.evaluate(async () => {

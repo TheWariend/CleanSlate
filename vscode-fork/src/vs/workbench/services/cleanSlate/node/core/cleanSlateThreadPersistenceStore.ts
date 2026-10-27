@@ -188,6 +188,15 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
         });
     }
 
+	/** Explicit imports never replace continued chats or trigger archive retention. */
+	async importSession(session: ICleanSlatePersistedSession): Promise<boolean> {
+		return this.enqueueWrite(async db => {
+			if (await this.get(db, 'SELECT id FROM ThreadSessions WHERE id = ?', [session.id])) { return false; }
+			await this.writeSession(db, resolveArchivedSessionWorkspaceId(session), session, { isActive: false, isArchived: true });
+			return true;
+		});
+	}
+
     async removeArchivedSession(workspaceId: string, sessionId: string): Promise<void> {
         await this.enqueueWrite(async db => {
             const existing = await this.get<IThreadSessionRow>(db, `SELECT isActive FROM ThreadSessions WHERE id = ? AND workspaceId = ?`, [sessionId, workspaceId]);
@@ -998,7 +1007,7 @@ export class CleanSlateThreadPersistenceStore extends Disposable {
         const staleRows = await this.all<{ id: string; isActive: number }>(
             db,
             `SELECT id, isActive FROM ThreadSessions
-             WHERE workspaceId = ? AND isArchived = 1
+             WHERE workspaceId = ? AND isArchived = 1 AND id NOT LIKE 'import-%'
              ORDER BY savedAt DESC
              LIMIT -1 OFFSET 50`,
             [workspaceId]

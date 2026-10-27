@@ -35,6 +35,13 @@ export function rememberCleanSlateDeletedSessionId(storageService: IStorageServi
 	persistCleanSlateDeletedSessionIds(storageService, deletedSessionIds);
 }
 
+export function forgetCleanSlateDeletedSessionId(storageService: IStorageService, deletedSessionIds: Set<string>, sessionId: string): void {
+	deletedSessionIds.delete(sessionId);
+	const saved = loadCleanSlateDeletedSessionIds(storageService);
+	saved.delete(sessionId);
+	persistCleanSlateDeletedSessionIds(storageService, saved);
+}
+
 export function loadCleanSlateDeletedProjectCutoffs(storageService: IStorageService): Map<string, number> {
 	return mergeCutoffs(
 		parseCutoffMap(storageService.get(CLEANSLATE_DELETED_PROJECT_CUTOFFS_STORAGE_KEY, StorageScope.PROFILE)),
