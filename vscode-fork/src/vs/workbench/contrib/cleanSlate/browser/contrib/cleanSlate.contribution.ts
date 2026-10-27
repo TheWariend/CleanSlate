@@ -36,6 +36,8 @@ import { CleanSlateAgentWorkspaceOverlay, CLEANSLATE_AGENT_MANAGER_IDE_HANDOFF_K
 import { CLEANSLATE_AGENT_WORKSPACE_EXIT_COMMAND_ID, CLEANSLATE_AGENT_WORKSPACE_OPEN_COMMAND_ID } from '../agentManager/cleanSlateAgentWorkspaceCommands.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../common/contributions.js';
 import { mainWindow } from '../../../../../base/browser/window.js';
+import { IURLService } from '../../../../../platform/url/common/url.js';
+import { Disposable } from '../../../../../base/common/lifecycle.js';
 // View Container ID
 export const CLEANSLATE_CONTAINER_ID = 'workbench.view.cleanSlate';
 export const CLEANSLATE_VIEW_ID = 'workbench.view.cleanSlateChat';
@@ -55,6 +57,25 @@ function getCleanSlateAgentWorkspaceOverlay(instantiationService: IInstantiation
 	}
 	return cleanSlateAgentWorkspaceOverlay;
 }
+
+class CleanSlateBrowserURLContribution extends Disposable implements IWorkbenchContribution {
+	static readonly ID = 'workbench.contrib.cleanSlateBrowserURLs';
+	constructor(@IURLService urlService: IURLService, @IInstantiationService instantiationService: IInstantiationService) {
+		super();
+		this._register(urlService.registerHandler({
+			handleURL: async (uri, options) => {
+				if (uri.scheme !== 'http' && uri.scheme !== 'https') { return false; }
+				let url: URL;
+				try { url = new URL(options?.originalUrl || uri.toString(true)); } catch { return false; }
+				if (url.protocol !== 'http:' && url.protocol !== 'https:') { return false; }
+				await getCleanSlateAgentWorkspaceOverlay(instantiationService).openBrowserURL(url.href);
+				return true;
+			}
+		}));
+	}
+}
+
+registerWorkbenchContribution2(CleanSlateBrowserURLContribution.ID, CleanSlateBrowserURLContribution, WorkbenchPhase.BlockStartup);
 
 // Opaque body-level layer that hides the workbench while it restores, so the
 // editor never flashes before the Agent Manager surface mounts. It is created

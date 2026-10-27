@@ -2162,7 +2162,8 @@ registerThemingParticipant((_theme, collector) => {
 			display: none;
 		}
 
-		.browser-mode .cleanSlate-browser-sidebar { display: flex; }
+		.browser-mode .cleanSlate-browser-sidebar { display: flex; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; overscroll-behavior-y: contain; }
+		.cleanSlate-browser-sidebar > * { flex-shrink: 0; }
 		.cleanSlate-browser-space { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; margin: 0 2px 4px; padding-left: 8px; }
 		.cleanSlate-browser-space > span { font-size: 13px; font-weight: 600; color: var(--cleanSlate-agent-manager-text); }
 
@@ -2185,6 +2186,26 @@ registerThemingParticipant((_theme, collector) => {
 		.cleanSlate-browser-return { font-size: 11px; gap: 5px; height: 26px; padding: 0 7px; }
 		.cleanSlate-browser-return .codicon { font-size: 13px; }
 		.cleanSlate-browser-new-tab { width: 100%; }
+		.cleanSlate-browser-import { margin-top: auto; font-size: 12px; }
+		.cleanSlate-browser-bookmarks { min-width: 0; flex: 0 0 auto; font-size: 12px; }
+		.cleanSlate-browser-bookmarks summary { display: flex; align-items: center; gap: 7px; min-height: 34px; box-sizing: border-box; padding: 7px 6px; border-radius: 7px; list-style: none; cursor: pointer; user-select: none; color: var(--cleanSlate-agent-manager-text-muted); transition: background 120ms ease, color 120ms ease; }
+		.cleanSlate-browser-bookmarks summary::-webkit-details-marker { display: none; }
+		.cleanSlate-browser-bookmarks summary:hover { background: var(--cleanSlate-agent-manager-hover-bg); color: var(--cleanSlate-agent-manager-text); }
+		.cleanSlate-browser-bookmarks summary:active { background: color-mix(in srgb, var(--cleanSlate-agent-manager-text) 12%, transparent); }
+		.cleanSlate-browser-bookmarks summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -2px; }
+		.cleanSlate-browser-bookmarks summary > .codicon { flex: 0 0 16px; font-size: 16px; transition: transform 200ms cubic-bezier(0.2, 0, 0, 1); }
+		.cleanSlate-browser-bookmarks details[open]:not(.cleanSlate-browser-library-collapsing) > summary > .codicon { transform: rotate(90deg); }
+		.cleanSlate-browser-library-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		@media (prefers-reduced-motion: reduce) {
+			.cleanSlate-browser-bookmarks summary, .cleanSlate-browser-bookmarks summary > .codicon { transition: none; }
+		}
+		.cleanSlate-browser-bookmark-folder { padding-left: 10px; }
+		.cleanSlate-browser-bookmark-row { display: flex; align-items: center; min-width: 0; border-radius: 7px; }
+		.cleanSlate-browser-bookmark-row:hover { background: var(--cleanSlate-agent-manager-hover-bg); }
+		.cleanSlate-browser-bookmark { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; height: 32px; padding: 0 6px; border: 0; background: transparent; color: var(--cleanSlate-agent-manager-text-soft); font: inherit; text-align: left; cursor: pointer; }
+		.cleanSlate-browser-bookmark-remove { display: grid; place-items: center; width: 22px; height: 22px; flex: 0 0 auto; border: 0; border-radius: 5px; background: transparent; color: var(--cleanSlate-agent-manager-text-muted); cursor: pointer; opacity: 0; }
+		.cleanSlate-browser-bookmark-row:hover .cleanSlate-browser-bookmark-remove, .cleanSlate-browser-bookmark-row:focus-within .cleanSlate-browser-bookmark-remove { opacity: 1; }
+		.cleanSlate-browser-bookmarks p { margin: 8px 6px; font-size: 11px; line-height: 1.5; color: var(--cleanSlate-agent-manager-text-muted); }
 
 		.cleanSlate-browser-return:hover,
 		.cleanSlate-browser-new-tab:hover { background: var(--cleanSlate-agent-manager-hover-bg); color: var(--cleanSlate-agent-manager-text); }
@@ -2194,8 +2215,6 @@ registerThemingParticipant((_theme, collector) => {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 			gap: 6px;
 			padding: 4px 2px 14px;
-			max-height: 180px;
-			overflow-y: auto;
 			border-bottom: 1px solid color-mix(in srgb, var(--cleanSlate-agent-manager-text) 8%, transparent);
 		}
 
@@ -2231,7 +2250,7 @@ registerThemingParticipant((_theme, collector) => {
 		.cleanSlate-browser-tabs-caption { display: flex; align-items: center; justify-content: space-between; padding: 10px 10px 4px; font-size: 11px; color: var(--cleanSlate-agent-manager-text-muted); }
 		.cleanSlate-browser-tab-count { font-size: 10px; }
 		.cleanSlate-browser-tabs-empty { padding: 12px 10px; color: var(--cleanSlate-agent-manager-text-muted); font-size: 12px; }
-		.cleanSlate-browser-tabs { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+		.cleanSlate-browser-tabs { flex: 0 0 auto; min-height: 0; }
 		.cleanSlate-browser-tab-row { display: flex; align-items: center; min-width: 0; height: 36px; margin-bottom: 3px; border-radius: 8px; color: var(--cleanSlate-agent-manager-text-soft); }
 		.cleanSlate-browser-tab-row:hover { background: var(--cleanSlate-agent-manager-hover-bg); }
 		.cleanSlate-browser-tab-row.active { background: color-mix(in srgb, var(--cleanSlate-agent-manager-text) 8%, transparent); color: var(--cleanSlate-agent-manager-text); }

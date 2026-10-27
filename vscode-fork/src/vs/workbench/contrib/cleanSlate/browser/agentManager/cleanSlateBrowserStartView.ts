@@ -15,6 +15,7 @@ export interface ICleanSlateBrowserShortcut {
 	readonly url: string;
 	readonly title: string;
 	readonly favicon?: string;
+	readonly kind?: 'bookmark' | 'history';
 }
 
 // Keep embedded icons small enough to store with bookmarks, including larger SVGs and ICOs.
@@ -61,7 +62,7 @@ export class CleanSlateBrowserStartView {
 	readonly input: HTMLInputElement;
 	private readonly results: HTMLElement;
 	private readonly submit: HTMLButtonElement;
-	private sites: readonly ICleanSlateBrowserShortcut[] = [];
+	private sites: () => Iterable<ICleanSlateBrowserShortcut> = () => [];
 	private matches: readonly ICleanSlateBrowserShortcut[] = [];
 	private selected = -1;
 	private dismissed = false;
@@ -118,38 +119,60 @@ export class CleanSlateBrowserStartView {
 	focus(): void { this.input.focus(); this.input.select(); }
 	reset(): void { this.input.value = ''; this.selected = -1; this.dismissed = false; this.renderSuggestions(); }
 
-	setSites(sites: readonly ICleanSlateBrowserShortcut[]): void {
+	setSites(sites: () => Iterable<ICleanSlateBrowserShortcut>): void {
 		this.sites = sites;
-		this.renderSuggestions();
+		if (!this.element.hidden) { this.renderSuggestions(); }
 	}
+
+	refresh(): void { this.renderSuggestions(); }
 
 	private renderSuggestions(): void {
 		const query = this.input.value.trim().toLowerCase();
-		this.matches = !this.dismissed
-			? this.sites.filter(site => !query || `${site.title} ${site.url}`.toLowerCase().includes(query)).slice(0, query ? 4 : 3)
-			: [];
+		const matches: ICleanSlateBrowserShortcut[] = [];
+		const urls = new Set<string>();
+		if (!this.dismissed) {
+			for (const site of this.sites()) {
+				if (urls.has(site.url)) { continue; }
+				urls.add(site.url);
+				if (query && !`${site.title} ${site.url}`.toLowerCase().includes(query)) { continue; }
+				matches.push(site);
+				if (matches.length === (query ? 4 : 3)) { break; }
+			}
+		}
+		this.matches = matches;
 		if (this.selected >= this.matches.length) { this.selected = -1; }
 		this.results.hidden = !this.matches.length;
 		this.input.setAttribute('aria-expanded', String(!!this.matches.length));
-		dom.clearNode(this.results);
+		const oldButtons = new Map(Array.from(this.results.querySelectorAll<HTMLButtonElement>('button')).map(button => [button.dataset.site, button]));
+		let next = this.results.firstElementChild;
 		this.matches.forEach((site, index) => {
-			const button = dom.append(this.results, dom.$('button.cleanSlate-browser-suggestion')) as HTMLButtonElement;
+			const key = site.id ?? site.url;
+			const button = oldButtons.get(key) ?? dom.$('button.cleanSlate-browser-suggestion') as HTMLButtonElement;
+			oldButtons.delete(key);
+			button.dataset.site = key;
+			if (button !== next) { this.results.insertBefore(button, next); }
+			next = button.nextElementSibling;
 			button.type = 'button';
 			button.tabIndex = -1;
 			button.id = `${this.results.id}-${index}`;
 			button.setAttribute('role', 'option');
-			const icon = dom.append(button, dom.$('.cleanSlate-browser-site-icon'));
+			const icon = button.querySelector<HTMLElement>('.cleanSlate-browser-site-icon') ?? dom.append(button, dom.$('.cleanSlate-browser-site-icon'));
 			renderCleanSlateSiteIcon(icon, site);
-			const copy = dom.append(button, dom.$('.cleanSlate-browser-suggestion-copy'));
-			dom.append(copy, dom.$('span')).textContent = site.title;
+			const copy = button.querySelector<HTMLElement>('.cleanSlate-browser-suggestion-copy') ?? dom.append(button, dom.$('.cleanSlate-browser-suggestion-copy'));
+			const title = copy.querySelector('span') ?? dom.append(copy, dom.$('span'));
+			if (title.textContent !== site.title) { title.textContent = site.title; }
 			let host = site.url;
 			try { host = new URL(site.url).hostname; } catch { /* Keep the original address. */ }
-			dom.append(copy, dom.$('small')).textContent = host;
-			dom.append(button, dom.$('.cleanSlate-browser-suggestion-action')).textContent = site.id
-				? localize('cleanSlate.browser.switchTab', 'Switch to tab') : localize('cleanSlate.browser.pinnedPage', 'Pinned page');
+			const detail = copy.querySelector('small') ?? dom.append(copy, dom.$('small'));
+			if (detail.textContent !== host) { detail.textContent = host; }
+			const action = button.querySelector<HTMLElement>('.cleanSlate-browser-suggestion-action') ?? dom.append(button, dom.$('.cleanSlate-browser-suggestion-action'));
+			action.textContent = site.id
+				? localize('cleanSlate.browser.switchTab', 'Switch to tab') : site.kind === 'bookmark'
+					? localize('cleanSlate.browser.bookmark', 'Bookmark') : site.kind === 'history' ? localize('cleanSlate.browser.history', 'History') : localize('cleanSlate.browser.pinnedPage', 'Pinned page');
 			button.onmousedown = event => event.preventDefault();
 			button.onclick = () => this.choose(site);
 		});
+		for (const button of oldButtons.values()) { button.remove(); }
 		this.renderSelection();
 	}
 

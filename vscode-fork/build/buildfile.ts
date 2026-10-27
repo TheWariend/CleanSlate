@@ -17,6 +17,7 @@ export const workerNotebook = createModuleDescription('vs/workbench/contrib/note
 export const workerLanguageDetection = createModuleDescription('vs/workbench/services/languageDetection/browser/languageDetectionWebWorkerMain');
 export const workerLocalFileSearch = createModuleDescription('vs/workbench/services/search/worker/localFileSearchMain');
 export const workerProfileAnalysis = createModuleDescription('vs/platform/profiling/electron-browser/profileAnalysisWorkerMain');
+export const workerCleanSlateBrowserHistory = createModuleDescription('vs/workbench/contrib/cleanSlate/browser/agentManager/cleanSlateBrowserHistoryWorker');
 export const workerOutputLinks = createModuleDescription('vs/workbench/contrib/output/common/outputLinkComputerMain');
 export const workerBackgroundTokenization = createModuleDescription('vs/workbench/services/textMate/browser/backgroundTokenization/worker/textMateTokenizationWorker.workerMain');
 
@@ -63,6 +64,7 @@ const buildfile = {
 	workerLanguageDetection,
 	workerLocalFileSearch,
 	workerProfileAnalysis,
+	workerCleanSlateBrowserHistory,
 	workerOutputLinks,
 	workerBackgroundTokenization,
 	workbenchDesktop,

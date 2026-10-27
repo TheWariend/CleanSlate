@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as dom from '../../../../../base/browser/dom.js';
-import { getZoomFactor } from '../../../../../base/browser/browser.js';
+import { getZoomFactor, onDidChangeZoomLevel } from '../../../../../base/browser/browser.js';
 import { CodeWindow } from '../../../../../base/browser/window.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { Emitter } from '../../../../../base/common/event.js';
@@ -12,18 +12,35 @@ import { Disposable, DisposableStore } from '../../../../../base/common/lifecycl
 import { isMacintosh } from '../../../../../base/common/platform.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
+import { FileAccess } from '../../../../../base/common/network.js';
+import { IWebWorkerClient } from '../../../../../base/common/worker/webWorker.js';
+import { IWebWorkerService } from '../../../../../platform/webWorker/browser/webWorkerService.js';
+import { WebWorkerDescriptor } from '../../../../../platform/webWorker/browser/webWorkerDescriptor.js';
 import { localize } from '../../../../../nls.js';
 import { BrowserViewUri } from '../../../../../platform/browserView/common/browserViewUri.js';
-import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
+import { IBrowserViewBounds } from '../../../../../platform/browserView/common/browserView.js';
+import { IStorageService, StorageScope, StorageTarget, WillSaveStateReason } from '../../../../../platform/storage/common/storage.js';
 import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../../browserView/common/browserView.js';
 import { ICleanSlateThreadTab } from './cleanSlateAgentManagerThreadTabsView.js';
 import { resolveCleanSlateBrowserAddress } from './cleanSlateBrowserAddress.js';
 import { CleanSlateBrowserStartView, cleanSlateStoredFavicon, ICleanSlateBrowserShortcut, renderCleanSlateSiteIcon } from './cleanSlateBrowserStartView.js';
+import { cleanSlateBrowserBookmarksKey, readCleanSlateBrowserBookmarks } from './cleanSlateBrowserBookmarks.js';
+import { IBrowserBookmark } from '../../../../../platform/native/common/browserIntegration.js';
+import { BrowserOverlayManager } from '../../../browserView/browser/overlayManager.js';
+import { CleanSlateBrowserHistory } from './cleanSlateBrowserHistory.js';
+import type { ICleanSlateBrowserHistoryWorker } from './cleanSlateBrowserHistoryWorker.js';
+
+import { cleanSlateBrowserImportedTabsKey, ICleanSlateImportedTab, readCleanSlateImportedTabs } from './cleanSlateBrowserData.js';
 
 /** Owns the native pages shown by browser tabs in the main workspace. */
 export class CleanSlateWorkspaceBrowser extends Disposable {
 	private readonly pinsKey = 'cleanSlate.browser.pinnedSites';
 	private pins: ICleanSlateBrowserShortcut[] = [];
+	private bookmarks: IBrowserBookmark[] = [];
+	private readonly history: CleanSlateBrowserHistory;
+	private importedTabs: ICleanSlateImportedTab[] = [];
+	private readonly loadingImportedTabs = new Set<string>();
+	private historyList: HTMLElement | undefined;
 	private renderedPins = '';
 	private readonly models = new Map<string, IBrowserViewModel>();
 	private readonly listeners = new Map<string, DisposableStore>();
@@ -36,10 +53,13 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 	readonly onDidRequestCloseTab = this.closed.event;
 	private readonly showThread = this._register(new Emitter<void>());
 	readonly onDidRequestShowThread = this.showThread.event;
+	private readonly settings = this._register(new Emitter<void>());
+	readonly onDidRequestSettings = this.settings.event;
 	private root: HTMLElement | undefined;
 	private sidebar: HTMLElement | undefined;
 	private sidebarTabs: HTMLElement | undefined;
 	private pinnedSites: HTMLElement | undefined;
+	private bookmarkList: HTMLElement | undefined;
 	private startView: CleanSlateBrowserStartView | undefined;
 	private tabSearch: HTMLInputElement | undefined;
 	private tabCount: HTMLElement | undefined;
@@ -53,13 +73,53 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 	private targetWindow: CodeWindow | undefined;
 	private activeId: string | undefined;
 	private visible = false;
+	private modalActive = false;
 	private layoutVersion = 0;
 	private navigationVersion = 0;
 	private layoutFrame: number | undefined;
+	private updateFrame: number | undefined;
+	private layoutRunning = false;
+	private layoutRequested = false;
+	private lastLayout: { id: string; bounds: IBrowserViewBounds } | undefined;
+	private presentedId: string | undefined;
+	private overlayManager: BrowserOverlayManager | undefined;
+	private overlayActive = false;
+	private historyDirty = true;
+	private bookmarksDirty = true;
+	private libraryQuery = '';
+	private readonly dirtyTabs = new Set<string>();
+	private chromeDirty = false;
+	private tabsChanged = false;
+	private allTabsDirty = false;
+	private historyWorker: IWebWorkerClient<ICleanSlateBrowserHistoryWorker> | undefined;
 	private disposed = false;
 
-	constructor(private readonly service: IBrowserViewWorkbenchService, private readonly storage: IStorageService) {
+	constructor(private readonly service: IBrowserViewWorkbenchService, private readonly storage: IStorageService, webWorkerService: IWebWorkerService) {
 		super();
+		this.bookmarks = readCleanSlateBrowserBookmarks(storage);
+		this.history = this._register(new CleanSlateBrowserHistory(storage, (base, changes) => {
+			this.historyWorker ??= this._register(webWorkerService.createWorkerClient<ICleanSlateBrowserHistoryWorker>(new WebWorkerDescriptor({
+				esmModuleLocation: FileAccess.asBrowserUri('vs/workbench/contrib/cleanSlate/browser/agentManager/cleanSlateBrowserHistoryWorker.js'),
+				label: 'CleanSlateBrowserHistory'
+			})));
+			return this.historyWorker.proxy.$serialize(base, changes);
+		}));
+		this.importedTabs = readCleanSlateImportedTabs(storage);
+		this._register(this.history.onDidChange(() => {
+			this.historyDirty = true;
+			this.scheduleUpdate();
+		}));
+		this._register(storage.onDidChangeValue(StorageScope.PROFILE, cleanSlateBrowserImportedTabsKey, this._store)(() => {
+			const old = new Set(this.importedTabs.map(tab => tab.id));
+			this.importedTabs = readCleanSlateImportedTabs(storage);
+			for (const tab of this.importedTabs) { if (!old.has(tab.id)) { this.opened.fire({ id: tab.id, background: true }); } }
+			this.scheduleUpdate(undefined, true);
+		}));
+		this._register(storage.onDidChangeValue(StorageScope.PROFILE, cleanSlateBrowserBookmarksKey, this._store)(() => {
+			this.bookmarks = readCleanSlateBrowserBookmarks(storage);
+			this.bookmarksDirty = true;
+			this.scheduleUpdate();
+		}));
 		try {
 			const parsed: unknown = JSON.parse(storage.get(this.pinsKey, StorageScope.PROFILE, '[]'));
 			if (Array.isArray(parsed)) {
@@ -79,6 +139,9 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 		this.root?.remove();
 		this.sidebar?.remove();
 		this.targetWindow = dom.getWindow(parent);
+		if (this.updateFrame !== undefined) { this.targetWindow.cancelAnimationFrame(this.updateFrame); this.updateFrame = undefined; }
+		this.historyDirty = this.bookmarksDirty = true;
+		this.lastLayout = undefined;
 		const root = this.root = dom.append(parent, dom.$('.cleanSlate-workspace-browser'));
 		root.hidden = true;
 		const toolbar = dom.append(root, dom.$('.cleanSlate-workspace-browser-toolbar'));
@@ -117,7 +180,7 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 		const searchTabs = dom.append(sidebar, dom.$('.cleanSlate-browser-tab-search'));
 		dom.append(searchTabs, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.search)}`));
 		this.tabSearch = dom.append(searchTabs, dom.$('input')) as HTMLInputElement;
-		this.tabSearch.placeholder = localize('cleanSlate.browser.searchTabs', 'Search tabs');
+		this.tabSearch.placeholder = localize('cleanSlate.browser.searchTabsAndBookmarks', 'Search tabs and bookmarks');
 		this.tabSearch.setAttribute('aria-label', this.tabSearch.placeholder);
 		this.tabSearch.oninput = () => this.renderSidebar();
 		this.tabSearch.onkeydown = event => {
@@ -135,9 +198,22 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 		dom.append(newTab, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.add)}`)).setAttribute('aria-hidden', 'true');
 		dom.append(newTab, dom.$('span')).textContent = localize('cleanSlate.browser.newTabRow', 'New tab');
 		newTab.onclick = () => void this.openTab().catch(error => this.showError(error));
+		this.bookmarkList = dom.append(sidebar, dom.$('.cleanSlate-browser-bookmarks'));
+		this.historyList = dom.append(sidebar, dom.$('.cleanSlate-browser-bookmarks'));
+		this.overlayManager = this.viewDisposables.add(new BrowserOverlayManager(this.targetWindow));
+		this.viewDisposables.add(this.overlayManager.onDidChangeOverlayState(() => this.checkOverlays()));
+		for (const tab of this.importedTabs) { this.opened.fire({ id: tab.id, background: true }); }
+		const imports = dom.append(sidebar, dom.$('button.cleanSlate-browser-new-tab.cleanSlate-browser-import')) as HTMLButtonElement;
+		imports.type = 'button';
+		dom.append(imports, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.cloudDownload)}`)).setAttribute('aria-hidden', 'true');
+		dom.append(imports, dom.$('span')).textContent = localize('cleanSlate.browser.importData', 'Import browser data…');
+		imports.onclick = () => this.settings.fire();
 		const observer = new this.targetWindow.ResizeObserver(() => this.layout());
 		observer.observe(viewport);
 		this.viewDisposables.add({ dispose: () => observer.disconnect() });
+		this.viewDisposables.add(onDidChangeZoomLevel(windowId => {
+			if (windowId === this.targetWindow?.vscodeWindowId) { this.layout(); }
+		}));
 		this.viewDisposables.add(dom.addDisposableListener(this.targetWindow, 'keydown', event => {
 			if (this.visible && this.handleKey(event as KeyboardEvent)) {
 				event.preventDefault();
@@ -148,15 +224,15 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 		this.renderSidebar();
 	}
 
-	hasTab(id: string): boolean { return this.models.has(id); }
+	hasTab(id: string): boolean { return this.models.has(id) || this.importedTabs.some(tab => tab.id === id); }
 
 	getTabs(): ICleanSlateThreadTab[] {
-		return Array.from(this.models.values(), model => ({
+		return [...Array.from(this.models.values(), model => ({
 			id: model.id,
 			title: model.title || (model.url && model.url !== 'about:blank' ? model.url : localize('cleanSlate.browser.newTab', 'New browser tab')),
 			running: model.loading,
 			browser: true
-		}));
+		})), ...this.importedTabs.filter(tab => !this.models.has(tab.id)).map(tab => ({ id: tab.id, title: tab.title, running: this.loadingImportedTabs.has(tab.id), browser: true }))];
 	}
 
 	async openTab(url?: string): Promise<void> {
@@ -170,7 +246,15 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 	}
 
 	activate(id: string): void {
-		if (!this.models.has(id)) { return; }
+		if (!this.models.has(id)) {
+			const imported = this.importedTabs.find(tab => tab.id === id);
+			if (!imported) { return; }
+			const previous = this.activeId && this.models.get(this.activeId);
+			if (previous) { void previous.setVisible(false); }
+			this.activeId = id;
+			if (!this.loadingImportedTabs.has(id)) { void this.loadImportedTab(imported); }
+			this.update(); this.renderSidebar(); return;
+		}
 		const previous = this.activeId && this.models.get(this.activeId);
 		this.activeId = id;
 		this.navigationVersion++;
@@ -186,7 +270,23 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 		this.layout();
 	}
 
+	private async loadImportedTab(tab: ICleanSlateImportedTab): Promise<void> {
+		this.loadingImportedTabs.add(tab.id);
+		try {
+			const model = await this.service.getOrCreateBrowserViewModel(tab.id);
+			if (this.disposed || !this.importedTabs.some(item => item.id === tab.id)) { model.dispose(); return; }
+			this.track(model, true);
+			await model.loadURL(tab.url);
+			if (this.activeId === tab.id) { this.activate(tab.id); }
+		} catch (error) { if (this.activeId === tab.id) { this.showError(error); } }
+		finally { this.loadingImportedTabs.delete(tab.id); this.renderSidebar(); }
+	}
+
 	closeTab(id: string): void {
+		if (this.importedTabs.some(tab => tab.id === id)) {
+			this.storage.store(cleanSlateBrowserImportedTabsKey, JSON.stringify(this.importedTabs.filter(tab => tab.id !== id)), StorageScope.PROFILE, StorageTarget.MACHINE);
+			void this.storage.flush(WillSaveStateReason.SHUTDOWN);
+		}
 		const model = this.models.get(id);
 		this.models.delete(id);
 		this.listeners.get(id)?.dispose();
@@ -198,16 +298,41 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 
 	setVisible(visible: boolean): void {
 		this.visible = visible;
+		if (!visible) { this.modalActive = false; }
 		this.layoutVersion++;
 		if (this.root) { this.root.hidden = !visible; }
 		if (!visible) {
-			for (const model of this.models.values()) { void model.setVisible(false); }
+			this.hidePages();
 		} else {
+			this.checkOverlays();
 			this.update();
 			this.layout();
 			const model = this.activeId ? this.models.get(this.activeId) : undefined;
 			if (!model?.url || model.url === 'about:blank') { this.focusAddress(); }
 		}
+	}
+
+	setModalActive(active: boolean): void {
+		this.modalActive = active; this.layoutVersion++;
+		if (active) { this.hidePages(); }
+		else { this.layout(); }
+	}
+
+	private hidePages(): void {
+		this.presentedId = undefined;
+		for (const model of this.models.values()) {
+			if (model.visible) { void model.setVisible(false); }
+		}
+	}
+
+	private checkOverlays(): void {
+		if (!this.viewport || !this.visible) { return; }
+		const active = !!this.overlayManager?.getOverlappingOverlays(this.viewport).length;
+		if (active === this.overlayActive) { return; }
+		this.overlayActive = active;
+		this.layoutVersion++;
+		if (active) { this.hidePages(); }
+		else { this.layout(); }
 	}
 
 	focusAddress(): void {
@@ -216,27 +341,59 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 	}
 
 	layout(): void {
-		if (!this.visible || !this.targetWindow) { return; }
-		if (this.layoutFrame !== undefined) { this.targetWindow.cancelAnimationFrame(this.layoutFrame); }
+		if (!this.visible || this.modalActive || this.overlayActive || !this.targetWindow) { return; }
+		this.layoutRequested = true;
+		if (this.layoutFrame !== undefined || this.layoutRunning) { return; }
 		this.layoutFrame = this.targetWindow.requestAnimationFrame(() => {
 			this.layoutFrame = undefined;
-			void this.layoutPage().catch(error => this.showError(error));
+			this.layoutRequested = false;
+			this.layoutRunning = true;
+			void this.layoutPage().catch(error => this.showError(error)).finally(() => {
+				this.layoutRunning = false;
+				if (this.layoutRequested) { this.layout(); }
+			});
 		});
 	}
 
 	private async layoutPage(): Promise<void> {
 		const model = this.activeId ? this.models.get(this.activeId) : undefined;
 		const win = this.targetWindow;
-		if (!model || !win || !this.viewport?.isConnected || !this.visible) { return; }
-		if (!model.url || model.url === 'about:blank' || model.error) { await model.setVisible(false); return; }
-		const version = ++this.layoutVersion;
+		this.checkOverlays();
+		if (!model || !win || !this.viewport?.isConnected || !this.visible || this.modalActive || this.overlayActive) { return; }
+		if (!model.url || model.url === 'about:blank' || model.error) { this.presentedId = undefined; if (model.visible) { await model.setVisible(false); } return; }
+		const version = this.layoutVersion;
 		const rect = this.viewport.getBoundingClientRect();
-		if (rect.width <= 0 || rect.height <= 0) { await model.setVisible(false); return; }
-		await model.layout({ windowId: win.vscodeWindowId, x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height), zoomFactor: getZoomFactor(win) });
-		if (version !== this.layoutVersion || !this.visible || this.activeId !== model.id) { return; }
-		await model.setVisible(true);
-		if (version !== this.layoutVersion || !this.visible || this.activeId !== model.id) { await model.setVisible(false); return; }
-		await model.bringToFront();
+		if (rect.width <= 0 || rect.height <= 0) { this.presentedId = undefined; if (model.visible) { await model.setVisible(false); } return; }
+		const bounds = { windowId: win.vscodeWindowId, x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height), zoomFactor: getZoomFactor(win) };
+		const previous = this.lastLayout;
+		if (previous?.id !== model.id || (Object.keys(bounds) as (keyof IBrowserViewBounds)[]).some(key => bounds[key] !== previous.bounds[key])) {
+			await model.layout(bounds);
+			this.lastLayout = { id: model.id, bounds };
+		}
+		if (version !== this.layoutVersion || this.activeId !== model.id) { return; }
+		const showing = !model.visible;
+		if (showing) { await model.setVisible(true); }
+		if (version !== this.layoutVersion || this.activeId !== model.id) { return; }
+		if (showing || this.presentedId !== model.id) {
+			await model.bringToFront();
+			this.presentedId = model.id;
+		}
+	}
+
+	private scheduleUpdate(model?: IBrowserViewModel, tabsChanged = false): void {
+		if (model) { this.dirtyTabs.add(model.id); this.chromeDirty ||= this.activeId === model.id; }
+		this.tabsChanged ||= tabsChanged;
+		this.allTabsDirty ||= !model && tabsChanged;
+		if (this.updateFrame !== undefined || !this.targetWindow || this.disposed) { return; }
+		this.updateFrame = this.targetWindow.requestAnimationFrame(() => {
+			this.updateFrame = undefined;
+			if (this.chromeDirty) { this.update(); }
+			this.chromeDirty = false;
+			this.renderSidebar(this.allTabsDirty ? undefined : this.dirtyTabs);
+			this.allTabsDirty = false;
+			this.dirtyTabs.clear();
+			if (this.tabsChanged) { this.tabsChanged = false; this.changed.fire(); }
+		});
 	}
 
 	private track(model: IBrowserViewModel, background: boolean): void {
@@ -244,11 +401,11 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 		this.models.set(model.id, model);
 		const store = new DisposableStore();
 		this.listeners.set(model.id, store);
-		const update = () => { if (this.activeId === model.id) { this.update(); this.layout(); } this.renderSidebar(); this.changed.fire(); };
-		store.add(model.onDidChangeNavigationState(update));
-		store.add(model.onDidChangeLoadingState(update));
-		store.add(model.onDidChangeTitle(() => { this.refreshPin(model); update(); }));
-		store.add(model.onDidChangeFavicon(() => { this.refreshPin(model); update(); }));
+		const updatePage = () => { this.scheduleUpdate(model, true); if (this.activeId === model.id) { this.layout(); } };
+		store.add(model.onDidChangeNavigationState(updatePage));
+		store.add(model.onDidChangeLoadingState(() => { this.recordHistory(model); updatePage(); }));
+		store.add(model.onDidChangeTitle(() => { this.refreshPin(model); this.recordHistory(model); this.scheduleUpdate(model); }));
+		store.add(model.onDidChangeFavicon(() => { this.refreshPin(model); this.scheduleUpdate(model); }));
 		store.add(model.onDidKeyCommand(event => {
 			if (this.activeId === model.id && this.visible) { this.handleKey(event); }
 		}));
@@ -313,7 +470,11 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 		}
 		const empty = !model || !model.url || model.url === 'about:blank';
 		this.root.classList.toggle('new-tab', empty);
-		if (this.startView) { this.startView.element.hidden = !empty; }
+		if (this.startView) {
+			const wasHidden = this.startView.element.hidden;
+			this.startView.element.hidden = !empty;
+			if (empty && wasHidden) { this.startView.refresh(); }
+		}
 		if (this.address.parentElement) { this.address.parentElement.hidden = empty; }
 		if (this.pinButton) {
 			this.pinButton.disabled = empty;
@@ -343,6 +504,17 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 	}
 
 	private refreshPin(model: IBrowserViewModel): void {
+		const imported = this.importedTabs.find(tab => tab.id === model.id);
+		if (imported && model.url && model.url !== 'about:blank' && (imported.url !== model.url || model.title && imported.title !== model.title)) {
+			this.storage.store(cleanSlateBrowserImportedTabsKey, JSON.stringify(this.importedTabs.map(tab => tab.id === model.id ? { ...tab, url: model.url, title: model.title || tab.title } : tab)), StorageScope.PROFILE, StorageTarget.MACHINE);
+		}
+		const bookmarkIndex = this.bookmarks.findIndex(bookmark => bookmark.url === model.url);
+		const bookmarkIcon = cleanSlateStoredFavicon(model.favicon);
+		if (bookmarkIndex >= 0 && bookmarkIcon && this.bookmarks[bookmarkIndex].favicon !== bookmarkIcon) {
+			const bookmarks = this.bookmarks.slice();
+			bookmarks[bookmarkIndex] = { ...bookmarks[bookmarkIndex], favicon: bookmarkIcon };
+			this.storage.store(cleanSlateBrowserBookmarksKey, JSON.stringify(bookmarks), StorageScope.PROFILE, StorageTarget.MACHINE);
+		}
 		const index = this.pins.findIndex(pin => pin.url === model.url);
 		if (index < 0) { return; }
 		const pin = this.pins[index];
@@ -353,18 +525,23 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 		this.storage.store(this.pinsKey, JSON.stringify(this.pins), StorageScope.PROFILE, StorageTarget.MACHINE);
 	}
 
-	private renderSidebar(): void {
+	private renderSidebar(dirtyTabs?: ReadonlySet<string>): void {
 		if (!this.sidebarTabs || !this.pinnedSites) { return; }
 		const query = this.tabSearch?.value.trim().toLowerCase() ?? '';
-		if (this.tabCount) { this.tabCount.textContent = String(this.models.size); }
+		const tabs = this.getTabs();
+		const importedTabs = new Map(this.importedTabs.map(tab => [tab.id, tab]));
+		if (this.tabCount) { this.tabCount.textContent = String(tabs.length); }
 		const oldRows = new Map(Array.from(this.sidebarTabs.children).map(row => [(row as HTMLElement).dataset.tabId, row as HTMLElement]));
 		const shortcuts: ICleanSlateBrowserShortcut[] = [];
-		for (const model of this.models.values()) {
-			const tab = this.getTabs().find(tab => tab.id === model.id)!;
+		for (const tab of tabs) {
+			const live = this.models.get(tab.id);
+			const imported = importedTabs.get(tab.id);
+			const model = { id: tab.id, url: live?.url || imported?.url || '', title: tab.title, favicon: live?.favicon, loading: live?.loading || this.loadingImportedTabs.has(tab.id) };
 			if (model.url && model.url !== 'about:blank') { shortcuts.push({ id: model.id, url: model.url, title: tab.title, favicon: model.favicon }); }
 			if (query && !`${tab.title} ${model.url}`.toLowerCase().includes(query)) { continue; }
 			const row = oldRows.get(model.id) ?? dom.$('.cleanSlate-browser-tab-row');
 			oldRows.delete(model.id);
+			if (row.parentElement && dirtyTabs && !dirtyTabs.has(model.id)) { continue; }
 			row.dataset.tabId = model.id;
 			row.classList.toggle('active', model.id === this.activeId);
 			const button = row.querySelector<HTMLButtonElement>('[role="tab"]') ?? dom.append(row, dom.$('button.cleanSlate-browser-tab-select')) as HTMLButtonElement;
@@ -408,29 +585,42 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 			empty ??= dom.append(this.sidebarTabs, dom.$('.cleanSlate-browser-tabs-empty'));
 			empty.textContent = localize('cleanSlate.browser.noTabs', 'No matching tabs');
 		}
-		const urls = new Set(shortcuts.map(site => site.url));
-		this.startView?.setSites([...shortcuts.filter(site => site.id !== this.activeId), ...this.pins.filter(pin => !urls.has(pin.url))]);
+		// Suggestions consume only their first few matches; never copy all history on a tab update.
+		const self = this;
+		this.startView?.setSites(function* () {
+			yield* shortcuts.filter(site => site.id !== self.activeId);
+			yield* self.pins;
+			for (const bookmark of self.bookmarks) { yield { ...bookmark, kind: 'bookmark' as const }; }
+			for (const page of self.history.entries()) { yield { ...page, kind: 'history' as const }; }
+		});
+		if (query !== this.libraryQuery) { this.bookmarksDirty = this.historyDirty = true; this.libraryQuery = query; }
+		if (this.bookmarksDirty) { this.bookmarksDirty = false; this.renderBookmarks(query); }
+		if (this.historyDirty) { this.historyDirty = false; this.renderHistory(query); }
 		const pinsKey = JSON.stringify(this.pins);
 		if (pinsKey === this.renderedPins) { return; }
 		this.renderedPins = pinsKey;
-		dom.clearNode(this.pinnedSites);
+		const oldPins = new Map(Array.from(this.pinnedSites.querySelectorAll<HTMLElement>('.cleanSlate-browser-pin-wrap')).map(pin => [pin.dataset.url, pin]));
+		this.pinnedSites.querySelector('.cleanSlate-browser-pins-empty')?.remove();
 		for (const pin of this.pins) {
-			const wrap = dom.append(this.pinnedSites, dom.$('.cleanSlate-browser-pin-wrap'));
-			const button = dom.append(wrap, dom.$('button.cleanSlate-browser-pin')) as HTMLButtonElement;
+			const wrap = oldPins.get(pin.url) ?? dom.append(this.pinnedSites, dom.$('.cleanSlate-browser-pin-wrap'));
+			oldPins.delete(pin.url);
+			wrap.dataset.url = pin.url;
+			const button = wrap.querySelector<HTMLButtonElement>('.cleanSlate-browser-pin') ?? dom.append(wrap, dom.$('button.cleanSlate-browser-pin')) as HTMLButtonElement;
 			button.type = 'button';
 			button.title = pin.title;
 			button.setAttribute('aria-label', localize('cleanSlate.browser.openPin', 'Open pinned site: {0}', pin.title));
-			renderCleanSlateSiteIcon(dom.append(button, dom.$('.cleanSlate-browser-site-icon')), pin);
-			dom.append(button, dom.$('span.cleanSlate-browser-pin-label')).textContent = pin.title;
+			renderCleanSlateSiteIcon(button.querySelector<HTMLElement>('.cleanSlate-browser-site-icon') ?? dom.append(button, dom.$('.cleanSlate-browser-site-icon')), pin);
+			const label = button.querySelector<HTMLElement>('.cleanSlate-browser-pin-label') ?? dom.append(button, dom.$('span.cleanSlate-browser-pin-label'));
+			if (label.textContent !== pin.title) { label.textContent = pin.title; }
 			button.onclick = () => {
 				const existing = Array.from(this.models.values()).find(model => model.url === pin.url);
 				if (existing) { this.opened.fire({ id: existing.id, background: false }); }
 				else { void this.openTab(pin.url).catch(error => this.showError(error)); }
 			};
-			const remove = dom.append(wrap, dom.$('button.cleanSlate-browser-unpin')) as HTMLButtonElement;
+			const remove = wrap.querySelector<HTMLButtonElement>('.cleanSlate-browser-unpin') ?? dom.append(wrap, dom.$('button.cleanSlate-browser-unpin')) as HTMLButtonElement;
 			remove.type = 'button';
 			remove.setAttribute('aria-label', localize('cleanSlate.browser.unpinNamedPage', 'Unpin {0}', pin.title));
-			dom.append(remove, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.close)}`));
+			if (!remove.firstChild) { dom.append(remove, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.close)}`)); }
 			remove.onclick = () => {
 				this.pins = this.pins.filter(site => site.url !== pin.url);
 				this.storage.store(this.pinsKey, JSON.stringify(this.pins), StorageScope.PROFILE, StorageTarget.MACHINE);
@@ -438,11 +628,152 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 				this.update();
 			};
 		}
+		for (const pin of oldPins.values()) { pin.remove(); }
 		if (!this.pins.length) {
 			const hint = dom.append(this.pinnedSites, dom.$('.cleanSlate-browser-pins-empty'));
 			dom.append(hint, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.pin)}`));
 			dom.append(hint, dom.$('span')).textContent = localize('cleanSlate.browser.pinsHint', 'Pin your favorite pages here');
 		}
+	}
+
+	private renderHistory(query: string): void {
+		if (!this.historyList) { return; }
+		if (!this.history.size) { dom.clearNode(this.historyList); return; }
+		const details = this.historyList.querySelector<HTMLDetailsElement>('details') ?? dom.append(this.historyList, dom.$('details')) as HTMLDetailsElement;
+		if (query) { details.open = true; }
+		const summary = details.querySelector('summary') ?? dom.append(details, dom.$('summary'));
+		this.librarySummary(details, summary, localize('cleanSlate.browser.historyCount', 'History ({0})', this.history.size), () => this.renderHistory(this.libraryQuery));
+		const content = details.querySelector<HTMLElement>('.cleanSlate-browser-bookmark-content') ?? dom.append(details, dom.$('.cleanSlate-browser-bookmark-content'));
+		details.ontoggle = () => this.renderHistory(this.libraryQuery);
+		if (!details.open) { return; }
+		const oldRows = this.savedRows(content);
+		let count = 0;
+		let next = content.firstElementChild;
+		for (const page of this.history.entries()) {
+			if (query && !`${page.title} ${page.url}`.toLowerCase().includes(query)) { continue; }
+			if (count++ < 100) {
+				const row = this.savedRow(oldRows, page, true);
+				if (row !== next) { content.insertBefore(row, next); }
+				next = row.nextElementSibling;
+			}
+			if (!query && count === 100) { count = this.history.size; break; }
+		}
+		for (const row of oldRows.values()) { row.remove(); }
+		this.libraryHint(content, count, true);
+	}
+
+	private recordHistory(model: IBrowserViewModel): void {
+		if (model.loading || model.error || !/^https?:\/\//i.test(model.url)) { return; }
+		this.history.record(model.url, model.title);
+	}
+
+	private renderBookmarks(query: string): void {
+		if (!this.bookmarkList) { return; }
+		if (!this.bookmarks.length) { dom.clearNode(this.bookmarkList); return; }
+		const library = this.bookmarkList.querySelector<HTMLDetailsElement>('details') ?? dom.append(this.bookmarkList, dom.$('details')) as HTMLDetailsElement;
+		library.dataset.folder = 'library';
+		if (query) { library.open = true; }
+		const summary = library.querySelector('summary') ?? dom.append(library, dom.$('summary'));
+		this.librarySummary(library, summary, localize('cleanSlate.browser.bookmarkCount', 'Bookmarks ({0})', this.bookmarks.length), () => this.renderBookmarks(this.libraryQuery));
+		const content = library.querySelector<HTMLElement>('.cleanSlate-browser-bookmark-content') ?? dom.append(library, dom.$('.cleanSlate-browser-bookmark-content'));
+		library.ontoggle = () => this.renderBookmarks(this.libraryQuery);
+		if (!library.open) { return; }
+		const matches = this.bookmarks.filter(bookmark => !query || `${bookmark.title} ${bookmark.url} ${bookmark.folders.join(' ')}`.toLowerCase().includes(query));
+		const oldRows = this.savedRows(content);
+		const oldFolders = new Map(Array.from(content.querySelectorAll<HTMLDetailsElement>('details')).map(folder => [folder.dataset.folder!, folder]));
+		const folders = new Map<string, HTMLElement>([['', content]]);
+		for (const bookmark of matches.slice(0, 100)) {
+			let parent = content;
+			for (let depth = 0; depth < bookmark.folders.length; depth++) {
+				const key = JSON.stringify(bookmark.folders.slice(0, depth + 1));
+				let folder = folders.get(key);
+				if (!folder) {
+					const details = oldFolders.get(key) ?? dom.$('details') as HTMLDetailsElement;
+					oldFolders.delete(key);
+					details.dataset.folder = key;
+					if (query) { details.open = true; }
+					const label = details.querySelector('summary') ?? dom.append(details, dom.$('summary'));
+					this.librarySummary(details, label, bookmark.folders[depth]);
+					folder = details.querySelector<HTMLElement>('.cleanSlate-browser-bookmark-folder') ?? dom.append(details, dom.$('.cleanSlate-browser-bookmark-folder'));
+					if (details.parentElement !== parent) { parent.appendChild(details); }
+					folders.set(key, folder);
+				}
+				parent = folder;
+			}
+			const row = this.savedRow(oldRows, bookmark, false);
+			if (row.parentElement !== parent) { parent.appendChild(row); }
+		}
+		for (const row of oldRows.values()) { row.remove(); }
+		for (const folder of oldFolders.values()) { folder.remove(); }
+		this.libraryHint(content, matches.length, false);
+	}
+
+	private librarySummary(details: HTMLDetailsElement, summary: HTMLElement, title: string, render?: () => void): void {
+		const icon = summary.querySelector<HTMLElement>('.codicon') ?? dom.append(summary, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.chevronRight)}`));
+		icon.setAttribute('aria-hidden', 'true');
+		const label = summary.querySelector<HTMLElement>('.cleanSlate-browser-library-label') ?? dom.append(summary, dom.$('span.cleanSlate-browser-library-label'));
+		label.textContent = title;
+		// Install once so rerenders preserve an in-flight animation and its target state.
+		if (summary.onclick) { return; }
+		let animation: Animation | undefined;
+		let expanded = details.open;
+		summary.onclick = event => {
+			event.preventDefault();
+			expanded = animation ? !expanded : !details.open;
+			const from = details.getBoundingClientRect().height;
+			animation?.cancel();
+			details.open = true;
+			render?.();
+			const to = expanded ? details.getBoundingClientRect().height : summary.getBoundingClientRect().height;
+			details.classList.toggle('cleanSlate-browser-library-collapsing', !expanded);
+			const finish = () => {
+				details.open = expanded;
+				details.classList.remove('cleanSlate-browser-library-collapsing');
+				animation = undefined;
+			};
+			if (dom.getWindow(details).matchMedia('(prefers-reduced-motion: reduce)').matches) { finish(); return; }
+			animation = details.animate([{ height: `${from}px`, overflow: 'hidden' }, { height: `${to}px`, overflow: 'hidden' }], { duration: 200, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+			animation.onfinish = finish;
+		};
+	}
+
+	private savedRows(content: HTMLElement): Map<string, HTMLElement> {
+		return new Map(Array.from(content.querySelectorAll<HTMLElement>('.cleanSlate-browser-bookmark-row')).map(row => [row.dataset.url!, row]));
+	}
+
+	private savedRow(rows: Map<string, HTMLElement>, page: ICleanSlateBrowserShortcut, history: boolean): HTMLElement {
+		const row = rows.get(page.url) ?? dom.$('.cleanSlate-browser-bookmark-row');
+		rows.delete(page.url);
+		row.dataset.url = page.url;
+		const button = row.querySelector<HTMLButtonElement>('.cleanSlate-browser-bookmark') ?? dom.append(row, dom.$('button.cleanSlate-browser-bookmark')) as HTMLButtonElement;
+		button.type = 'button'; button.title = page.url;
+		const icon = button.querySelector<HTMLElement>('.cleanSlate-browser-site-icon') ?? dom.append(button, dom.$('span.cleanSlate-browser-site-icon'));
+		renderCleanSlateSiteIcon(icon, page);
+		const label = button.querySelector<HTMLElement>('.cleanSlate-browser-tab-label') ?? dom.append(button, dom.$('span.cleanSlate-browser-tab-label'));
+		if (label.textContent !== page.title) { label.textContent = page.title; }
+		button.onclick = () => {
+			const existing = Array.from(this.models.values()).find(model => model.url === page.url);
+			if (existing) { this.opened.fire({ id: existing.id, background: false }); }
+			else { void this.openTab(page.url).catch(error => this.showError(error)); }
+		};
+		const remove = row.querySelector<HTMLButtonElement>('.cleanSlate-browser-bookmark-remove') ?? dom.append(row, dom.$('button.cleanSlate-browser-bookmark-remove')) as HTMLButtonElement;
+		remove.type = 'button';
+		remove.setAttribute('aria-label', history ? localize('cleanSlate.browser.removeHistory', 'Remove from history: {0}', page.title) : localize('cleanSlate.browser.removeBookmark', 'Remove bookmark: {0}', page.title));
+		if (!remove.firstChild) { dom.append(remove, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.close)}`)); }
+		remove.onclick = () => {
+			if (history) { this.history.remove(page.url); }
+			else { this.storage.store(cleanSlateBrowserBookmarksKey, JSON.stringify(this.bookmarks.filter(item => item.url !== page.url)), StorageScope.PROFILE, StorageTarget.MACHINE); }
+		};
+		return row;
+	}
+
+	private libraryHint(content: HTMLElement, count: number, history: boolean): void {
+		let hint = content.querySelector<HTMLParagraphElement>(':scope > p');
+		if (count > 0 && count <= 100) { hint?.remove(); return; }
+		hint ??= dom.append(content, dom.$('p'));
+		hint.textContent = count === 0
+			? history ? localize('cleanSlate.browser.noHistory', 'No matching history') : localize('cleanSlate.browser.noBookmarks', 'No matching bookmarks')
+			: history ? localize('cleanSlate.browser.moreHistory', 'Showing 100 of {0}. Search to find a page.', count) : localize('cleanSlate.browser.moreBookmarks', 'Showing 100 of {0}. Search to find a bookmark.', count);
 	}
 
 	private showError(error: unknown): void {
@@ -473,6 +804,7 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 		this.disposed = true;
 		this.setVisible(false);
 		if (this.layoutFrame !== undefined) { this.targetWindow?.cancelAnimationFrame(this.layoutFrame); }
+		if (this.updateFrame !== undefined) { this.targetWindow?.cancelAnimationFrame(this.updateFrame); }
 		for (const id of this.models.keys()) { this.closeTab(id); }
 		this.root?.remove();
 		this.sidebar?.remove();

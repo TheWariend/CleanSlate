@@ -115,6 +115,7 @@ const webEntryPoints = [
 	buildfile.workerEditor,
 	buildfile.workerExtensionHost,
 	buildfile.workerNotebook,
+	buildfile.workerCleanSlateBrowserHistory,
 	buildfile.workerLanguageDetection,
 	buildfile.workerLocalFileSearch,
 	buildfile.workerOutputLinks,
