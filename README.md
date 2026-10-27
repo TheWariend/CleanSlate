@@ -52,6 +52,21 @@ macOS Gatekeeper and require manual installation; automatic updates from an
 existing signed installation may reject them. Check the release notes for the
 signing status of a particular build.
 
+#### If macOS blocks CleanSlate
+
+You may see the following message because the current build is not notarized:
+
+![macOS blocks CleanSlate and offers an Open Anyway button](assets/macos-open-anyway.png)
+
+If you trust the download and obtained it from the release links above:
+
+1. Move **CleanSlate.app** to **Applications** and try opening it once.
+2. Open **System Settings → Privacy & Security** and scroll to **Security**.
+3. Click **Open Anyway** beside the CleanSlate message shown above.
+4. Authenticate if prompted, then click **Open** to launch CleanSlate.
+
+See [Apple’s instructions for opening a blocked app](https://support.apple.com/en-us/102445) for more details.
+
 > [!NOTE]
 > Intel macOS, Windows, and Linux aren't published yet. Build from source on those platforms.
 
