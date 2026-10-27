@@ -4,8 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { registerThemingParticipant } from '../../../../../platform/theme/common/themeService.js';
+import { editorBackground, quickInputBackground } from '../../../../../platform/theme/common/colorRegistry.js';
 
 registerThemingParticipant((_theme, collector) => {
+	const editorColor = _theme.getColor(editorBackground);
+	const pickerColor = _theme.getColor(quickInputBackground);
+	const pickerBackground = pickerColor && editorColor ? pickerColor.makeOpaque(editorColor).toString() : 'var(--vscode-editor-background, #252526)';
 	collector.addRule(`
 		.monaco-workbench {
 			--cleanSlate-workspace-canvas-radius: 12px;
@@ -23,9 +27,33 @@ registerThemingParticipant((_theme, collector) => {
 			overflow: hidden;
 		}
 
-		.cleanSlate-agent-manager-host-active > :not(.cleanSlate-agent-manager-surface):not(.part.titlebar):not(.quick-input-widget) {
+		/* Keep modal dialogs visible while the editor parts are hidden. Project
+		   selection waits for these trust/import dialogs to be answered. */
+		.cleanSlate-agent-manager-host-active > :not(.cleanSlate-agent-manager-surface):not(.part.titlebar):not(.quick-input-widget):not(.monaco-dialog-modal-block) {
 			display: none !important;
 		}
+
+		/* Pickers cover the transcript, so their surface must remain opaque even
+		   when the surrounding macOS workbench uses native transparent material. */
+		.monaco-workbench .quick-input-widget {
+			background-color: ${pickerBackground} !important;
+			border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, #7775));
+			border-radius: 12px;
+			box-shadow: 0 16px 48px rgba(0, 0, 0, .35);
+			overflow: hidden;
+		}
+
+		.monaco-workbench .quick-input-title { padding: 8px 12px; }
+		.monaco-workbench .quick-input-header { padding: 10px 12px 8px; gap: 6px; }
+		.monaco-workbench .quick-input-header .quick-input-action .monaco-button {
+			box-sizing: border-box;
+			min-width: 72px;
+			min-height: 28px;
+			padding: 4px 16px;
+			border-radius: 4px;
+			line-height: 18px;
+		}
+		.monaco-workbench .quick-input-list .quick-input-list-label-meta { font-size: 12px; }
 
 		.cleanSlate-agent-manager-host-active > .part.titlebar {
 			display: flex !important;

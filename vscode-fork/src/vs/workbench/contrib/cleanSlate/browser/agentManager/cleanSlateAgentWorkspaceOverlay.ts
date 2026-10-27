@@ -26,6 +26,7 @@ import { IFileDialogService } from '../../../../../platform/dialogs/common/dialo
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { showCleanSlateChatImport } from '../settings/cleanSlateChatImport.js';
+import { prepareCleanSlateProject } from '../settings/cleanSlateProjectOpen.js';
 import { IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IMarkerService } from '../../../../../platform/markers/common/markers.js';
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
@@ -1280,7 +1281,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 				finally { this.environmentGitBusy = false; }
 				if (current()) { this.renderEnvironment(); this.updatePendingEdits(); }
 			},
-			onWorktree: path => { if (current()) { this.startNewChat({ id: URI.file(path).toString(), label: basename(URI.file(path)), folderUri: URI.file(path), description: path }); this.renderEnvironment(); } },
+			onWorktree: async path => { if (current()) { await this.startNewChatInProject({ id: URI.file(path).toString(), label: basename(URI.file(path)), folderUri: URI.file(path), description: path }); this.renderEnvironment(); } },
 			onChanges: () => { if (current()) { this.setReviewScopeMode('working'); this.selectRightPaneTab('review', true); } },
 			onOpenUrl: url => openCleanSlateEnvironmentUrl(url, href => this.openerService.open(URI.parse(href), {
 				openExternal: true, allowContributedOpeners: false, fromUserGesture: true, fromWorkspace: true
@@ -3694,7 +3695,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			getWorkspaceEntryKey: entry => this.projectProvider.getWorkspaceEntryKey(entry),
 			isRunningSession: session => session.id === activeSessionId ? activeSessionRunning : this.isRunningSession(session),
 			onSelectWorkspace: entry => void this.selectWorkspace(entry),
-			onNewChatForWorkspace: entry => this.startNewChat(entry),
+			onNewChatForWorkspace: entry => void this.startNewChatInProject(entry),
 			onPrefetchSessions: sessions => this.prefetchSessions(sessions),
 			onRestoreSession: (session, entry) => void this.restoreSession(session, entry, true),
 			onDeleteSession: session => this.deleteSession(session),
@@ -3954,7 +3955,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			entries,
 			selectedEntry: this.selectedWorkspaceEntry ?? this.getCurrentWorkspaceEntry(),
 			projectProvider: this.projectProvider,
-			onSelectWorkspace: entry => this.startNewChat(entry),
+			onSelectWorkspace: entry => void this.startNewChatInProject(entry),
 			onAddProject: () => void this.addNewProject()
 		});
 	}
@@ -4002,10 +4003,18 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		};
 		this.workspaceEntries = this.projectProvider.mergeWorkspaceEntries([...this.workspaceEntries, entry]);
 		this.cachedWorkspaceEntries = [...this.workspaceEntries];
+		await this.startNewChatInProject(entry);
+	}
+
+	private async startNewChatInProject(entry: ICleanSlateWorkspaceEntry): Promise<void> {
+		this.hideWorkspaceSelector();
+		if (entry.folderUri && !await this.instantiationService.invokeFunction(prepareCleanSlateProject, entry.folderUri)) { return; }
 		this.startNewChat(entry);
 	}
 
 	private async selectWorkspace(entry: ICleanSlateWorkspaceEntry): Promise<void> {
+		this.hideWorkspaceSelector();
+		if (entry.folderUri && !await this.instantiationService.invokeFunction(prepareCleanSlateProject, entry.folderUri)) { return; }
 		const request = ++this.workspaceSelectionRequest;
 		this.hideWorkspaceSelector();
 		this.composerDraftController.persistDraft();

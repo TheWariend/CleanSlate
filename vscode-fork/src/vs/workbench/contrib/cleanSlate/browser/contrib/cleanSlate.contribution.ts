@@ -14,6 +14,7 @@ import { CleanSlateChatViewPane } from '../chat/view/cleanSlateChatViewPane.js';
 import './cleanSlateEditor.contribution.js';
 import '../auth/cleanSlateAuth.contribution.js';
 import '../settings/cleanSlateChatImport.js';
+import '../settings/cleanSlateProjectOpen.js';
 import '../editor/cleanSlateSelectionAddToChat.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ConfigurationTarget, IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
