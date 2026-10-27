@@ -1354,13 +1354,19 @@ registerThemingParticipant((_theme, collector) => {
 			}
 
 			.cleanSlate-agent-manager-session {
-				grid-template-columns: minmax(0, 1fr) 18px auto;
+				/* Status indicators must not shift the title into a fixed grid track. */
+				display: flex;
 				padding-left: 12px;
+			}
+
+			.cleanSlate-agent-manager-session > .session-copy {
+				flex: 1 1 0;
 			}
 
 			.session-meta {
 				position: relative;
 				min-width: 22px;
+				flex: 0 0 22px;
 				height: 20px;
 				display: inline-flex;
 				align-items: center;
@@ -1440,8 +1446,9 @@ registerThemingParticipant((_theme, collector) => {
 
 		.cleanSlate-agent-manager-session-running {
 			width: 18px;
+			flex: 0 0 18px;
 			height: 18px;
-			display: inline-flex;
+			display: none;
 			align-items: center;
 			justify-content: center;
 			color: var(--vscode-progressBar-background, var(--vscode-focusBorder));
@@ -1452,6 +1459,7 @@ registerThemingParticipant((_theme, collector) => {
 		}
 
 		.cleanSlate-agent-manager-session.running .cleanSlate-agent-manager-session-running {
+			display: inline-flex;
 			opacity: 0.9;
 		}
 

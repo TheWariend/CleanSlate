@@ -41,9 +41,9 @@ export class CleanSlateAgentManagerSidebarView {
 			const badge = dom.$(`span.session-pr-status${ThemeIcon.asCSSSelector(icon)}`);
 			badge.title = `Pull request ${state.toLowerCase()}`;
 			badge.setAttribute('aria-label', badge.title);
-			badge.style.cssText = 'flex:0 0 14px;font-size:14px;margin-right:6px';
+			badge.style.cssText = 'flex:0 0 14px;font-size:14px';
 			badge.style.color = state === 'MERGED' ? '#a78bfa' : 'var(--vscode-descriptionForeground)';
-			chat.prepend(badge);
+			chat.insertBefore(badge, chat.querySelector('.cleanSlate-agent-manager-session-running'));
 		}
 	}
 
