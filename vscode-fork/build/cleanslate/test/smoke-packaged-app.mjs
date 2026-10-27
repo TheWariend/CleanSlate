@@ -237,6 +237,9 @@ const child = spawn(executablePath, [
 	'--disable-extensions',
 	'--disable-updates',
 	'--skip-welcome',
+	// Keep automated launches independent of interactive macOS Keychain prompts.
+	'--use-mock-keychain',
+	'--use-inmemory-secretstorage',
 	`--remote-debugging-port=${port}`
 ], {
 	detached: true,
