@@ -39,7 +39,7 @@ powers the standalone CLI and SDK below.
 
 ### Installation
 
-The current release is **CleanSlate 1.1.0**. See the [release notes](https://github.com/TheWariend/CleanSlate-Releases/releases/tag/v1.1.0) or download it directly:
+The current release is **CleanSlate 1.2.0**. See the [release notes](https://github.com/TheWariend/CleanSlate-Releases/releases/tag/v1.2.0) or download it directly:
 
 | Platform | Download |
 | -------- | -------- |
