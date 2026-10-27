@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { CLEANSLATE_BROWSER_CHAT_INSTRUCTION } from '../core/cleanSlateBrowserPageContext.js';
 import { IModelService } from '../../../../../editor/common/services/model.js';
 import { ICodeEditorService } from '../../../../../editor/browser/services/codeEditorService.js';
 import { ITextFileService } from '../../../../services/textfile/common/textfiles.js';
@@ -83,6 +84,7 @@ const CLEANSLATE_JIT_SEMANTIC_MIN_SCORE = 0.65;
 const CLEANSLATE_JIT_SEMANTIC_PREFETCH_BUDGET_MS = 2500;
 
 export class CleanSlateAgent {
+    private browserChatMode = false;
     private toolContext: CleanSlateToolContext;
     private registeredTools: CleanSlateTool[] = [];
 	private readonly agentSession = new CleanSlateAgentSession();
@@ -326,11 +328,22 @@ export class CleanSlateAgent {
         this.toolContext.surface = surface;
     }
 
+    public setBrowserChatMode(enabled: boolean): void {
+        this.browserChatMode = enabled;
+        // Enforce the boundary at dispatch as well as in the advertised tools.
+        this.registeredTools = enabled
+            ? ALL_TOOLS.filter(tool => (tool.name.startsWith('browser_') && tool.name !== 'browser_upload') || tool.name === 'web_search' || tool.name === 'web_fetch')
+            : [...ALL_TOOLS];
+    }
+
+    public isBrowserChatMode(): boolean { return this.browserChatMode; }
+
     public setIdeWorkspaceContextService(workspaceContextService: IWorkspaceContextService): void {
         this.toolContext.ideWorkspaceContextService = workspaceContextService;
     }
 
     private async buildPromptContext(context: any, lean = false, signal?: AbortSignal): Promise<string> {
+        if (this.browserChatMode) { return ''; }
         return lean
             ? this.contextHelper.buildLeanPromptContext(context, signal)
             : this.contextHelper.buildPromptContext(context, signal);
@@ -447,6 +460,7 @@ export class CleanSlateAgent {
     }
 
     async getContext(): Promise<any> {
+        if (this.browserChatMode) { return { activeFile: undefined, openFiles: [] }; }
         return await this.cleanSlateContextService.getContext();
     }
 
@@ -467,15 +481,27 @@ export class CleanSlateAgent {
         }
     }
 
+    getAttachedBrowserPageContext(): Promise<string | undefined> {
+		return this.browserAutomationService.getAttachedPageContext(this.browserSurfaceForToolContext());
+	}
+
+	releaseAttachedBrowserPageContext(): void {
+		this.browserAutomationService.releaseAttachedPageContext(this.browserSurfaceForToolContext());
+	}
+
     async sendMessage(
         userMessage: string,
         selections: Selection[],
         mode: string = 'normal',
         signal?: AbortSignal,
         images?: string[],
-        onTransportStatus?: (status: ICleanSlateTransportStatus) => void
+        onTransportStatus?: (status: ICleanSlateTransportStatus) => void,
+        preparedBrowserPageContext?: string
     ): Promise<AsyncIterable<CleanSlateStreamPart>> {
         void selections;
+        if (this.browserChatMode) {
+            return this.sendBrowserChatMessage(userMessage, signal, images, preparedBrowserPageContext);
+        }
         await this.workspaceTrustManagementService.workspaceResolved;
         if (!this.workspaceTrustManagementService.isWorkspaceTrusted()) {
             return this.streamSystemSummaryResponse(
@@ -497,6 +523,7 @@ export class CleanSlateAgent {
 
 		const browserAnnotations = this.listBrowserAnnotationsForContext();
 		const browserAnnotationContext = buildBrowserAnnotationTaskContext(browserAnnotations);
+		const browserPageContext = await this.getAttachedBrowserPageContext() ?? '';
 		const pendingQuestion = this.agentSession.resumePendingQuestion(userMessage);
 		if (pendingQuestion) {
 			const activeThreadService = this.threadService;
@@ -513,7 +540,7 @@ export class CleanSlateAgent {
 				phaseObjective,
 				pendingQuestion.mode ?? mode,
 				context,
-				`${mentionedFiles}${browserAnnotationContext}`,
+				`${mentionedFiles}${browserAnnotationContext}${browserPageContext}`,
 				activeThreadService,
 				activeTaskSessionService,
 				baseExecutionSettings,
@@ -584,7 +611,7 @@ export class CleanSlateAgent {
         const mentionedFiles = await this.resolveMentionedFiles(userMessage, context, signal);
         // JIT semantic snippets are injected non-blocking at context-prep time via
         // the deferred prefetch, so the turn addendum carries only @-mention context.
-        const turnContextAddendum = mentionedFiles;
+        const turnContextAddendum = mentionedFiles + browserPageContext;
         const activeThreadService = this.threadService;
         const activeTaskSessionService = this.taskSessionService;
 		const isControlContinuationTurn = turnControl.intent === CleanSlateTurnIntent.APPROVE_PLAN
@@ -597,7 +624,7 @@ export class CleanSlateAgent {
 		const runtimeTurn = this.parseRuntimeTurn(effectiveUserMessage);
 		const phaseObjective = this.buildPhaseObjective(effectivePhase, runtimeTurn.userMessage, '', continuationContext, executionSettings);
 		const messages = this.agentSession.hasMessages()
-			? this.buildRuntimeTurn(effectivePhase, runtimeTurn, images)
+			? this.buildRuntimeTurn(effectivePhase, runtimeTurn, images, browserPageContext)
 			: await this.buildPhaseMessages(
 				effectivePhase,
 				phaseObjective,
@@ -610,6 +637,29 @@ export class CleanSlateAgent {
 			);
 
 		return this.streamWithToolExecution(messages, phaseObjective, mode, context, turnContextAddendum, activeThreadService, activeTaskSessionService, executionSettings, executionBudget, signal, this.agentSession, deferredSemanticContext);
+    }
+
+    private async sendBrowserChatMessage(userMessage: string, signal?: AbortSignal, images?: string[], preparedPageContext?: string): Promise<AsyncIterable<CleanSlateStreamPart>> {
+        // No editor context, instruction discovery, semantic retrieval, project
+        // memory, slash commands or task handoff belongs in this conversation.
+        const pageContext = preparedPageContext ?? await this.getAttachedBrowserPageContext() ?? '';
+        this.threadService.addMessage('user', userMessage, false, images);
+        this.taskSessionService.recordUserTurn(userMessage);
+        this.taskSessionService.setPhase(AgentPhase.EXECUTION);
+        const turn = this.buildRuntimeUserTurn(userMessage, images);
+        const messages = this.agentSession.hasMessages()
+            ? this.agentSession.continueWithTurn([turn], { objective: userMessage, mode: 'Execution', phase: AgentPhase.EXECUTION })
+            : this.agentSession.start([
+                { role: 'system', content: CLEANSLATE_BROWSER_CHAT_INSTRUCTION },
+                ...this.historyBuilder.prepareBudgetedDialogueHistory(
+                    this.threadService.getRawHistoryReference(), userMessage, userMessage,
+                    this.historyBuilder.getContextWindowCharBudget(this.configService.getConfiguration())
+                ).map(message => this.historyBuilder.cloneChatMessage(message)),
+                turn
+            ], { objective: userMessage, mode: 'Execution', phase: AgentPhase.EXECUTION });
+        const settings = { ...this.parsingSupport.getExecutionLoopSettings(), planMode: false, executionFlow: 'normal' as const };
+        return this.streamWithToolExecution(messages, userMessage, 'normal', { openFiles: [] }, pageContext,
+            this.threadService, this.taskSessionService, settings, new CleanSlateExecutionBudget(settings.maxTurns), signal);
     }
 
 	private parseRuntimeTurn(userMessage: string): { command?: string; userMessage: string } {
@@ -631,7 +681,8 @@ export class CleanSlateAgent {
 	private buildRuntimeTurn(
 		phase: AgentPhase,
 		turn: { command?: string; userMessage: string },
-		images?: string[]
+		images?: string[],
+		browserPageContext = ''
 	): IChatMessage[] {
 		return [
 			{
@@ -641,7 +692,7 @@ export class CleanSlateAgent {
 					command: turn.command
 				})
 			},
-			this.buildRuntimeUserTurn(turn.userMessage, images)
+			this.buildRuntimeUserTurn(browserPageContext ? `${browserPageContext}\nUser Request: ${turn.userMessage}` : turn.userMessage, images)
 		];
 	}
 
@@ -729,6 +780,7 @@ export class CleanSlateAgent {
 					phase: AgentPhase.EXECUTION
 				});
 
+        if (this.browserChatMode) { return result; }
         const approvedPlan = this.artifactService.getLatestArtifactByType('implementation_plan', { sessionId: this.sessionId })?.content?.trim();
         if (!approvedPlan) {
             return result;
@@ -1377,7 +1429,8 @@ export class CleanSlateAgent {
 	private createExecutionRunnerOptions(runtimeSession: CleanSlateAgentSession = this.agentSession): IExecutionRunnerOptions {
         return {
             cleanSlateService: this.cleanSlateService,
-            cleanSlateContextService: this.cleanSlateContextService,
+            cleanSlateContextService: { _serviceBrand: undefined, getContext: () => this.getContext() },
+            getSystemDirective: () => this.browserChatMode ? CLEANSLATE_BROWSER_CHAT_INSTRUCTION : undefined,
             parsingSupport: this.parsingSupport,
             executionSupport: this.executionSupport,
             toolContext: this.toolContext,

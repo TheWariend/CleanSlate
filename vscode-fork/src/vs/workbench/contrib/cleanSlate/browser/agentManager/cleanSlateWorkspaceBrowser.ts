@@ -55,6 +55,8 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 	readonly onDidRequestShowThread = this.showThread.event;
 	private readonly settings = this._register(new Emitter<void>());
 	readonly onDidRequestSettings = this.settings.event;
+	private readonly chat = this._register(new Emitter<void>());
+	readonly onDidRequestChat = this.chat.event;
 	private root: HTMLElement | undefined;
 	private sidebar: HTMLElement | undefined;
 	private sidebarTabs: HTMLElement | undefined;
@@ -64,6 +66,8 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 	private tabSearch: HTMLInputElement | undefined;
 	private tabCount: HTMLElement | undefined;
 	private pinButton: HTMLButtonElement | undefined;
+	private chatButton: HTMLButtonElement | undefined;
+	private chatVisible = false;
 	private viewport: HTMLElement | undefined;
 	private address: HTMLInputElement | undefined;
 	private back: HTMLButtonElement | undefined;
@@ -132,6 +136,15 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 	}
 
 	get activeTabId(): string | undefined { return this.activeId; }
+	getActiveBrowserModel(): IBrowserViewModel | undefined { return this.activeId ? this.models.get(this.activeId) : undefined; }
+	hasActivePage(): boolean { const model = this.getActiveBrowserModel(); return !!model?.url && model.url !== 'about:blank'; }
+	getBrowserModels(): readonly IBrowserViewModel[] { return Array.from(this.models.values()); }
+
+	setChatVisible(visible: boolean): void {
+		this.chatVisible = visible;
+		this.chatButton?.classList.toggle('active', visible);
+		this.chatButton?.setAttribute('aria-pressed', String(visible));
+	}
 
 	mount(parent: HTMLElement, sidebarHost: HTMLElement): void {
 		this.setVisible(false);
@@ -158,6 +171,10 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 		address.autocomplete = 'off';
 		form.onsubmit = event => { event.preventDefault(); void this.navigate(address.value); };
 		this.pinButton = this.button(toolbar, Codicon.pin, localize('cleanSlate.browser.pinPage', 'Pin current page'), () => this.togglePin());
+		this.chatButton = this.button(toolbar, Codicon.commentDiscussion, localize('cleanSlate.browser.chatPage', 'Chat about this page'), () => this.chat.fire());
+		this.chatButton.classList.add('cleanSlate-browser-chat-button');
+		dom.append(this.chatButton, dom.$('span')).textContent = localize('cleanSlate.browser.chat', 'Chat');
+		this.setChatVisible(this.chatVisible);
 		const viewport = this.viewport = dom.append(root, dom.$('.cleanSlate-workspace-browser-viewport'));
 		this.startView = new CleanSlateBrowserStartView(viewport, {
 			navigate: value => void this.navigate(value),
@@ -235,14 +252,15 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 		})), ...this.importedTabs.filter(tab => !this.models.has(tab.id)).map(tab => ({ id: tab.id, title: tab.title, running: this.loadingImportedTabs.has(tab.id), browser: true }))];
 	}
 
-	async openTab(url?: string): Promise<void> {
+	async openTab(url?: string, background = false): Promise<IBrowserViewModel | undefined> {
 		const model = await this.service.getOrCreateBrowserViewModel(`cleanslate.workspace.browser.${generateUuid()}`);
 		if (this.disposed) { model.dispose(); return; }
-		this.track(model, false);
+		this.track(model, background);
 		if (url) {
 			try { await model.loadURL(url); }
 			catch (error) { if (this.activeId === model.id) { this.showError(error); } }
 		}
+		return model;
 	}
 
 	activate(id: string): void {
@@ -268,6 +286,7 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 		this.update();
 		this.renderSidebar();
 		this.layout();
+		this.changed.fire();
 	}
 
 	private async loadImportedTab(tab: ICleanSlateImportedTab): Promise<void> {
@@ -468,7 +487,8 @@ export class CleanSlateWorkspaceBrowser extends Disposable {
 		if (this.address.ownerDocument.activeElement !== this.address) {
 			this.address.value = model && model.url !== 'about:blank' ? model.url : '';
 		}
-		const empty = !model || !model.url || model.url === 'about:blank';
+		const empty = !this.hasActivePage();
+		if (this.chatButton) { this.chatButton.disabled = empty; }
 		this.root.classList.toggle('new-tab', empty);
 		if (this.startView) {
 			const wasHidden = this.startView.element.hidden;

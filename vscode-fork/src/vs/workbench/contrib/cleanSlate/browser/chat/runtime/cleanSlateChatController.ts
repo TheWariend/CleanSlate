@@ -73,7 +73,7 @@ export class CleanSlateChatController extends Disposable {
     ) {
         super();
         this.onDidPendingEditsChange = editCodeService.onDidPendingEditsChange;
-        this.completionTimelineBuilder = new CleanSlateCompletionTimelineBuilder(workspaceContextService, editCodeService, this.filesModifiedService, this.fileChangeLedger);
+        this.completionTimelineBuilder = new CleanSlateCompletionTimelineBuilder(workspaceContextService, { getPendingEditsDiffs: () => this.getPendingEditsDiffs() }, this.filesModifiedService, this.fileChangeLedger);
         this._register(this.commandApprovalService.onDidRequestApproval(request => this.handleCommandApprovalRequested(request)));
         this._register(this.commandApprovalService.onDidResolveApproval(resolution => this.handleCommandApprovalResolved(resolution)));
     }
@@ -1109,7 +1109,7 @@ export class CleanSlateChatController extends Disposable {
         onModelTerminatedContinue?: () => void,
 		streamFactory?: (signal: AbortSignal) => Promise<AsyncIterable<CleanSlateStreamPart>> | AsyncIterable<CleanSlateStreamPart>
     ): Promise<void> {
-        const editor = this.codeEditorService.getActiveCodeEditor();
+        const editor = this.agent.isBrowserChatMode() ? undefined : this.codeEditorService.getActiveCodeEditor();
         const selections = editor ? [...(editor.getSelections() || [])] : [];
 
         this.fileChangeLedger.clear();
@@ -2087,6 +2087,7 @@ export class CleanSlateChatController extends Disposable {
     }
 
     applyLastResponse(): void {
+        if (this.agent.isBrowserChatMode()) { return; }
         if (this.lastResponse) {
             let code = this.lastResponse.text;
             if (code.startsWith('```')) {
@@ -2101,6 +2102,7 @@ export class CleanSlateChatController extends Disposable {
     }
 
     undoLastEdit(): void {
+        if (this.agent.isBrowserChatMode()) { return; }
         const editor = this.codeEditorService.getActiveCodeEditor();
         if (editor && editor.getModel()) {
             const uri = editor.getModel()!.uri;
@@ -2164,28 +2166,34 @@ export class CleanSlateChatController extends Disposable {
     }
 
     acceptAll(): void {
+        if (this.agent.isBrowserChatMode()) { return; }
         this.editCodeService.acceptAll();
         this.lastResponse = undefined;
     }
 
     rejectAll(): void {
+        if (this.agent.isBrowserChatMode()) { return; }
         this.editCodeService.rejectAll();
         this.lastResponse = undefined;
     }
 
     hasPendingEdits(): boolean {
+        if (this.agent.isBrowserChatMode()) { return false; }
         return this.editCodeService.hasPendingEdits();
     }
 
     getPendingEditsCount(): number {
+        if (this.agent.isBrowserChatMode()) { return 0; }
         return this.editCodeService.getPendingEditsCount();
     }
 
     getPendingEditsInfo(): { uri: URI; added: number; deleted: number }[] {
+        if (this.agent.isBrowserChatMode()) { return []; }
         return this.editCodeService.getPendingEditsInfo();
     }
 
     getPendingEditsDiffs(): { uri: URI; added: number; deleted: number; diff: string; beforeContent: string; afterContent: string }[] {
+        if (this.agent.isBrowserChatMode()) { return []; }
         return this.editCodeService.getPendingEditsDiffs();
     }
 

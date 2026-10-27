@@ -29,7 +29,7 @@ registerThemingParticipant((_theme, collector) => {
 
 		/* Keep modal dialogs visible while the editor parts are hidden. Project
 		   selection waits for these trust/import dialogs to be answered. */
-		.cleanSlate-agent-manager-host-active > :not(.cleanSlate-agent-manager-surface):not(.part.titlebar):not(.quick-input-widget):not(.monaco-dialog-modal-block) {
+		.cleanSlate-agent-manager-host-active > :not(.cleanSlate-agent-manager-surface):not(.part.titlebar):not(.quick-input-widget):not(.context-view):not(.monaco-dialog-modal-block) {
 			display: none !important;
 		}
 
@@ -429,7 +429,10 @@ registerThemingParticipant((_theme, collector) => {
 		.cleanSlate-agent-manager-surface.right-pane-visible .cleanSlate-agent-manager-right-pane {
 			visibility: visible;
 			opacity: 1;
-			transform: translateX(0);
+			/* Editor pickers use viewport coordinates. A transform, even zero,
+			 * makes fixed descendants relative to this pane and clips them. */
+			transform: none;
+			will-change: auto;
 			pointer-events: auto;
 		}
 
@@ -866,7 +869,7 @@ registerThemingParticipant((_theme, collector) => {
 			max-width: none;
 		}
 
-		/* Side chat lives in a resizable pane. Do not inherit the main chat's
+		/* Task Side chat lives in a resizable pane. Do not inherit the main chat's
 		 * 80px outer gutter or its 40px composer padding: at the pane's minimum
 		 * width those nested gutters leave the footer narrower than its controls. */
 		.cleanSlate-agent-manager-side-chat-host > .cleanSlate-agent-manager-transcript,
@@ -917,6 +920,18 @@ registerThemingParticipant((_theme, collector) => {
 		.cleanSlate-agent-manager-side-chat-host .cleanSlate-agent-manager-bottom .cleanSlate-dropdown {
 			padding: 2px 5px;
 		}
+
+		.cleanSlate-agent-manager-right-pane.browser-chat > .cleanSlate-agent-manager-right-header { display: none; }
+		.cleanSlate-agent-manager-right-body.editor-chat {
+			padding: 0;
+			overflow: hidden;
+			scrollbar-gutter: auto;
+			line-height: normal;
+		}
+		.cleanSlate-agent-manager-side-chat-host > .cleanSlate-agent-manager-bottom { gap: 0; }
+		.cleanSlate-agent-manager-side-chat-host .cleanSlate-input-footer,
+		.cleanSlate-agent-manager-side-chat-host .cleanSlate-footer-left { flex-wrap: wrap; min-width: 0; }
+		.cleanSlate-agent-manager-side-chat-host .cleanSlate-model-dropdown { min-width: 0; max-width: 140px; }
 
 		.cleanSlate-agent-manager-terminal-container {
 			position: relative;
@@ -2041,6 +2056,19 @@ registerThemingParticipant((_theme, collector) => {
 			border-radius: 8px;
 			background: color-mix(in srgb, var(--cleanSlate-agent-manager-text) 4%, transparent);
 			color: var(--cleanSlate-agent-manager-text-muted);
+		}
+
+		.cleanSlate-workspace-browser-toolbar .cleanSlate-browser-chat-button {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			width: auto;
+			padding: 5px 9px;
+			white-space: nowrap;
+		}
+
+		.cleanSlate-workspace-browser-toolbar .cleanSlate-browser-chat-button.active {
+			background: color-mix(in srgb, var(--vscode-focusBorder) 15%, transparent);
 		}
 
 		.cleanSlate-workspace-browser-address:focus-within {

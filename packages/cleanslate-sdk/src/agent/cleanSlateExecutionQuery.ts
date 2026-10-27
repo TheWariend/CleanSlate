@@ -1023,6 +1023,8 @@ export class CleanSlateExecutionQueryEngine {
     }
 
     private buildSystemDirective(): string {
+        const domainDirective = this.options.getSystemDirective?.();
+        if (domainDirective !== undefined) { return domainDirective; }
         const cliPolicy = [
             'VERIFICATION POLICY:',
 			'Use host diagnostics after edits. When diagnostics do not prove the requested behavior, run a finite, scoped execute_command with an accurate intent and writesToWorkspace value.',

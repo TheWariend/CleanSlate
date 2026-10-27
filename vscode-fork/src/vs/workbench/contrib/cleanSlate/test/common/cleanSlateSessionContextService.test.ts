@@ -8,6 +8,14 @@ import { URI } from '../../../../../base/common/uri.js';
 import { CleanSlateSessionContextService } from '../../browser/chat/providers/cleanSlateChatSessionProvider.js';
 
 suite('CleanSlateSessionContextService', () => {
+	test('browser chat never calls the IDE context service or enumerates workspace files', async () => {
+		const service = new CleanSlateSessionContextService({
+			getContext: () => assert.fail('Browser chat must not request IDE context')
+		} as any, {
+			isInsideWorkspace: () => assert.fail('Browser chat must not inspect the project')
+		} as any, true);
+		assert.deepStrictEqual(await service.getContext(), { activeFile: undefined, openFiles: [] });
+	});
 	test('removes active and open editor context from another project', async () => {
 		const oldProjectFile = URI.file('/workspace/flutter/lib/main.dart');
 		const activeProjectFile = URI.file('/workspace/calculator/README.md');

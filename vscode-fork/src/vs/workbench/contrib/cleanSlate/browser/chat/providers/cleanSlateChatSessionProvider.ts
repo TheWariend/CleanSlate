@@ -6,7 +6,7 @@
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { CleanSlateProviderSchemaNormalizer } from '@cleanslate/sdk/node/cleanSlateProviderSchemaNormalizer.js';
 import { normalizePlanningQuestion } from '../runtime/cleanSlateChatResponseNormalizer.js';
-import { Disposable, DisposableStore, IDisposable } from '../../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { basename, isEqualOrParent, joinPath } from '../../../../../../base/common/resources.js';
 import { generateUuid } from '../../../../../../base/common/uuid.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
@@ -55,11 +55,20 @@ import { CleanSlateChatSessionRunState, CleanSlateSessionAlreadyRunningError, ty
 import { CleanSlateChatSessionSnapshotCodec } from './cleanSlateChatSessionSnapshotCodec.js';
 import { CLEANSLATE_HOSTED_AGENT_OWNER } from '@cleanslate/sdk/protocol/cleanSlateAI.js';
 import { ICleanSlateBrowserAutomationService } from '../../core/cleanSlateBrowserAutomationService.js';
-import { IExternalAgentConfig, IExternalAgentEvent } from '../../../../../services/cleanSlate/common/externalAgents/externalAgentTypes.js';
+import { CLEANSLATE_BROWSER_CHAT_INSTRUCTION } from '../../core/cleanSlateBrowserPageContext.js';
+import { IExternalAgentConfig, IExternalAgentEvent, IExternalAgentStartRequest } from '../../../../../services/cleanSlate/common/externalAgents/externalAgentTypes.js';
 import { externalAgentDisplayText } from '@cleanslate/sdk/externalAgents/externalAgentPresentation.js';
 import { createExternalAgentHandoffPrompt, createExternalAgentHostPrompt } from '@cleanslate/sdk/externalAgents/handoff.js';
 import { CleanSlateDiffService } from '@cleanslate/sdk/services/cleanSlateDiffService.js';
 import { CleanSlateFilesModifiedService, type ICleanSlateFileChange } from '@cleanslate/sdk/agent/cleanSlateFilesModifiedService.js';
+
+const CLEANSLATE_BROWSER_CHATS_STORAGE_KEY = 'cleanSlate.browserChat.conversations.v1';
+
+interface ICleanSlateBrowserConversation {
+	snapshot: ICleanSlateSessionSnapshot;
+	draft: string;
+	images: string[];
+}
 
 const CLEANSLATE_ACTIVE_SESSION_STORAGE_KEY = 'cleanSlate.chat.activeSession';
 const CLEANSLATE_ACTIVE_SESSION_SAVE_DEBOUNCE_MS = 250;
@@ -114,6 +123,7 @@ interface ICleanSlateLiveSession {
     liveOwnerId?: string;
     transportStatus?: NonNullable<ICleanSlateThreadSessionUpdate['live']>['transportStatus'];
 	runtime: 'native' | 'external';
+	sideChatKind?: 'task' | 'browser';
 	externalAgent?: IExternalAgentConfig;
 	externalAgentSessionId?: string;
 }
@@ -153,6 +163,9 @@ export class CleanSlateChatSessionProvider extends Disposable {
     private readonly sessions = new Map<string, ICleanSlateLiveSession>();
 	/** Auxiliary conversations belong to a task surface, never to task history. */
 	private readonly sideChats = new Map<string, ICleanSlateLiveSession>();
+	private readonly browserChats = new Map<string, ICleanSlateLiveSession>();
+	private readonly browserConversations = new Map<string, ICleanSlateBrowserConversation>();
+	private activeBrowserChatId: string | undefined;
 	private readonly sideChatRenderers = new Map<string, IResponseRenderer>();
 	private readonly childAgentPresentations = new Map<string, ICleanSlateChildAgentPresentation>();
 	private readonly hostedChildSequences = new Map<string, number>();
@@ -223,6 +236,13 @@ export class CleanSlateChatSessionProvider extends Disposable {
             this.registerSession(fresh);
             this.activeSessionId = fresh.id;
         }
+        if (this.surface === 'agentManager') { this.loadBrowserConversations(); }
+        this._register(toDisposable(() => {
+            this.persistBrowserConversations();
+            for (const session of this.browserChats.values()) { this.disposeBrowserChatSession(session); }
+            this.browserChats.clear();
+        }));
+        this._register(this.storageService.onWillSaveState(() => this.persistBrowserConversations()));
         this.readyPromise = this.surface === 'agentManager'
             ? Promise.resolve()
             : this.initializePersistentActiveSession(activeSession);
@@ -256,7 +276,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
     }
 
     hasOwnedRunningSessions(): boolean {
-        return [...this.sessions.values(), ...this.sideChats.values()].some(session => this.runState.isRunning(session.id));
+        return [...this.sessions.values(), ...this.sideChats.values(), ...this.browserChats.values()].some(session => this.runState.isRunning(session.id));
     }
 
     private requestLiveSessionSync(): Promise<void> {
@@ -418,7 +438,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 	private readonly externalContextUsage = new Map<string, { usedTokens: number; maxTokens: number }>();
 
 	getExternalContextUsage(sessionId = this.activeSessionId): { usedTokens: number; maxTokens: number } | null | undefined {
-		const session = this.sessions.get(sessionId) ?? this.sideChats.get(sessionId);
+		const session = this.sessions.get(sessionId) ?? this.getAuxiliaryChat(sessionId);
 		if (session?.runtime !== 'external') { return undefined; }
 		const cached = this.externalContextUsage.get(sessionId);
 		if (cached) { return cached; }
@@ -442,7 +462,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
         if (!sessionId) {
             return false;
         }
-        const session = this.sessions.get(sessionId) ?? this.sideChats.get(sessionId);
+        const session = this.sessions.get(sessionId) ?? this.getAuxiliaryChat(sessionId);
         return session ? this.runState.isRunning(sessionId) || session.controller.getIsGenerating() === true
             : this.publishedRunningSessions.get(sessionId) === true;
     }
@@ -485,26 +505,175 @@ export class CleanSlateChatSessionProvider extends Disposable {
         this._onDidChangeState.fire();
     }
 
+	private getAuxiliaryChat(id: string): ICleanSlateLiveSession | undefined {
+		return this.browserChats.get(id) ?? this.sideChats.get(id);
+	}
+
+	getBrowserChatId(): string {
+		if (!this.activeBrowserChatId || !this.browserConversations.has(this.activeBrowserChatId)) { return this.newBrowserChat(); }
+		this.materializeBrowserChat(this.activeBrowserChatId);
+		return this.activeBrowserChatId;
+	}
+
+	newBrowserChat(): string {
+		const active = this.activeBrowserChatId ? this.browserConversations.get(this.activeBrowserChatId) : undefined;
+		if (active && !this.hasBrowserConversationContent(active) && !active.snapshot.externalAgent) {
+			return this.activeBrowserChatId!;
+		}
+		const session = this.createLiveSession(undefined, false, 'low', {
+			workspaceId: 'browser-chat', projectRoot: '', workDir: '', workspaceName: '', title: 'Browser chat'
+		}, undefined, true);
+		session.sideChatKind = 'browser';
+		this.browserChats.set(session.id, session);
+		this.browserConversations.set(session.id, { snapshot: this.buildSessionSnapshot(session), draft: '', images: [] });
+		this.activeBrowserChatId = session.id;
+		this.persistBrowserConversations();
+		return session.id;
+	}
+
+	selectBrowserChat(id: string): void {
+		if (!this.browserConversations.has(id)) { return; }
+		this.activeBrowserChatId = id;
+		this.materializeBrowserChat(id);
+		this.persistBrowserConversations();
+	}
+
+	listBrowserChats(): { id: string; title: string }[] {
+		return [...this.browserConversations].map(([id, value]) => ({ id, title: value.snapshot.title }));
+	}
+
+	getBrowserChatSnapshots(): ICleanSlateSessionSnapshot[] {
+		return [...this.browserConversations].filter(([, value]) => this.hasBrowserConversationContent(value)).map(([id, value]) => {
+			const session = this.browserChats.get(id);
+			return session ? this.buildSessionSnapshot(session) : value.snapshot;
+		});
+	}
+
+	getBrowserChatTitle(id: string): string {
+		return this.browserChats.get(id)?.title ?? this.browserConversations.get(id)?.snapshot.title ?? 'Browser chat';
+	}
+
+	private hasBrowserConversationContent(value: ICleanSlateBrowserConversation): boolean {
+		return !!value.draft.trim() || value.images.length > 0
+			|| value.snapshot.history.some(message => message.role === 'user' && !message.isInternalState)
+			|| (value.snapshot.transcript ?? []).some(message => message.role === 'user' && !message.isInternalState);
+	}
+
+	getBrowserChatDraft(id: string): { draft: string; images: string[] } {
+		const value = this.browserConversations.get(id);
+		return { draft: value?.draft ?? '', images: [...value?.images ?? []] };
+	}
+
+	setBrowserChatDraft(id: string, draft: string, images: string[]): void {
+		const value = this.browserConversations.get(id);
+		if (!value) { return; }
+		Object.assign(value, { draft, images: [...images] });
+		this.persistBrowserConversations();
+	}
+
+	deleteBrowserChat(id: string): void {
+		const session = this.browserChats.get(id);
+		if (session) {
+			this.abortSideChat(id, this.createLiveSideChatRenderer(id));
+			this.disposeBrowserChatSession(session);
+		}
+		this.browserChats.delete(id);
+		this.browserConversations.delete(id);
+		this.sideChatRenderers.delete(id);
+		void this.cleanSlateMainService.closeExternalAgentSession(id).catch(() => undefined);
+		if (this.activeBrowserChatId === id) { this.activeBrowserChatId = [...this.browserConversations.keys()].at(-1); }
+		this.persistBrowserConversations();
+	}
+
+	private disposeBrowserChatSession(session: ICleanSlateLiveSession): void {
+		session.agent.releaseAttachedBrowserPageContext();
+		session.threadHistoryListener.dispose();
+		session.controllerStateListener.dispose();
+		session.controller.dispose();
+		session.instantiationStore.dispose();
+	}
+
+	private materializeBrowserChat(id: string): void {
+		if (this.browserChats.has(id)) { return; }
+		const snapshot = this.browserConversations.get(id)!.snapshot;
+		const session = this.createLiveSession(id, false, snapshot.reasoningLevel, {
+			workspaceId: 'browser-chat', projectRoot: '', workDir: '', workspaceName: '', title: snapshot.title, createdAt: snapshot.createdAt
+		}, snapshot.externalAgent, true);
+		session.sideChatKind = 'browser';
+		// Restore only this browser conversation. Never use project snapshot fallbacks.
+		session.externalAgentSessionId = snapshot.externalAgentSessionId;
+		session.threadService.setHistory(this.snapshotCodec.cloneHistory(snapshot.history));
+		session.transcriptHistory = this.snapshotCodec.cloneTranscript(snapshot.transcript ?? []);
+		session.agent.restoreRuntimeSnapshot(this.snapshotCodec.cloneObject(snapshot.agentRuntimeState));
+		this.browserChats.set(id, session);
+	}
+
+	private loadBrowserConversations(): void {
+		try {
+			const saved = JSON.parse(this.storageService.get(CLEANSLATE_BROWSER_CHATS_STORAGE_KEY, StorageScope.PROFILE, '{}'));
+			for (const value of saved.conversations ?? []) {
+				if (typeof value?.snapshot?.id !== 'string' || !Array.isArray(value.snapshot.history) || !Array.isArray(value.snapshot.transcript)) { continue; }
+				this.browserConversations.set(value.snapshot.id, {
+					snapshot: value.snapshot, draft: typeof value.draft === 'string' ? value.draft : '',
+					images: Array.isArray(value.images) ? value.images.filter((image: unknown) => typeof image === 'string') : []
+				});
+			}
+			this.activeBrowserChatId = saved.activeId;
+		} catch (error) { console.warn('[CleanSlate] Failed to restore browser conversations:', error); }
+	}
+
+	private persistBrowserConversations(): void {
+		if (this.surface !== 'agentManager') { return; }
+		for (const [id, session] of this.browserChats) {
+			const value = this.browserConversations.get(id);
+			if (value) { value.snapshot = this.buildSessionSnapshot(session); }
+		}
+		this.storageService.store(CLEANSLATE_BROWSER_CHATS_STORAGE_KEY, JSON.stringify({
+			activeId: this.activeBrowserChatId, conversations: [...this.browserConversations.values()].filter(value => this.hasBrowserConversationContent(value))
+		}), StorageScope.PROFILE, StorageTarget.MACHINE);
+	}
+
 	/**
 	 * Creates a conversation attached to the current task without replacing the
 	 * main composer. The side chat receives a read-only context seed, then owns
 	 * an independent runtime, transcript and cancellation boundary.
 	 */
-	createSideChat(title = 'Side chat'): string {
+	createSideChat(title = 'Side chat', kind: 'task' | 'browser' = 'task'): string {
+		if (kind === 'browser') { return this.getBrowserChatId(); }
 		const parent = this.activeSession;
-		const existing = Array.from(this.sideChats.values()).find(candidate => candidate.parentSessionId === parent.id);
+		const existing = Array.from(this.sideChats.values()).find(candidate => candidate.parentSessionId === parent.id && (candidate.sideChatKind ?? 'task') === kind);
 		if (existing) {
 			return existing.id;
 		}
-		return this.createSideChatForParent(parent, title).id;
+		return this.createSideChatForParent(parent, title, kind).id;
 	}
 
 	getSideChatExternalRequest(sessionId: string) {
-		const session = this.sideChats.get(sessionId);
-		return session?.externalAgent ? { cleanSlateSessionId: session.id, config: session.externalAgent, cwd: session.workDir || session.projectRoot, externalSessionId: session.externalAgentSessionId } : undefined;
+		const session = this.getAuxiliaryChat(sessionId);
+		if (!session?.externalAgent) { return undefined; }
+		return session.sideChatKind === 'browser' ? this.getExternalSessionRequest(session)
+			: { cleanSlateSessionId: session.id, config: session.externalAgent, cwd: session.workDir || session.projectRoot, externalSessionId: session.externalAgentSessionId };
 	}
 
-	private createSideChatForParent(parent: ICleanSlateLiveSession, title = 'Side chat'): ICleanSlateLiveSession {
+	private getExternalSessionRequest(session: ICleanSlateLiveSession): IExternalAgentStartRequest {
+		const browserChat = session.sideChatKind === 'browser';
+		return {
+			cleanSlateSessionId: session.id, config: session.externalAgent!,
+			// An empty cwd starts ACP in its own temporary directory, away from the project.
+			cwd: browserChat ? undefined : session.workDir || session.projectRoot,
+			externalSessionId: session.externalAgentSessionId,
+			hostTools: {
+				ownerId: this.providerId,
+				tools: [{ name: 'cleanslate_context', description: browserChat ? 'Identify this browser conversation and its available browser tools.' : 'Identify the current CleanSlate chat, workspace, surface and available IDE tools.', inputSchema: { type: 'object', properties: {} } },
+					...session.agent.getTools().filter(tool => this.externalHostToolNames.has(tool.name)).map(tool => ({
+						name: tool.name, description: `Runs through the current CleanSlate ${browserChat ? 'browser' : 'IDE'} chat. ${tool.name === 'spawn_worker' ? 'Starts a CleanSlate-managed worker using the configured CleanSlate provider, not another instance of this external agent. ' : ''}${tool.description}`,
+						inputSchema: new CleanSlateProviderSchemaNormalizer().normalizeJsonObjectSchema(tool.parametersSchema)
+					}))]
+			}
+		};
+	}
+
+	private createSideChatForParent(parent: ICleanSlateLiveSession, title = 'Side chat', kind: 'task' | 'browser' = 'task'): ICleanSlateLiveSession {
 		const side = this.createLiveSession(undefined, false, parent.reasoningLevel, {
 			parentSessionId: parent.id,
 			workspaceId: parent.workspaceId,
@@ -517,12 +686,14 @@ export class CleanSlateChatSessionProvider extends Disposable {
 		// history listener fires synchronously. This keeps even the initial seed out
 		// of persistence, publishing, archives and sidebar history.
 		this.sideChats.set(side.id, side);
+		side.sideChatKind = kind;
+		side.agent.setBrowserChatMode(kind === 'browser');
 		const context = parent.threadService.getActiveTaskHistory()
 			.filter(message => !message.isInternalState && (message.role === 'user' || message.role === 'assistant'))
 			.slice(-8)
 			.map(message => `${message.role}: ${message.content}`)
 			.join('\n\n');
-		if (context) {
+		if (context && kind === 'task') {
 			side.threadService.addMessage('system', [
 				'This is a side conversation attached to another task.',
 				'Use the following prior discussion only as context. Do not claim you performed the parent task.',
@@ -534,7 +705,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 	}
 
 	attachSideChatRenderer(sessionId: string, renderer: IResponseRenderer): void {
-		if (this.sideChats.has(sessionId)) {
+		if (this.getAuxiliaryChat(sessionId)) {
 			this.sideChatRenderers.set(sessionId, renderer);
 		}
 	}
@@ -544,7 +715,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 	}
 
 	getSideChatTranscript(sessionId: string): ICleanSlateTranscriptMessage[] {
-		const session = this.sideChats.get(sessionId);
+		const session = this.getAuxiliaryChat(sessionId);
 		return session ? this.snapshotCodec.cloneTranscript(this.getEffectiveTranscriptHistory(session)) : [];
 	}
 
@@ -552,7 +723,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 		if (this.isSessionRunning(sessionId)) {
 			return true;
 		}
-		const sideChat = this.sideChats.get(sessionId);
+		const sideChat = this.getAuxiliaryChat(sessionId);
 		if (!sideChat) {
 			return false;
 		}
@@ -562,8 +733,8 @@ export class CleanSlateChatSessionProvider extends Disposable {
 	}
 
 	sendSideChatMessage(sessionId: string, text: string, renderer: IResponseRenderer, onGeneratingChange?: (isGenerating: boolean) => void, images?: string[]): Promise<void> {
-		const session = this.sideChats.get(sessionId);
-		if (!session || !session.parentSessionId) {
+		const session = this.getAuxiliaryChat(sessionId);
+		if (!session) {
 			return Promise.reject(new Error('Side chat is no longer available.'));
 		}
 		this.attachSideChatRenderer(sessionId, renderer);
@@ -571,7 +742,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 	}
 
 	abortSideChat(sessionId: string, renderer: IResponseRenderer): void {
-		const session = this.sideChats.get(sessionId);
+		const session = this.getAuxiliaryChat(sessionId);
 		if (!session) {
 			return;
 		}
@@ -631,7 +802,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 		if (event.agent.parentAgentId !== sessionId) {
 			return;
 		}
-		const sourceSideChat = this.sideChats.get(sessionId);
+		const sourceSideChat = this.getAuxiliaryChat(sessionId);
 		let sideChat = sourceSideChat ?? Array.from(this.sideChats.values()).find(candidate => candidate.parentSessionId === sessionId);
 		if (!sideChat && event.type === 'created' && liveSession) {
 			sideChat = this.createSideChatForParent(liveSession);
@@ -952,7 +1123,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
         return this.sendSessionMessage(session, text, renderer, onGeneratingChange, images);
     }
 
-    private sendSessionMessage(
+    private async sendSessionMessage(
         session: ICleanSlateLiveSession,
         text: string,
         renderer: IResponseRenderer,
@@ -967,7 +1138,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 				if (forceVisibleRenderer || this.isActiveSession(session)) { onGeneratingChange?.(value); }
 			}, images, renderUserMessage);
 		}
-        if (this.cleanSlateMainService.startHostedAgentRun && !session.parentSessionId) {
+        if (this.cleanSlateMainService.startHostedAgentRun && !session.parentSessionId && session.sideChatKind !== 'browser') {
             return this.submitHostedRun(session, text, onGeneratingChange, images);
         }
         let run: ReturnType<typeof this.startRun>;
@@ -976,6 +1147,23 @@ export class CleanSlateChatSessionProvider extends Disposable {
         } catch (error) {
             return Promise.reject(error);
         }
+		let browserPageContext: string | undefined;
+		if (session.sideChatKind === 'browser') {
+			onGeneratingChange?.(true);
+			try {
+				// Capture and pin the page before committing a visible conversation
+				// turn. Loading/navigation failures leave the draft and history intact.
+				browserPageContext = await session.agent.getAttachedBrowserPageContext() ?? '';
+				const currentRun = this.runState.get(session.id);
+				if (currentRun?.runId !== run.runId || currentRun.status !== 'running') { throw new Error('Browser chat was cancelled.'); }
+			} catch (error) {
+				this.finishRun(session, run.runId, this.isAbortLikeError(error) ? 'cancelled' : 'failed');
+				onGeneratingChange?.(false);
+				this.notifySessionChanged(session);
+				throw error;
+			}
+			if (session.title === 'Browser chat' && text.trim()) { session.title = text.trim().slice(0, 90); }
+		}
 		if (renderUserMessage) {
 			this.createSessionScopedRenderer(session, renderer, forceVisibleRenderer).addMessage(text, 'user', images);
 		}
@@ -994,7 +1182,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
             }
             resumeRequested = true;
             void currentRunSettled.then(() => {
-                if (this.sessions.get(session.id) !== session && this.sideChats.get(session.id) !== session) {
+                if (this.sessions.get(session.id) !== session && this.getAuxiliaryChat(session.id) !== session) {
                     return;
                 }
 				this.recordTranscriptMessageForSession(session, { role: 'user', content: 'continue', isInternalState: true });
@@ -1015,7 +1203,8 @@ export class CleanSlateChatSessionProvider extends Disposable {
             },
             undefined,
             images,
-            resumeAfterModelTermination
+            resumeAfterModelTermination,
+			browserPageContext !== undefined ? signal => session.agent.sendMessage(text, [], executionFlow, signal, images, undefined, browserPageContext) : undefined
         ).then(
             result => {
                 this.finishRun(session, run.runId, 'completed');
@@ -1038,7 +1227,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
         onGeneratingChange?: (isGenerating: boolean) => void
     ): Promise<void> {
         const session = this.activeSession;
-        if (this.cleanSlateMainService.startHostedAgentRun && !session.parentSessionId) {
+        if (this.cleanSlateMainService.startHostedAgentRun && !session.parentSessionId && session.sideChatKind !== 'browser') {
             return this.submitHostedRun(session, planStepsContext, onGeneratingChange, undefined, 'approvePlan');
         }
         let run: ReturnType<typeof this.startRun>;
@@ -1198,7 +1387,11 @@ export class CleanSlateChatSessionProvider extends Disposable {
     }
 
     private persistSession(session: ICleanSlateLiveSession): void {
-		if (this.applyingPublishedSession || this.sideChats.get(session.id) === session) {
+		if (session.sideChatKind === 'browser') {
+			if (this.browserChats.get(session.id) === session) { this.persistBrowserConversations(); }
+			return;
+		}
+		if (this.applyingPublishedSession || this.getAuxiliaryChat(session.id) === session) {
             return;
         }
         const snapshot = this.buildSessionSnapshot(session, this.getWorkspaceName());
@@ -1240,7 +1433,14 @@ export class CleanSlateChatSessionProvider extends Disposable {
         if (this.applyingPublishedSession) {
             return;
         }
-		if (this.sideChats.get(session.id) === session) {
+		if (session.sideChatKind === 'browser') {
+			if (this.browserChats.get(session.id) === session) {
+				this.persistBrowserConversations();
+				this._onDidChangeState.fire();
+			}
+			return;
+		}
+		if (this.getAuxiliaryChat(session.id) === session) {
 			this._onDidChangeState.fire();
 			return;
 		}
@@ -1255,7 +1455,8 @@ export class CleanSlateChatSessionProvider extends Disposable {
      * those consumers only need semantic session/status changes.
      */
     private persistTranscriptContent(session: ICleanSlateLiveSession): void {
-		if (this.sideChats.get(session.id) === session) {
+		if (session.sideChatKind === 'browser') { this.persistBrowserConversations(); return; }
+		if (this.getAuxiliaryChat(session.id) === session) {
 			return;
 		}
         // Agent Manager's persistence callback also rebuilds its complete history
@@ -1268,7 +1469,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
     }
 
     private queueLiveSessionPublish(session: ICleanSlateLiveSession): void {
-        if (this.applyingPublishedSession || session.liveOwnerId || this.sideChats.get(session.id) === session || this.deletedSessionIds.has(session.id)) {
+        if (session.sideChatKind === 'browser' || this.applyingPublishedSession || session.liveOwnerId || this.getAuxiliaryChat(session.id) === session || this.deletedSessionIds.has(session.id)) {
             return;
         }
 
@@ -1533,6 +1734,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 		const finished = this.runState.finish(session.id, runId, status, reason);
 		if (finished) {
 			session.controller.setExternalGeneratingState(false);
+			session.agent.releaseAttachedBrowserPageContext();
 		}
         if (this.disposeAfterRuns && !this.hasOwnedRunningSessions()) {
             super.dispose();
@@ -1558,7 +1760,16 @@ export class CleanSlateChatSessionProvider extends Disposable {
 	private readonly handoffs = new Set<string>();
 
 	async handoffAgent(config: IExternalAgentConfig | undefined, name: string): Promise<void> {
-		const session = this.activeSession;
+		return this.handoffSession(this.activeSession, config, name);
+	}
+
+	async handoffBrowserChat(id: string, config: IExternalAgentConfig | undefined, name: string): Promise<void> {
+		const session = this.browserChats.get(id);
+		if (!session) { throw new Error('The browser conversation is no longer available.'); }
+		return this.handoffSession(session, config, name);
+	}
+
+	private async handoffSession(session: ICleanSlateLiveSession, config: IExternalAgentConfig | undefined, name: string): Promise<void> {
 		if (this.handoffs.has(session.id)) { throw new Error('An agent handoff is already in progress.'); }
 		if (this.isLiveSessionRunning(session)) { throw new Error('Stop the current response before switching agents.'); }
 		if (session.externalAgent?.agentId === config?.agentId) { return; }
@@ -1595,31 +1806,26 @@ export class CleanSlateChatSessionProvider extends Disposable {
 			throw new Error('External agent configuration is missing.');
 		}
 		const state = this.startRun(session);
-		if (renderUserMessage) { renderer.addMessage(text, 'user', images); }
 		let promptStarted = false;
+		let pagePrepared = false;
 		onGeneratingChange?.(true);
 		try {
+		const browserPageContext = await session.agent.getAttachedBrowserPageContext();
+		pagePrepared = true;
+		if (session.sideChatKind === 'browser' && session.title === 'Browser chat' && text.trim()) { session.title = text.trim().slice(0, 90); }
+		if (renderUserMessage) { renderer.addMessage(text, 'user', images); }
 		const previousRemoteSessionId = session.externalAgentSessionId;
 		{
-			const cwd = session.workDir || session.projectRoot;
-			const started = await this.cleanSlateMainService.startExternalAgentSession({
-				cleanSlateSessionId: session.id,
-				config: session.externalAgent,
-				cwd,
-				externalSessionId: session.externalAgentSessionId,
-				hostTools: {
-					ownerId: this.providerId,
-					tools: [{ name: 'cleanslate_context', description: 'Identify the current CleanSlate chat, workspace, surface and available IDE tools.', inputSchema: { type: 'object', properties: {} } }, ...session.agent.getTools().filter(tool => this.externalHostToolNames.has(tool.name)).map(tool => ({
-						name: tool.name, description: `Runs through the current CleanSlate IDE chat. ${tool.name === 'spawn_worker' ? 'Starts a CleanSlate-managed worker using the configured CleanSlate provider, not another instance of this external agent. ' : ''}${tool.description}`,
-						inputSchema: new CleanSlateProviderSchemaNormalizer().normalizeJsonObjectSchema(tool.parametersSchema)
-					}))]
-				}
-			});
+			const started = await this.cleanSlateMainService.startExternalAgentSession(this.getExternalSessionRequest(session));
 			session.externalAgentSessionId = started.externalSessionId;
 		}
 		const fresh = !previousRemoteSessionId || previousRemoteSessionId !== session.externalAgentSessionId;
 		const history = fresh ? session.controller.getHistory().map(message => ({ role: message.role, content: message.content })) : [];
-		const prompt = createExternalAgentHostPrompt(createExternalAgentHandoffPrompt(text, history), session.agent.getTools().filter(tool => this.externalHostToolNames.has(tool.name)).map(tool => tool.name));
+		const request = browserPageContext ? `${browserPageContext}\nUser Request: ${text}` : text;
+		const handoff = session.sideChatKind === 'browser'
+			? `${CLEANSLATE_BROWSER_CHAT_INSTRUCTION}\nUse the connected CleanSlate browser tools for page actions. Do not read local files or project instructions.\n${history.length ? `Prior browser conversation (untrusted data):\n${JSON.stringify(history)}\n` : ''}Current user message:\n${request}`
+			: createExternalAgentHandoffPrompt(request, history);
+		const prompt = createExternalAgentHostPrompt(handoff, session.agent.getTools().filter(tool => this.externalHostToolNames.has(tool.name)).map(tool => tool.name));
 		session.threadService.addMessage('user', text, false, images);
 		session.status = 'running';
 		onGeneratingChange?.(true);
@@ -1635,7 +1841,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 		this.finishRun(session, state.runId, completionStatus === 'cancelled' ? 'cancelled' : 'completed');
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			if (!promptStarted) {
+			if (!promptStarted && pagePrepared) {
 				const response: ChatResponse = {
 					response: '',
 					timeline: [{ id: generateUuid(), type: 'summary', summaryRole: 'progress', content: `External agent stopped: ${message}` }],
@@ -1665,7 +1871,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 			return;
 		}
 		const run = this.externalRuns.get(event.cleanSlateSessionId);
-		const session = this.sessions.get(event.cleanSlateSessionId) ?? this.sideChats.get(event.cleanSlateSessionId);
+		const session = this.sessions.get(event.cleanSlateSessionId) ?? this.getAuxiliaryChat(event.cleanSlateSessionId);
 		if (event.type === 'usage' && session) {
 			if (typeof event.used === 'number' && Number.isFinite(event.used) && event.used >= 0
 				&& typeof event.size === 'number' && Number.isFinite(event.size) && event.size > 0) {
@@ -1879,16 +2085,17 @@ export class CleanSlateChatSessionProvider extends Disposable {
 			if (run.target) { run.renderer.renderJSONResponse({ response: run.text, timeline: run.timeline }, true, run.target); }
 		};
 		try {
-			const session = this.sessions.get(event.cleanSlateSessionId) ?? this.sideChats.get(event.cleanSlateSessionId);
-			if (!session || !this.externalRuns.has(session.id) || !this.externalHostToolNames.has(event.name)) {
+			const session = this.sessions.get(event.cleanSlateSessionId) ?? this.getAuxiliaryChat(event.cleanSlateSessionId);
+			if (!session || !this.externalRuns.has(session.id) || !this.externalHostToolNames.has(event.name)
+				|| (event.name !== 'cleanslate_context' && !session.agent.getTools().some(tool => tool.name === event.name))) {
 				throw new Error('This IDE tool is unavailable for the current agent response.');
 			}
 			if (event.name === 'cleanslate_context') {
 				await this.cleanSlateMainService.respondToExternalAgentHostTool({ ownerId: this.providerId, requestId: event.requestId, result: {
 					application: 'CleanSlate', sessionId: session.id, surface: this.surface,
-					workspace: session.workDir || session.projectRoot, planMode: session.planMode,
+					...(session.sideChatKind === 'browser' ? { conversation: 'browser' } : { workspace: session.workDir || session.projectRoot, planMode: session.planMode }),
 					tools: session.agent.getTools().filter(tool => this.externalHostToolNames.has(tool.name)).map(tool => tool.name),
-					guidance: 'Use browser_open to open pages inside CleanSlate. Shell open commands launch the system browser. IDE tool access requires user approval.'
+					guidance: session.sideChatKind === 'browser' ? 'Use the connected browser tools for this conversation. Browser tools require user approval.' : 'Use browser_open to open pages inside CleanSlate. Shell open commands launch the system browser. IDE tool access requires user approval.'
 				} });
 				return;
 			}
@@ -1921,7 +2128,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 					id: approvalId, sessionId: session.id, toolName: event.name, toolCallId: event.requestId,
 					command: `${event.name} ${JSON.stringify(event.input)}`,
 					cwd: session.workDir || session.projectRoot,
-					reason: 'The external agent requests access to this chat’s IDE tools. Review the arguments before allowing access.'
+					reason: session.sideChatKind === 'browser' ? 'The external agent requests access to this chat’s browser. Review the arguments before allowing access.' : 'The external agent requests access to this chat’s IDE tools. Review the arguments before allowing access.'
 				});
 			} finally { abort.signal.removeEventListener('abort', rejectApproval); showApprovalState(false); }
 			if (abort.signal.aborted || !approved || !this.externalRuns.has(session.id)) { throw new Error('IDE tool request cancelled.'); }
@@ -1942,11 +2149,12 @@ export class CleanSlateChatSessionProvider extends Disposable {
         planMode = false,
         reasoningLevel: CleanSlateReasoningLevel = 'low',
 		metadata: ICleanSlateSessionWorkspaceMetadata & Partial<Pick<ICleanSlateLiveSession, 'parentSessionId' | 'createdAt' | 'status' | 'title'>> = {},
-		externalAgent?: IExternalAgentConfig
+		externalAgent?: IExternalAgentConfig,
+        browserChat = false
     ): ICleanSlateLiveSession {
 		const workspaceMetadata = this.normalizeWorkspaceMetadata(metadata);
 		const workspaceContextService = new CleanSlateSessionWorkspaceContextService(this.workspaceContextService, workspaceMetadata);
-		const contextService = new CleanSlateSessionContextService(this.cleanSlateContextService, workspaceContextService);
+		const contextService = new CleanSlateSessionContextService(this.cleanSlateContextService, workspaceContextService, browserChat);
 		const instantiationStore = new DisposableStore();
 		const sessionInstantiationService = this.instantiationService.createChild(
 			new ServiceCollection(
@@ -1965,10 +2173,11 @@ export class CleanSlateChatSessionProvider extends Disposable {
             agent = sessionInstantiationService.createInstance(CleanSlateAgent, threadService, taskSessionService);
             agent.setSessionId(sessionId);
             agent.setToolSurface(this.surface);
+            agent.setBrowserChatMode(browserChat);
             // The agent's injected IWorkspaceContextService is the session-scoped override; give it
             // the real IDE-open workspace too so tools can tell same-project from cross-project
             // before revealing files/artifacts in the editor.
-            agent.setIdeWorkspaceContextService(this.workspaceContextService);
+            if (!browserChat) { agent.setIdeWorkspaceContextService(this.workspaceContextService); }
         } catch (error) {
             instantiationStore.dispose();
             console.error('%c[CleanSlate] %cAgent Instantiation Failed!', 'color: #EF4444; font-weight: bold;', 'color: inherit;', error);
@@ -2599,10 +2808,12 @@ export class CleanSlateSessionContextService implements ICleanSlateContextServic
 
     constructor(
         private readonly fallback: ICleanSlateContextService,
-        private readonly workspaceContextService: IWorkspaceContextService
+        private readonly workspaceContextService: IWorkspaceContextService,
+        private readonly browserChat = false
     ) { }
 
     async getContext(): Promise<ICleanSlateContext> {
+        if (this.browserChat) { return { activeFile: undefined, openFiles: [] }; }
         const context = await this.fallback.getContext();
         const activeFile = context.activeFile && this.workspaceContextService.isInsideWorkspace(context.activeFile.uri)
             ? context.activeFile

@@ -18,6 +18,21 @@ export const CLEANSLATE_CHAT_STYLES = `
                 text-rendering: optimizeLegibility;
 			}
 
+			.cleanSlate-chat-view-title {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				flex: 0 0 35px;
+				padding: 0 8px 0 20px;
+				box-sizing: border-box;
+				color: var(--vscode-sideBarTitle-foreground, var(--vscode-foreground));
+				font-size: 11px;
+				font-weight: 600;
+			}
+			.cleanSlate-chat-view-title-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+			.cleanSlate-chat-view-title .title-actions { flex: 0 0 auto; }
+			.cleanSlate-chat-view-title .action-label { padding: 3px; }
+
             /* Scrollbar Styling */
             .cleanSlate-chat-view ::-webkit-scrollbar {
                 width: 10px;
@@ -535,8 +550,8 @@ export const CLEANSLATE_CHAT_STYLES = `
 				background: linear-gradient(
 					to bottom,
 					transparent,
-					color-mix(in srgb, var(--vscode-editor-background) 94%, transparent) 72%,
-					var(--vscode-editor-background)
+					color-mix(in srgb, var(--vscode-sideBar-background) 94%, transparent) 72%,
+					var(--vscode-sideBar-background)
 				);
 				opacity: 0;
 				pointer-events: none;

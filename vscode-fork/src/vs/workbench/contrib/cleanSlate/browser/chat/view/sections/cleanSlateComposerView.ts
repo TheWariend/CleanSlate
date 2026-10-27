@@ -246,7 +246,7 @@ export class CleanSlateComposerView {
 			this.editModeChip.onclick = () => this.options.onEditModeSelector?.(this.editModeChip);
 		}
 		this.reasoningDropdown.style.display = external ? 'none' : '';
-		this.editModeChip.style.display = external ? 'none' : '';
+		this.editModeChip.style.display = external || !this.options.onEditModeSelector ? 'none' : '';
 		this.contextWindowButton.style.display = '';
 		this.planModeChip.style.display = 'none';
 		this.modelDropdown.classList.toggle('external-runtime', external);
@@ -530,6 +530,7 @@ export class CleanSlateComposerView {
 		dom.append(this.editModeChip, dom.$('i.codicon.codicon-chevron-down'));
 		this.editModeChip.onclick = () => this.options.onEditModeSelector?.(this.editModeChip);
 		this.updateEditMode('manual');
+		this.editModeChip.style.display = this.options.onEditModeSelector ? '' : 'none';
 
 		this.buildContextWindowIndicator(leftFooter);
 	}
@@ -747,12 +748,14 @@ export class CleanSlateComposerView {
 	}
 
 	private resizeInput(): void {
-		if (this.options.compact && this.inputElement.value.length === 0) {
-			this.inputElement.style.height = '24px';
+		if (this.inputElement.value.length === 0) {
+			// Use the editor's one-line CSS floor for an empty draft. Measuring
+			// height:auto can inherit a previous tall layout when reopening a chat.
+			this.inputElement.style.height = this.options.compact ? '24px' : '0px';
 			this.inputElement.style.overflowY = 'hidden';
 			return;
 		}
-		this.inputElement.style.height = 'auto';
+		this.inputElement.style.height = '0px';
 		const scrollHeight = this.inputElement.scrollHeight;
 		// Before the composer is attached and laid out, scrollHeight is 0.
 		// Writing that back pins the textarea to zero height and clips the

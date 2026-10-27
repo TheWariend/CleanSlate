@@ -102,6 +102,12 @@ export class CleanSlateTranscriptView {
 		}, { passive: true });
 	}
 
+	dispose(): void {
+		this.cancelPendingScroll();
+		this.contentResizeObserver?.disconnect();
+		this.transcriptRenderer.disposeMarkdownRenders();
+	}
+
 	clear(showEmptyState = false): void {
 		this.hostedRestore = undefined;
 		this.restoredWindow = undefined;
@@ -634,6 +640,9 @@ export class CleanSlateTranscriptView {
 	}
 
 	private handleScroll(): void {
+		// Hiding a retained editor body changes its scroll geometry. It does not
+		// mean the user scrolled away from the latest message.
+		if (this.element.clientHeight === 0) { return; }
 		if (this.smoothScrollInProgress) {
 			if (this.distanceFromBottom() < CleanSlateTranscriptView.BOTTOM_THRESHOLD_PX) {
 				this.smoothScrollInProgress = false;
@@ -667,7 +676,7 @@ export class CleanSlateTranscriptView {
 
 	private updateScrollToBottomButton(): void {
 		const scrollRange = this.element.scrollHeight - this.element.clientHeight;
-		const awayFromBottom = scrollRange > 1
+		const awayFromBottom = this.element.clientHeight > 0 && scrollRange > 1
 			&& scrollRange - this.element.scrollTop >= CleanSlateTranscriptView.BOTTOM_THRESHOLD_PX;
 		const showBottomFade = awayFromBottom;
 		this.bottomEdgeFade.classList.toggle('visible', showBottomFade);

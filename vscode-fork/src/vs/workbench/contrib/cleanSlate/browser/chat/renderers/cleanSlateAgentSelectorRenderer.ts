@@ -35,7 +35,7 @@ export class CleanSlateAgentSelectorRenderer {
 		dom.append(loading, dom.$('.model-status-icon.codicon.codicon-loading.codicon-modifier-spin'));
 		dom.append(loading, dom.$('.model-status-title')).textContent = 'Loading Agents';
 		this.position(overlay, anchor, container);
-		this.outsideClickListener = dom.addDisposableListener(document, 'mousedown', event => {
+		this.outsideClickListener = dom.addDisposableListener(container.ownerDocument, 'mousedown', event => {
 			if (!this.overlay?.contains(event.target as Node) && !anchor.contains(event.target as Node)) { this.hide(); }
 		});
 		try {
@@ -49,6 +49,7 @@ export class CleanSlateAgentSelectorRenderer {
 				item.type = 'button';
 				this.renderLogo(item, agent);
 				const label = agent.name.trim() || agent.id;
+				item.setAttribute('aria-label', label);
 				dom.append(item, dom.$('.model-item-label')).textContent = label;
 				if (agent.id === currentId) { item.classList.add('active'); dom.append(item, dom.$('span.codicon.codicon-check')); }
 				item.disabled = !agent.available;
@@ -94,10 +95,13 @@ export class CleanSlateAgentSelectorRenderer {
 	private position(overlay: HTMLElement, anchor: HTMLElement, container: HTMLElement): void {
 		const containerRect = container.getBoundingClientRect();
 		const anchorRect = anchor.getBoundingClientRect();
-		const width = Math.min(280, Math.max(220, containerRect.width - 20));
+		const window = dom.getWindow(container);
+		const width = Math.min(280, containerRect.width - 20, window.innerWidth - 20);
 		overlay.style.width = `${width}px`;
 		const height = overlay.getBoundingClientRect().height || 180;
-		overlay.style.left = `${Math.max(10, Math.min(anchorRect.right - width, window.innerWidth - width - 10))}px`;
-		overlay.style.top = `${Math.max(10, anchorRect.top - height - 8)}px`;
+		const minLeft = Math.max(10, containerRect.left + 10);
+		const maxLeft = Math.min(containerRect.right - width - 10, window.innerWidth - width - 10);
+		overlay.style.left = `${Math.max(minLeft, Math.min(anchorRect.right - width, maxLeft))}px`;
+		overlay.style.top = `${Math.max(10, Math.min(anchorRect.top - height - 8, window.innerHeight - height - 10))}px`;
 	}
 }

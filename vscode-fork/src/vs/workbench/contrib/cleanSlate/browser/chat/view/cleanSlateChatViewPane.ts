@@ -39,7 +39,7 @@ import { CleanSlateChatHistoryProvider } from '../providers/cleanSlateChatHistor
 import { CleanSlateChatComposerProvider } from '../providers/cleanSlateChatComposerProvider.js';
 import { stringifyCleanSlatePlanningAnswerPayload, type ICleanSlateTranscriptMessage } from '../types/cleanSlateChatSessionTypes.js';
 import { CleanSlateTranscriptRenderer } from '../renderers/cleanSlateTranscriptRenderer.js';
-import { ensureCleanSlateChatStyles } from '../styles/cleanSlateChatStyles.js';
+import { CleanSlateChatViewBody } from './cleanSlateChatViewBody.js';
 import { CleanSlateChatSettingsProvider } from '../providers/cleanSlateChatSettingsProvider.js';
 import { CleanSlateChatModelProvider } from '../providers/cleanSlateChatModelProvider.js';
 import { CleanSlatePendingEditsRenderer } from '../renderers/cleanSlatePendingEditsRenderer.js';
@@ -353,19 +353,12 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
     protected override renderBody(container: HTMLElement): void {
         super.renderBody(container);
 
-        this.container = dom.append(container, dom.$('.cleanSlate-chat-view'));
-        this.container.style.height = '100%';
-        this.container.style.display = 'flex';
-        this.container.style.flexDirection = 'column';
-
-	        this.transcriptView = new CleanSlateTranscriptView(
-	            this.container,
-	            this.transcriptRenderer,
-	            (question) => {
-	                this.planningQuestionView.show(question);
-	                this.planApprovalView?.hide();
-	            }
-	        );
+        const chatBody = new CleanSlateChatViewBody(container, this.transcriptRenderer, question => {
+            this.planningQuestionView.show(question);
+            this.planApprovalView?.hide();
+        });
+        this.container = chatBody.element;
+        this.transcriptView = chatBody.transcript;
 
         // Loading Overlay (Full Panel)
         this.loadingOverlay = dom.append(this.container, dom.$('.cleanSlate-loading-overlay'));
@@ -378,9 +371,6 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
 
         // Initial state
         this.updateLoadingState();
-
-        // Inject CSS styles
-        ensureCleanSlateChatStyles(this.container);
 
         // Initial title update
         this.updateChatTitle();
@@ -438,7 +428,7 @@ export class CleanSlateChatViewPane extends ViewPane implements IResponseRendere
         // Plan dropup — sits between global actions bar and the chat input
         this.planPanelView = new CleanSlatePlanPanelView(this.container);
 
-	        this.composerView = new CleanSlateComposerView(this.container, {
+	        this.composerView = chatBody.createComposer({
 	            workspaceName: this.workspaceContextService.getWorkspace().folders[0]?.name,
 	            mountPanels: (inputBox) => {
 	                this.planningQuestionView = new CleanSlatePlanningQuestionView(

@@ -13,7 +13,7 @@ import { CleanSlateFileChangeLedger } from './cleanSlateFileChangeLedger.js';
 export class CleanSlateCompletionTimelineBuilder {
     constructor(
         private readonly workspaceContextService: IWorkspaceContextService,
-        private readonly editCodeService: ICleanSlateEditCodeService,
+        private readonly editCodeService: Pick<ICleanSlateEditCodeService, 'getPendingEditsDiffs'>,
         private readonly filesModifiedService: CleanSlateFilesModifiedService,
         private readonly fileChangeLedger: CleanSlateFileChangeLedger
     ) { }

@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as dom from '../../../../../base/browser/dom.js';
+import { ToolBar } from '../../../../../base/browser/ui/toolbar/toolbar.js';
 import { mainWindow } from '../../../../../base/browser/window.js';
 import { FileAccess } from '../../../../../base/common/network.js';
 import { Action } from '../../../../../base/common/actions.js';
@@ -12,7 +13,7 @@ import { readCleanSlateEnvironmentGit, runCleanSlateEnvironmentGitAction, openCl
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { hash } from '../../../../../base/common/hash.js';
 import * as json from '../../../../../base/common/json.js';
-import { Disposable, DisposableStore, IReference, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, IDisposable, IReference, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { basename, extUri, isEqualOrParent } from '../../../../../base/common/resources.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
@@ -20,9 +21,9 @@ import { generateUuid } from '../../../../../base/common/uuid.js';
 import { ICodeEditor } from '../../../../../editor/browser/editorBrowser.js';
 import { ICodeEditorService } from '../../../../../editor/browser/services/codeEditorService.js';
 import { localize } from '../../../../../nls.js';
-import { IContextMenuService } from '../../../../../platform/contextview/browser/contextView.js';
+import { IContextMenuService, IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
-import { IFileDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
+import { IDialogService, IFileDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { showCleanSlateChatImport } from '../settings/cleanSlateChatImport.js';
@@ -86,6 +87,7 @@ import { CleanSlatePendingEditsRenderer } from '../chat/renderers/cleanSlatePend
 import { collectGitReviewChanges, collectSCMReviewChanges, mergeCleanSlateReviewChanges, type CleanSlateReviewDisplayScopeMode, type ICleanSlateReviewChange } from '../chat/renderers/cleanSlateReviewModel.js';
 import { CleanSlateModelSelectorRenderer } from '../chat/renderers/cleanSlateModelSelectorRenderer.js';
 import { CleanSlateAgentSelectorRenderer } from '../chat/renderers/cleanSlateAgentSelectorRenderer.js';
+import { CleanSlateHistoryOverlayRenderer } from '../chat/renderers/cleanSlateHistoryOverlayRenderer.js';
 import { CleanSlateReasoningSelectorRenderer } from '../chat/renderers/cleanSlateModeSelectorRenderer.js';
 import { CleanSlateEditModeSelectorRenderer } from '../chat/renderers/cleanSlateEditModeSelectorRenderer.js';
 import { normalizeChatResponse } from '../chat/runtime/cleanSlateChatResponseNormalizer.js';
@@ -99,6 +101,7 @@ import { CleanSlateMessageSubmitController } from '../chat/viewModel/cleanSlateM
 import { CleanSlatePlanApprovalController } from '../chat/viewModel/cleanSlatePlanApprovalController.js';
 import { CleanSlateCommandApprovalView } from '../chat/view/sections/cleanSlateCommandApprovalView.js';
 import { CleanSlateComposerView } from '../chat/view/sections/cleanSlateComposerView.js';
+import { CleanSlateChatViewBody } from '../chat/view/cleanSlateChatViewBody.js';
 import { CleanSlatePendingEditsBarView } from '../chat/view/sections/cleanSlatePendingEditsBarView.js';
 import { CleanSlatePlanApprovalView } from '../chat/view/sections/cleanSlatePlanApprovalView.js';
 import { CleanSlatePlanningQuestionView, type ICleanSlatePlanningQuestionSubmission } from '../chat/view/sections/cleanSlatePlanningQuestionView.js';
@@ -152,6 +155,8 @@ const CLEANSLATE_AGENT_MANAGER_NAV_WIDTH_MIN = 240;
 const CLEANSLATE_AGENT_MANAGER_NAV_WIDTH_MAX = 360;
 const CLEANSLATE_AGENT_MANAGER_MAIN_WIDTH_MIN = 560;
 const CLEANSLATE_AGENT_MANAGER_RIGHT_WIDTH_STORAGE_KEY = 'cleanSlate.agentManager.rightWidth.v2';
+const CLEANSLATE_BROWSER_CHAT_WIDTH_STORAGE_KEY = 'cleanSlate.browserChat.width';
+const CLEANSLATE_BROWSER_CHAT_VISIBLE_STORAGE_KEY = 'cleanSlate.browserChat.visible';
 const CLEANSLATE_AGENT_MANAGER_RIGHT_WIDTH_DEFAULT = 440;
 const CLEANSLATE_AGENT_MANAGER_RIGHT_WIDTH_MIN = 440;
 const CLEANSLATE_AGENT_MANAGER_RIGHT_WIDTH_MAX = 840;
@@ -236,7 +241,11 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	private readonly sideChatSessionByParent = new Map<string, string>();
 	private readonly pendingSideChatImages = new Map<string, string[]>();
 	private sideChatComposerView: CleanSlateComposerView | undefined;
+	private browserChatPaneVisible = false;
+	private browserChatHistoryRenderer: CleanSlateHistoryOverlayRenderer | undefined;
+	private browserChatAgentSelector: CleanSlateAgentSelectorRenderer | undefined;
 	private sideChatTranscriptSessionId: string | undefined;
+	private readonly browserChatBindings = new Map<string, MutableDisposable<IDisposable>>();
 	private workspaceEntries: readonly ICleanSlateWorkspaceEntry[] = [];
 	private selectedWorkspaceEntry: ICleanSlateWorkspaceEntry | undefined;
 	private projectTreeRenderRequest = 0;
@@ -317,6 +326,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 
 	constructor(
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
+		@IContextViewService private readonly contextViewService: IContextViewService,
 		@IClipboardService private readonly clipboardService: IClipboardService,
 		@ICodeEditorService private readonly codeEditorService: ICodeEditorService,
 		@ICleanSlateService private readonly cleanSlateService: ICleanSlateService,
@@ -327,12 +337,13 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		@ICleanSlateArtifactService private readonly artifactService: ICleanSlateArtifactService,
 		@ICleanSlateBrowserAutomationService private readonly browserAutomationService: ICleanSlateBrowserAutomationService,
 		@ICleanSlateMainService private readonly cleanSlateMainService: ICleanSlateMainService,
-		@ICleanSlateCommandApprovalService commandApprovalService: ICleanSlateCommandApprovalService,
+		@ICleanSlateCommandApprovalService private readonly commandApprovalService: ICleanSlateCommandApprovalService,
 		@IMarkdownRendererService private readonly markdownRenderer: IMarkdownRendererService,
 		@IMarkerService markerService: IMarkerService,
 		@INotificationService private readonly notificationService: INotificationService,
 		@IOpenerService private readonly openerService: IOpenerService,
 		@IFileDialogService private readonly fileDialogService: IFileDialogService,
+		@IDialogService private readonly dialogService: IDialogService,
 		@IFileService private readonly fileService: IFileService,
 		@ISCMService private readonly scmService: ISCMService,
 		@IStorageService private readonly storageService: IStorageService,
@@ -356,9 +367,17 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			if (!background) { this.showWorkspaceBrowserTab(id); }
 			else { this.renderThreadTabs(); }
 		}));
-		this._register(this.workspaceBrowser.onDidChange(() => this.renderThreadTabs()));
+		this._register(this.workspaceBrowser.onDidChange(() => this.onWorkspaceBrowserChanged()));
 		this._register(this.workspaceBrowser.onDidRequestSettings(() => this.showBrowserImport()));
 		this._register(this.workspaceBrowser.onDidRequestCloseTab(id => void this.closeThreadTab(id)));
+		this._register(this.workspaceBrowser.onDidRequestChat(() => {
+			if (this.rightPaneVisible && this.rightPaneActiveTab === 'browserChat') {
+				this.setRightPaneVisible(false);
+			} else {
+				this.selectRightPaneTab('browserChat', true);
+				this.sideChatComposerView?.focus();
+			}
+		}));
 		this._register(this.workspaceBrowser.onDidRequestShowThread(() => {
 			this.showThreadContent();
 			this.renderThreadTabs();
@@ -409,10 +428,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			if (change.parentSessionId !== this.sidebarViewModel.getActiveSessionId()) {
 				return;
 			}
-			// Opening Side Chat is the worker's existing activity surface. Do this
-			// on creation, before the coordinator emits its started event, so the
-			// newly-created side session can seed the current worker snapshot and
-			// then receive the live lifecycle updates normally.
+			// Task workers stay in their auxiliary session; they never open Browser chat.
 			if (change.event.type === 'created') {
 				this.selectRightPaneTab('sideChat', true);
 			}
@@ -575,6 +591,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			}
 		}));
 		this._register(this.browserAutomationService.onDidOpenBrowser(state => {
+			if (this.browserAutomationService.isWorkspaceBrowserBound(state.surface)) { return; }
 			if (this.isActiveAgentManagerBrowserSurface(state.surface)) {
 				this.openBrowserInRightPane(state);
 				return;
@@ -1353,21 +1370,24 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		const next = this.clampRightPaneWidth(width);
 		this.root?.style.setProperty('--cleanSlate-agent-manager-right-width', `${next}px`);
 		if (persist) {
-			this.storageService.store(CLEANSLATE_AGENT_MANAGER_RIGHT_WIDTH_STORAGE_KEY, String(next), StorageScope.PROFILE, StorageTarget.USER);
+			this.storageService.store(this.activeWorkspaceBrowserTabId ? CLEANSLATE_BROWSER_CHAT_WIDTH_STORAGE_KEY : CLEANSLATE_AGENT_MANAGER_RIGHT_WIDTH_STORAGE_KEY, String(next), StorageScope.PROFILE, StorageTarget.USER);
 		}
 		this.scheduleBrowserPaneLayout();
+		this.workspaceBrowser.layout();
+		this.layoutTerminalPane();
 		return next;
 	}
 
 	private clampRightPaneWidth(width: number): number {
+		const minimum = this.rightPaneActiveTab === 'browserChat' ? 300 : CLEANSLATE_AGENT_MANAGER_RIGHT_WIDTH_MIN;
 		const rootWidth = this.root?.clientWidth ?? 0;
 		const navWidth = this.leftNavVisible ? (this.leftNav?.getBoundingClientRect().width ?? CLEANSLATE_AGENT_MANAGER_NAV_WIDTH_DEFAULT) : 0;
 		const available = Math.max(0, rootWidth - navWidth);
 		const maxByRoot = available > 0
-			? Math.max(CLEANSLATE_AGENT_MANAGER_RIGHT_WIDTH_MIN, available - CLEANSLATE_AGENT_MANAGER_MAIN_WIDTH_MIN)
+			? Math.max(minimum, available - (this.activeWorkspaceBrowserTabId ? 240 : CLEANSLATE_AGENT_MANAGER_MAIN_WIDTH_MIN))
 			: CLEANSLATE_AGENT_MANAGER_RIGHT_WIDTH_MAX;
 		const max = Math.min(CLEANSLATE_AGENT_MANAGER_RIGHT_WIDTH_MAX, maxByRoot);
-		return Math.max(CLEANSLATE_AGENT_MANAGER_RIGHT_WIDTH_MIN, Math.min(max, Math.round(width)));
+		return Math.max(minimum, Math.min(max, Math.round(width)));
 	}
 
 	private getCurrentRightPaneWidth(): number {
@@ -1381,34 +1401,36 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		handle.setAttribute('aria-label', localize('cleanSlate.agentManager.resizeRightPane', 'Resize right pane'));
 		handle.title = handle.getAttribute('aria-label') ?? '';
 		const dragDisposables = this.shellDisposables.add(new DisposableStore());
-		const stopResize = (persistWidth?: number): void => {
+		let frame: number | undefined;
+		let latestWidth: number | undefined;
+		const stopResize = (): void => {
 			dragDisposables.clear();
+			if (frame !== undefined) { this.targetWindow.cancelAnimationFrame(frame); frame = undefined; }
 			this.root?.classList.remove('resizing-right');
-			if (typeof persistWidth === 'number') {
-				this.setRightPaneWidth(persistWidth, true);
-			}
+			if (latestWidth !== undefined) { this.setRightPaneWidth(latestWidth, true); latestWidth = undefined; }
 		};
+		this.shellDisposables.add(toDisposable(stopResize));
 		this.shellDisposables.add(dom.addDisposableListener(handle, 'mousedown', event => {
 			const mouseEvent = event as MouseEvent;
-			if (mouseEvent.button !== 0) {
-				return;
-			}
+			if (mouseEvent.button !== 0 || !this.root) { return; }
 			mouseEvent.preventDefault();
-			const root = this.root;
-			if (!root) {
-				return;
-			}
-			this.setRightPaneVisible(true);
+			stopResize();
+			// A visible separator already belongs to an open pane. Never remount
+			// its transcript/composer just to start dragging it.
 			this.hideWorkspaceSelector();
-			root.classList.add('resizing-right');
-			const rootRight = root.getBoundingClientRect().right;
-			let latestWidth = this.setRightPaneWidth(rootRight - mouseEvent.clientX, false);
-			dragDisposables.clear();
+			this.root.classList.add('resizing-right');
+			const rootRight = this.root.getBoundingClientRect().right;
+			latestWidth = this.getCurrentRightPaneWidth();
 			dragDisposables.add(dom.addDisposableListener(this.targetWindow, 'mousemove', moveEvent => {
-				const nextMouseEvent = moveEvent as MouseEvent;
-				latestWidth = this.setRightPaneWidth(rootRight - nextMouseEvent.clientX, false);
+				latestWidth = rootRight - (moveEvent as MouseEvent).clientX;
+				if (frame !== undefined) { return; }
+				frame = this.targetWindow.requestAnimationFrame(() => {
+					frame = undefined;
+					if (latestWidth !== undefined) { this.setRightPaneWidth(latestWidth, false); }
+				});
 			}));
-			dragDisposables.add(dom.addDisposableListener(this.targetWindow, 'mouseup', () => stopResize(latestWidth)));
+			dragDisposables.add(dom.addDisposableListener(this.targetWindow, 'mouseup', stopResize));
+			dragDisposables.add(dom.addDisposableListener(this.targetWindow, 'blur', stopResize));
 		}));
 		this.shellDisposables.add(dom.addDisposableListener(handle, 'keydown', event => {
 			const keyboardEvent = event as KeyboardEvent;
@@ -1829,6 +1851,10 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	}
 
 	private setRightPaneVisible(visible: boolean): void {
+		if (visible && !this.activeWorkspaceBrowserTabId && this.rightPaneActiveTab === 'browserChat') {
+			this.rightPaneActiveTab = undefined;
+			this.rightPaneOpenTabs = this.rightPaneOpenTabs.filter(tab => tab !== 'browserChat');
+		}
 		// A fresh pane opens on the launcher unless the session already has an
 		// active surface to return to.
 		if (visible && !this.rightPaneVisible && this.rightPaneActiveTab && !this.rightPaneOpenTabs.includes(this.rightPaneActiveTab)) {
@@ -1837,6 +1863,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 
 		this.rightPaneVisible = visible;
 		if (!visible) {
+			this.hideBrowserChatPopups();
 			this.browserPaneActive = false;
 			this.cancelBrowserPaneLayout();
 			this.deactivateRightPaneTerminal();
@@ -1850,6 +1877,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	}
 
 	private syncRightPaneStateWithActiveSession(): void {
+		if (this.activeWorkspaceBrowserTabId) { return; }
 		const activeSessionId = this.sidebarViewModel.getActiveSessionId();
 		if (this.rightPaneStateSessionId === activeSessionId) {
 			return;
@@ -1897,10 +1925,17 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	}
 
 	private saveRightPaneStateForActiveSession(): void {
+		if (this.activeWorkspaceBrowserTabId) {
+			this.browserChatPaneVisible = this.rightPaneVisible && this.rightPaneActiveTab === 'browserChat';
+			this.storageService.store(CLEANSLATE_BROWSER_CHAT_VISIBLE_STORAGE_KEY, this.browserChatPaneVisible, StorageScope.PROFILE, StorageTarget.MACHINE);
+			return;
+		}
 		this.saveRightPaneStateForSession(this.rightPaneStateSessionId ?? this.sidebarViewModel.getActiveSessionId());
 	}
 
 	private saveRightPaneStateForSession(sessionId: string | undefined): void {
+		// Browser conversation chrome never belongs to a project thread.
+		if (this.activeWorkspaceBrowserTabId || this.rightPaneActiveTab === 'browserChat') { return; }
 		if (!sessionId) {
 			return;
 		}
@@ -1924,10 +1959,10 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		}
 		this.rightPaneStateSessionId = sessionId;
 		const state = sessionId ? this.rightPaneStateBySession.get(sessionId) : undefined;
-		this.rightPaneVisible = state?.visible ?? false;
-		this.rightPaneActiveTab = state?.activeTab ?? (this.rightPaneVisible ? 'review' : undefined);
+		this.rightPaneVisible = state?.activeTab === 'browserChat' ? false : state?.visible ?? false;
+		this.rightPaneActiveTab = state?.activeTab === 'browserChat' ? undefined : state?.activeTab ?? (this.rightPaneVisible ? 'review' : undefined);
 		this.rightPaneOpenTabs = state?.openTabs
-			? [...state.openTabs]
+			? state.openTabs.filter(tab => tab !== 'browserChat')
 			: (this.rightPaneActiveTab ? [this.rightPaneActiveTab] : []);
 		if (this.rightPaneActiveTab && !this.rightPaneOpenTabs.includes(this.rightPaneActiveTab)) {
 			this.rightPaneOpenTabs = [...this.rightPaneOpenTabs, this.rightPaneActiveTab];
@@ -2032,10 +2067,14 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	}
 
 	private updateRightPaneChrome(): void {
-		const visible = this.rightPaneVisible && !this.activeWorkspaceBrowserTabId;
+		const browserChat = this.rightPaneActiveTab === 'browserChat';
+		const visible = this.rightPaneVisible && (browserChat ? !!this.activeWorkspaceBrowserTabId && this.workspaceBrowser.hasActivePage() : !this.activeWorkspaceBrowserTabId);
+		if (!visible && browserChat) { this.hideBrowserChatPopups(); }
+		this.workspaceBrowser.setChatVisible(visible && !!this.activeWorkspaceBrowserTabId && this.rightPaneActiveTab === 'browserChat');
 		this.root?.classList.toggle('right-pane-visible', visible);
 		this.rightPane?.classList.toggle('visible', visible);
 		this.rightPane?.classList.toggle('launcher', this.rightPaneActiveTab === undefined);
+		this.rightPane?.classList.toggle('browser-chat', this.rightPaneActiveTab === 'browserChat');
 		this.rightResizeHandle?.classList.toggle('visible', visible);
 		if (this.rightPaneTabsEl) {
 			this.rightPaneView.renderTabStrip(this.rightPaneTabsEl, this.rightPaneOpenTabs, this.rightPaneActiveTab, {
@@ -2047,8 +2086,16 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		if (!this.rightPaneToggleButton) {
 			return;
 		}
-		this.rightPaneToggleButton.classList.toggle('active', this.rightPaneVisible);
-		this.rightPaneToggleButton.setAttribute('aria-pressed', String(this.rightPaneVisible));
+		this.rightPaneToggleButton.classList.toggle('active', visible);
+		this.rightPaneToggleButton.setAttribute('aria-pressed', String(visible));
+	}
+
+	private onWorkspaceBrowserChanged(): void {
+		this.renderThreadTabs();
+		if (this.activeWorkspaceBrowserTabId) {
+			this.updateRightPaneChrome();
+			this.workspaceBrowser.layout();
+		}
 	}
 
 	private layoutRightPane(): void {
@@ -2410,12 +2457,20 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	}
 
 	private renderActiveRightPaneTab(): void {
+		if (this.rightPaneActiveTab === 'browserChat' && this.sideChatComposerView
+			&& this.sideChatTranscriptSessionId === this.sessionProvider.getBrowserChatId()
+			&& this.rightPaneBody?.querySelector('.cleanSlate-browser-chat-body')) {
+			this.rightPaneBody.classList.remove('browser', 'review', 'terminal', 'launcher', 'file', 'side-chat');
+			this.rightPaneBody.classList.add('editor-chat');
+			return;
+		}
+		this.hideBrowserChatPopups();
 		if (this.sideChatTranscriptSessionId) {
 			this.sessionProvider.detachSideChatRenderer(this.sideChatTranscriptSessionId);
 		}
 		this.sideChatComposerView = undefined;
 		this.sideChatTranscriptSessionId = undefined;
-		this.rightPaneBody?.classList.remove('launcher', 'file');
+		this.rightPaneBody?.classList.remove('launcher', 'file', 'editor-chat');
 		switch (this.rightPaneActiveTab) {
 			case 'review':
 				this.renderReviewInRightPane();
@@ -2433,7 +2488,10 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 				this.renderArtifactInRightPane(this.getLatestRightPaneArtifact());
 				return;
 			case 'sideChat':
-				this.renderSideChatInRightPane();
+				this.renderSideChatInRightPane(false);
+				return;
+			case 'browserChat':
+				this.renderSideChatInRightPane(true);
 				return;
 			default:
 				this.renderLauncherInRightPane();
@@ -2441,7 +2499,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		}
 	}
 
-	private renderSideChatInRightPane(): void {
+	private renderSideChatInRightPane(browserChat: boolean): void {
 		if (!this.rightPaneBody || !this.rightPaneTitle) {
 			return;
 		}
@@ -2451,43 +2509,87 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		this.browserPaneViewport = undefined;
 		void this.browserAutomationService.setOpenBrowserVisible(false, this.getActiveAgentManagerBrowserSurface());
 		const parentId = this.sidebarViewModel.getActiveSessionId();
-		if (!parentId) {
-			this.rightPaneView.renderEmptyState(
-				this.rightPaneBody,
-				Codicon.commentDiscussion,
+		if (!browserChat && !parentId) {
+			dom.clearNode(this.rightPaneBody);
+			this.rightPaneView.renderEmptyState(this.rightPaneBody, Codicon.commentDiscussion,
 				localize('cleanSlate.agentManager.sideChatUnavailable', 'Side chat unavailable'),
-				localize('cleanSlate.agentManager.sideChatNeedsTask', 'Open a task before starting a side conversation.')
-			);
+				localize('cleanSlate.agentManager.sideChatNeedsTask', 'Open a task before starting a side conversation.'));
 			return;
 		}
-		let sideChatId = this.sideChatSessionByParent.get(parentId);
-		if (!sideChatId) {
-			sideChatId = this.sessionProvider.createSideChat();
-			this.sideChatSessionByParent.set(parentId, sideChatId);
+		let activeSideChatId: string;
+		if (browserChat) {
+			activeSideChatId = this.sessionProvider.getBrowserChatId();
+		} else {
+			activeSideChatId = this.sideChatSessionByParent.get(parentId!) ?? this.sessionProvider.createSideChat();
+			this.sideChatSessionByParent.set(parentId!, activeSideChatId);
 		}
-		const activeSideChatId = sideChatId;
-		this.rightPaneTitle.textContent = localize('cleanSlate.agentManager.sideChat', 'Side chat');
+		this.rightPaneTitle.textContent = browserChat ? localize('cleanSlate.agentManager.browserChat', 'Browser chat') : localize('cleanSlate.agentManager.sideChat', 'Side chat');
 		dom.clearNode(this.rightPaneBody);
-		this.rightPaneBody.classList.remove('browser', 'review', 'terminal', 'launcher', 'file');
-		this.rightPaneBody.classList.add('side-chat');
+		this.rightPaneBody.classList.remove('browser', 'review', 'terminal', 'launcher', 'file', 'side-chat', 'editor-chat');
+		this.rightPaneBody.classList.add(browserChat ? 'editor-chat' : 'side-chat');
 
-		// A side chat is a separate session, not a separate design. Mount the same
-		// transcript and composer used by the main CleanSlate chat in the right pane.
-		const chatSurface = dom.append(this.rightPaneBody, dom.$('.cleanSlate-agent-manager-chat.cleanSlate-chat-view.cleanSlate-agent-manager-side-chat-host'));
-		const transcriptHost = dom.append(chatSurface, dom.$('.cleanSlate-agent-manager-transcript'));
-		const bottomHost = dom.append(chatSurface, dom.$('.cleanSlate-agent-manager-bottom'));
 		const transcriptRenderer = this.instantiationService.createInstance(CleanSlateTranscriptRenderer);
 		transcriptRenderer.openFileOverride = this.transcriptRenderer.openFileOverride;
-		const transcriptView = new CleanSlateTranscriptView(transcriptHost, transcriptRenderer, () => undefined);
+		// Browser chat uses the editor's body and full composer. Task Side chat
+		// retains its compact presentation and parent-task context.
+		const chatBody = browserChat ? new CleanSlateChatViewBody(this.rightPaneBody, transcriptRenderer, () => undefined) : undefined;
+		const chatSurface = chatBody?.element ?? dom.append(this.rightPaneBody, dom.$('.cleanSlate-agent-manager-chat.cleanSlate-chat-view.cleanSlate-agent-manager-side-chat-host'));
+		chatSurface.classList.toggle('cleanSlate-browser-chat-body', browserChat);
+		const transcriptHost = chatBody ? chatSurface : dom.append(chatSurface, dom.$('.cleanSlate-agent-manager-transcript'));
+		const bottomHost = chatBody ? chatSurface : dom.append(chatSurface, dom.$('.cleanSlate-agent-manager-bottom'));
+		if (browserChat) { this.renderBrowserChatTitle(chatSurface, activeSideChatId); }
+		const selectorContainer = browserChat ? chatSurface : this.root ?? chatSurface;
+		if (browserChat) {
+			// Native page views cover DOM popups outside the chat bounds. Dismiss
+			// anchored editor pickers when resizing rather than leaving them behind.
+			const resizeObserver = new ResizeObserver(() => this.hideBrowserChatPopups());
+			resizeObserver.observe(chatSurface);
+			this.rightPaneMarkdownDisposables.add(toDisposable(() => resizeObserver.disconnect()));
+		}
+		const draft = browserChat ? this.sessionProvider.getBrowserChatDraft(activeSideChatId) : { draft: '', images: [] };
+		let binding = this.browserChatBindings.get(activeSideChatId);
+		if (browserChat && !binding) {
+			binding = this._register(new MutableDisposable<IDisposable>());
+			this.browserChatBindings.set(activeSideChatId, binding);
+			this.bindBrowserChat(activeSideChatId);
+		}
+		const transcriptView = chatBody?.transcript ?? new CleanSlateTranscriptView(transcriptHost, transcriptRenderer, () => undefined);
+		this.rightPaneMarkdownDisposables.add(toDisposable(() => transcriptView.dispose()));
 		transcriptView.restore(this.sessionProvider.getSideChatTranscript(activeSideChatId), undefined, false, activeSideChatId);
 		this.sideChatTranscriptSessionId = activeSideChatId;
 		const renderer = this.createSideChatRenderer(transcriptView);
 		this.sessionProvider.attachSideChatRenderer(activeSideChatId, renderer);
-		const pendingImages = this.pendingSideChatImages.get(activeSideChatId) ?? [];
+		const pendingImages = this.pendingSideChatImages.get(activeSideChatId) ?? draft.images;
 		this.pendingSideChatImages.set(activeSideChatId, pendingImages);
 
 		let composer!: CleanSlateComposerView;
+		const saveDraft = () => {
+			if (browserChat) { this.sessionProvider.setBrowserChatDraft(activeSideChatId, composer?.getValue() ?? '', pendingImages); }
+		};
+		const agentSelector = browserChat ? new CleanSlateAgentSelectorRenderer(
+			() => this.sessionProvider.getSideChatExternalRequest(activeSideChatId)?.config.agentId ?? 'native',
+			async () => {
+				const agents = await this.cleanSlateMainService.listExternalAgents();
+				agents.forEach(agent => this.externalAgentDescriptors.set(agent.id, agent));
+				return [{ id: 'native', name: 'CleanSlate', available: true }, ...agents];
+			},
+			async id => {
+				try {
+					await this.sessionProvider.handoffBrowserChat(activeSideChatId, id === 'native' ? undefined : { transport: 'acp', agentId: id }, this.externalAgentDescriptors.get(id)?.name ?? 'CleanSlate');
+					if (this.sideChatTranscriptSessionId === activeSideChatId) {
+						this.sideChatComposerView = undefined;
+						this.renderActiveRightPaneTab();
+					}
+				} catch (error) { this.notificationService.error(String(error)); }
+			}
+		) : undefined;
+		if (agentSelector) {
+			this.browserChatAgentSelector = agentSelector;
+			this.rightPaneMarkdownDisposables.add(toDisposable(() => { agentSelector.hide(); this.browserChatAgentSelector = undefined; }));
+		}
+		let approvalView: CleanSlateCommandApprovalView | undefined;
 		const submit = (): void => {
+			if (approvalView?.isVisible()) { approvalView.submit(); return; }
 			if (this.sessionProvider.isSideChatGenerating(activeSideChatId)) {
 				this.sessionProvider.abortSideChat(activeSideChatId, renderer);
 				composer.setGenerating(this.sessionProvider.isSideChatGenerating(activeSideChatId));
@@ -2500,43 +2602,84 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			const sentImages = pendingImages.splice(0);
 			composer.clearValue();
 			composer.renderImagePreviews(pendingImages);
+			saveDraft();
 			composer.setGenerating(true);
-			void this.sessionProvider.sendSideChatMessage(activeSideChatId, text, renderer, generating => composer.setGenerating(generating), sentImages)
-				.catch(error => this.notificationService.error(localize('cleanSlate.agentManager.sideChatFailed', 'Side chat failed: {0}', String(error))))
-				.finally(() => composer.setGenerating(this.sessionProvider.isSideChatGenerating(activeSideChatId)));
+			void this.sessionProvider.sendSideChatMessage(activeSideChatId, text, renderer, generating => {
+				composer.setGenerating(generating);
+			}, sentImages)
+				.catch(error => {
+					if (!composer.getValue()) {
+						composer.setValue(text);
+						pendingImages.unshift(...sentImages);
+						composer.renderImagePreviews(pendingImages);
+						saveDraft();
+					}
+					this.notificationService.error(browserChat ? localize('cleanSlate.agentManager.browserChatFailed', 'Browser chat failed: {0}', String(error)) : localize('cleanSlate.agentManager.sideChatFailed', 'Side chat failed: {0}', String(error)));
+				})
+				.finally(() => {
+					const generating = this.sessionProvider.isSideChatGenerating(activeSideChatId);
+					composer.setGenerating(generating);
+				});
 		};
-		composer = new CleanSlateComposerView(bottomHost, {
-			compact: true,
-			workspaceName: this.getSelectedWorkspaceLabel(),
+		const composerOptions = {
+			workspaceName: browserChat ? '' : this.getSelectedWorkspaceLabel(),
 			imageDropTarget: chatSurface,
-			mountPanels: () => undefined,
+			mountPanels: inputBox => {
+				approvalView = new CleanSlateCommandApprovalView(inputBox, {
+					focusInput: () => composer?.focus(),
+					onApprove: id => this.commandApprovalService.approve(id),
+					onApproveForSession: id => this.commandApprovalService.approveForSession(id),
+					onCancel: id => this.commandApprovalService.reject(id),
+					onDidChange: () => undefined
+				});
+				const update = () => {
+					const request = this.commandApprovalService.getPendingApproval(activeSideChatId);
+					approvalView?.update(request);
+					composer?.setCommandApprovalPending(!!request);
+				};
+				this.rightPaneMarkdownDisposables.add(this.commandApprovalService.onDidChangeApprovalRequests(update));
+				update();
+			},
 			onSubmit: submit,
 			onImageAdded: imageDataUrl => {
 				pendingImages.push(imageDataUrl);
 				composer.renderImagePreviews(pendingImages);
+				saveDraft();
 			},
 			onImageRemoved: index => {
 				pendingImages.splice(index, 1);
 				composer.renderImagePreviews(pendingImages);
+				saveDraft();
 			},
-			onReasoningSelector: anchor => void this.reasoningSelectorRenderer.toggle(this.root ?? chatSurface, anchor),
+			onReasoningSelector: anchor => void this.reasoningSelectorRenderer.toggle(selectorContainer, anchor),
 			onPlanModeCommand: () => undefined,
 			onPlanModeDisabled: () => undefined,
-			onEditModeSelector: anchor => this.editModeSelectorRenderer.toggle(this.root ?? chatSurface, anchor),
-			onModelSelector: anchor => void this.modelSelectorRenderer.toggle(this.root ?? chatSurface, anchor),
+			onEditModeSelector: browserChat ? undefined : anchor => this.editModeSelectorRenderer.toggle(selectorContainer, anchor),
+			onModelSelector: anchor => void this.modelSelectorRenderer.toggle(selectorContainer, anchor),
+			onAgentSelector: agentSelector ? anchor => void agentSelector.toggle(selectorContainer, anchor) : undefined,
 			onDeleteAnnotations: () => undefined,
-			onRemoveSelectionReference: () => undefined
-		});
+			onRemoveSelectionReference: () => undefined,
+			onKeyDown: event => approvalView?.handleKeyDown(event) ?? false,
+			onDidInputChange: saveDraft
+		} satisfies ConstructorParameters<typeof CleanSlateComposerView>[1];
+		composer = chatBody ? chatBody.createComposer(composerOptions) : new CleanSlateComposerView(bottomHost, { ...composerOptions, compact: true });
+		composer.setValue(draft.draft);
 		this.sideChatComposerView = composer;
 		composer.setWorkspaceSelectorEnabled(false);
+		if (agentSelector) {
+			const agentId = this.sessionProvider.getSideChatExternalRequest(activeSideChatId)?.config.agentId;
+			const agent = agentId ? this.externalAgentDescriptors.get(agentId) : undefined;
+			composer.updateAgent(agent?.name ?? agentId ?? 'CleanSlate', agent?.iconPath as Parameters<typeof FileAccess.asBrowserUri>[0] | undefined, agent?.monochromeIcon);
+		}
 		composer.setPlaceholder(localize('cleanSlate.agentManager.sideChatPlaceholder', 'Ask anything'));
 		composer.renderImagePreviews(pendingImages);
 		composer.setGenerating(this.sessionProvider.isSideChatGenerating(activeSideChatId));
+		composer.setCommandApprovalPending(!!this.commandApprovalService.getPendingApproval(activeSideChatId));
 		const model = this.sidebarViewModel.getState().model;
 		composer.updateModel(model.label, model.warning, model.provider, model.model);
 		composer.updateReasoning(formatCleanSlateReasoningLevel(this.sidebarViewModel.getState().settings.reasoningLevel));
 		composer.updatePlanMode(false);
-		composer.updateEditMode(this.sidebarViewModel.getState().settings.editMode);
+		if (!browserChat) { composer.updateEditMode(this.sidebarViewModel.getState().settings.editMode); }
 		composer.updateContextWindowUsage({
 			usedTokens: 0,
 			maxTokens: this.sidebarViewModel.getState().settings.contextWindow,
@@ -2545,8 +2688,8 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		});
 		const externalRequest = this.sessionProvider.getSideChatExternalRequest(activeSideChatId);
 		if (externalRequest) {
-			const descriptor = this.externalAgentDescriptors.get(externalRequest.config.agentId);
-			const name = descriptor?.name ?? externalRequest.config.agentId;
+			let descriptor = this.externalAgentDescriptors.get(externalRequest.config.agentId);
+			let name = descriptor?.name ?? externalRequest.config.agentId;
 			const current = () => this.sideChatComposerView === composer && this.sideChatTranscriptSessionId === activeSideChatId;
 			const configure = async (configId: string, value: string) => {
 				if (!current() || this.sessionProvider.isSideChatGenerating(activeSideChatId)) { throw new Error('Stop the side-chat response before changing its settings.'); }
@@ -2556,25 +2699,120 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 			const apply = (info: Awaited<ReturnType<ICleanSlateMainService['startExternalAgentSession']>>) => {
 				if (!current()) { return; }
 				composer.setExternalRuntime(info.models?.options.find(option => option.value === info.models?.current)?.name ?? name, descriptor?.iconPath as Parameters<typeof FileAccess.asBrowserUri>[0] | undefined,
-					anchor => void this.modelSelectorRenderer.toggleExternal(this.root ?? chatSurface, anchor, name, async () => info.models ?? { current: '', options: [] }, async value => {
+					anchor => void this.modelSelectorRenderer.toggleExternal(selectorContainer, anchor, name, async () => info.models ?? { current: '', options: [] }, async value => {
 						if (info.models) { await configure(info.models.configId, value); }
 					}), descriptor?.monochromeIcon);
 				composer.setExternalControls(info.controls ?? [], (anchor, configId) => {
 					const control = info.controls?.find(item => item.configId === configId);
 					if (!control) { return; }
 					if (control.category === 'thought_level') {
-						this.reasoningSelectorRenderer.toggleAgentChoices(this.root ?? chatSurface, anchor, control, info.controls ?? [], configure);
+						this.reasoningSelectorRenderer.toggleAgentChoices(selectorContainer, anchor, control, info.controls ?? [], configure);
 					} else {
-						this.editModeSelectorRenderer.toggleChoices(this.root ?? chatSurface, anchor, control, value => configure(configId, value));
+						this.editModeSelectorRenderer.toggleChoices(selectorContainer, anchor, control, value => configure(configId, value));
 					}
 				});
 			};
 			composer.setExternalRuntime(name, descriptor?.iconPath as Parameters<typeof FileAccess.asBrowserUri>[0] | undefined, undefined, descriptor?.monochromeIcon);
 			composer.updateContextWindowUsage(null);
-			void this.cleanSlateMainService.startExternalAgentSession(externalRequest).then(apply).catch(error => {
+			const loadDescriptor = descriptor ? Promise.resolve(descriptor) : this.cleanSlateMainService.listExternalAgents().then(agents => {
+				agents.forEach(agent => this.externalAgentDescriptors.set(agent.id, agent));
+				return this.externalAgentDescriptors.get(externalRequest.config.agentId);
+			}).catch(() => undefined);
+			void Promise.all([this.cleanSlateMainService.startExternalAgentSession(externalRequest), loadDescriptor]).then(([info, agent]) => {
+				descriptor = agent;
+				name = agent?.name ?? externalRequest.config.agentId;
+				if (browserChat && current()) { composer.updateAgent(name, agent?.iconPath as Parameters<typeof FileAccess.asBrowserUri>[0] | undefined, agent?.monochromeIcon); }
+				apply(info);
+			}).catch(error => {
 				if (current()) { composer.setPlaceholder(error instanceof Error ? error.message : 'Agent unavailable'); }
 			});
 		}
+	}
+
+	private renderBrowserChatTitle(parent: HTMLElement, sessionId: string): void {
+		const header = dom.$('.cleanSlate-chat-view-title');
+		parent.prepend(header);
+		const title = dom.append(header, dom.$('span.cleanSlate-chat-view-title-label'));
+		const updateTitle = () => {
+			title.textContent = this.sessionProvider.getBrowserChatTitle(sessionId);
+			title.title = title.textContent;
+		};
+		updateTitle();
+		this.rightPaneMarkdownDisposables.add(this.sessionProvider.onDidChangeState(updateTitle));
+		const history = new CleanSlateHistoryOverlayRenderer(this.contextViewService);
+		this.browserChatHistoryRenderer = history;
+		this.rightPaneMarkdownDisposables.add(toDisposable(() => { history.hide(); this.browserChatHistoryRenderer = undefined; }));
+		const historyData = () => ({ activeSessionId: this.sessionProvider.getBrowserChatId(), sessions: this.sessionProvider.getBrowserChatSnapshots().reverse(), workspaceName: '' });
+		const toolbar = this.rightPaneMarkdownDisposables.add(new ToolBar(dom.append(header, dom.$('.title-actions')), this.contextMenuService, {
+			ariaLabel: localize('cleanSlate.browser.chatActions', 'Browser chat actions')
+		}));
+		const actions = [
+			new Action('cleanSlate.browser.newChat', localize('cleanSlate.newChat', 'New Chat'), ThemeIcon.asClassName(Codicon.plus), true, () => {
+				this.sessionProvider.newBrowserChat();
+				this.renderActiveRightPaneTab();
+				this.sideChatComposerView?.focus();
+			}),
+			new Action('cleanSlate.browser.history', localize('cleanSlate.history', 'History'), ThemeIcon.asClassName(Codicon.history), true, () => {
+				if (history.isVisible()) { history.hide(); return; }
+				history.show(parent, historyData(), {
+					onRestore: session => {
+						history.hide();
+						this.sessionProvider.selectBrowserChat(session.id);
+						this.renderActiveRightPaneTab();
+						this.sideChatComposerView?.focus();
+					},
+					onRemove: id => void this.deleteBrowserConversation(id).then(() => history.refresh(historyData()))
+				});
+			}),
+			new Action('cleanSlate.browser.deleteChat', localize('cleanSlate.browser.deleteChat', 'Delete chat'), ThemeIcon.asClassName(Codicon.trash), true, () => this.deleteBrowserConversation(sessionId)),
+			new Action('cleanSlate.browser.closeChat', localize('cleanSlate.browser.closeChat', 'Close browser chat'), ThemeIcon.asClassName(Codicon.close), true, () => this.setRightPaneVisible(false))
+		];
+		actions.forEach(action => this.rightPaneMarkdownDisposables.add(action));
+		toolbar.setActions(actions);
+	}
+
+	private async deleteBrowserConversation(sessionId: string): Promise<void> {
+		this.hideBrowserChatPopups();
+		const { confirmed } = await this.dialogService.confirm({
+			type: 'warning',
+			message: localize('cleanSlate.browser.confirmDelete', 'Delete this browser conversation?'),
+			detail: localize('cleanSlate.browser.deleteWarning', 'This will permanently delete its messages and draft.'),
+			primaryButton: localize('cleanSlate.browser.deleteChat', 'Delete chat')
+		});
+		if (!confirmed) { return; }
+		this.sessionProvider.deleteBrowserChat(sessionId);
+		this.browserChatBindings.get(sessionId)?.dispose();
+		this.browserChatBindings.delete(sessionId);
+		this.pendingSideChatImages.delete(sessionId);
+		if (this.sideChatTranscriptSessionId === sessionId && this.rightPaneActiveTab === 'browserChat') {
+			this.sideChatComposerView = undefined;
+			this.renderActiveRightPaneTab();
+		}
+	}
+
+	private hideBrowserChatPopups(): void {
+		this.browserChatHistoryRenderer?.hide();
+		this.browserChatAgentSelector?.hide();
+		if (this.rightPaneActiveTab === 'browserChat' || this.rightPaneBody?.classList.contains('editor-chat')) {
+			this.reasoningSelectorRenderer.hide();
+			this.modelSelectorRenderer.hide();
+			this.editModeSelectorRenderer.hide();
+		}
+	}
+
+	private bindBrowserChat(sessionId: string): void {
+		const binding = this.browserChatBindings.get(sessionId);
+		if (!binding || binding.value) { return; }
+		// Capture the current page on every send. Keep tools on that tab for the
+		// response even if the user switches to another workspace tab.
+		binding.value = this.browserAutomationService.bindWorkspaceBrowser(this.getAgentManagerBrowserSurfaceForSession(sessionId), {
+			onDidChange: this.workspaceBrowser.onDidChange,
+			getActiveTab: () => this.workspaceBrowser.getActiveBrowserModel(),
+			getTabs: () => this.workspaceBrowser.getBrowserModels(),
+			openTab: (url, background) => this.workspaceBrowser.openTab(url, background),
+			selectTab: id => this.showWorkspaceBrowserTab(id),
+			closeTab: id => this.closeThreadTab(id)
+		});
 	}
 
 	private createSideChatRenderer(transcript: CleanSlateTranscriptView): IResponseRenderer {
@@ -3524,11 +3762,20 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	}
 
 	private showWorkspaceBrowserTab(id: string): void {
+		const enteringBrowser = !this.activeWorkspaceBrowserTabId;
+		if (enteringBrowser) { this.saveRightPaneStateForActiveSession(); }
 		if (!this.openWorkspaceTabIds.includes(id)) { this.openWorkspaceTabIds.push(id); }
 		this.workspaceSelectionRequest++;
 		this.dismissAgentPicker();
 		this.composerDraftController.persistDraft();
 		this.activeWorkspaceBrowserTabId = id;
+		if (enteringBrowser) {
+			this.rightPaneActiveTab = 'browserChat';
+			this.rightPaneOpenTabs = ['browserChat'];
+			this.rightPaneVisible = this.storageService.getBoolean(CLEANSLATE_BROWSER_CHAT_VISIBLE_STORAGE_KEY, StorageScope.PROFILE, this.browserChatPaneVisible);
+			this.setRightPaneWidth(this.storageService.getNumber(CLEANSLATE_BROWSER_CHAT_WIDTH_STORAGE_KEY, StorageScope.PROFILE, CLEANSLATE_AGENT_MANAGER_RIGHT_WIDTH_DEFAULT), false);
+			if (this.rightPaneVisible) { this.renderActiveRightPaneTab(); }
+		}
 		this.root?.classList.remove('returning-to-thread');
 		this.root?.classList.add('browser-mode');
 		this.cancelBrowserPaneLayout();
@@ -3541,11 +3788,19 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	}
 
 	private showThreadContent(): void {
-		if (this.activeWorkspaceBrowserTabId) {
+		const leavingBrowser = !!this.activeWorkspaceBrowserTabId;
+		if (leavingBrowser) {
+			this.saveRightPaneStateForActiveSession();
+			this.hideBrowserChatPopups();
 			this.root?.classList.add('returning-to-thread');
 			this.setLeftNavVisible(true);
 		}
 		this.activeWorkspaceBrowserTabId = undefined;
+		if (leavingBrowser) {
+			this.restoreRightPaneStateForActiveSession();
+			this.rightPaneBody?.classList.remove('editor-chat');
+			this.setRightPaneWidth(this.storageService.getNumber(CLEANSLATE_AGENT_MANAGER_RIGHT_WIDTH_STORAGE_KEY, StorageScope.PROFILE, CLEANSLATE_AGENT_MANAGER_RIGHT_WIDTH_DEFAULT), false);
+		}
 		this.root?.classList.remove('browser-mode');
 		this.workspaceBrowser.setVisible(false);
 		if (this.chatSurface) { this.chatSurface.hidden = false; }

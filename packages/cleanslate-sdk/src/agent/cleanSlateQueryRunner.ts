@@ -17,6 +17,8 @@ import { CleanSlateExecutionBudget, ICleanSlateExecutionBudget } from './cleanSl
 import { ICleanSlateDomainProfile } from './cleanSlateDomainProfile.js';
 
 export interface IExecutionRunnerOptions {
+	/** Optional domain-specific directive; undefined retains the workspace policy. */
+	getSystemDirective?: () => string | undefined;
 	domainProfile?: ICleanSlateDomainProfile;
 	cleanSlateService: ICleanSlateService;
 	cleanSlateContextService: ICleanSlateContextService;

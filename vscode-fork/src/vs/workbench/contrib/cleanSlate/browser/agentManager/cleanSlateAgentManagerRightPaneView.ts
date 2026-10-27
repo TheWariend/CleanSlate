@@ -82,13 +82,15 @@ export class CleanSlateAgentManagerRightPaneView {
 				return { icon: Codicon.file, label: localize('cleanSlate.agentManager.fileTab', 'File') };
 			case 'sideChat':
 				return { icon: Codicon.commentDiscussion, label: localize('cleanSlate.agentManager.sideChatTab', 'Side chat') };
+			case 'browserChat':
+				return { icon: Codicon.commentDiscussion, label: localize('cleanSlate.agentManager.browserChatTab', 'Browser chat') };
 			case 'terminal':
 			default:
 				return { icon: Codicon.terminal, label: localize('cleanSlate.agentManager.terminalTab', 'Terminal') };
 		}
 	}
 
-	/** Tab strip: open surfaces render as closable pills, with "+" outside the launcher. */
+	/** Open surfaces render as closable pills. */
 	renderTabStrip(
 		container: HTMLElement,
 		openTabs: readonly CleanSlateAgentManagerRightTab[],
@@ -118,7 +120,7 @@ export class CleanSlateAgentManagerRightPaneView {
 			};
 			button.onclick = () => handlers.onSelect(tab);
 		}
-		if (activeTab) {
+		if (activeTab && activeTab !== 'browserChat') {
 			const add = dom.append(container, dom.$('button.cleanSlate-agent-manager-right-tab-add')) as HTMLButtonElement;
 			add.type = 'button';
 			add.title = localize('cleanSlate.agentManager.newRightTab', 'New tab');

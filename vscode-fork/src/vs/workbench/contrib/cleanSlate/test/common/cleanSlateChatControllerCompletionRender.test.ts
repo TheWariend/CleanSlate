@@ -488,6 +488,7 @@ function createController(
 	agent: any = {}
 ): CleanSlateChatController {
 	const emptyEvent = () => ({ dispose() { } });
+	agent.isBrowserChatMode ??= () => false;
 	return new CleanSlateChatController(
 		{
 			getActiveCodeEditor: () => undefined

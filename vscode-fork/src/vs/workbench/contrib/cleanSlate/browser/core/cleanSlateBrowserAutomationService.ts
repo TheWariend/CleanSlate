@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { getZoomFactor } from '../../../../../base/browser/browser.js';
 import { mainWindow } from '../../../../../base/browser/window.js';
@@ -15,6 +15,7 @@ import { ACTIVE_GROUP, IEditorService } from '../../../../services/editor/common
 import { CleanSlatePlaywrightBrowserAction, ICleanSlateMainService } from '../../../../services/cleanSlate/common/core/cleanSlateAI.js';
 import { IBrowserViewAnnotation } from '../../../browserView/common/cleanSlateBrowserAnnotation.js';
 import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../../browserView/common/browserView.js';
+import { formatCleanSlateBrowserPageContext, readCleanSlateBrowserPageContext } from './cleanSlateBrowserPageContext.js';
 
 export const ICleanSlateBrowserAutomationService = createDecorator<ICleanSlateBrowserAutomationService>('cleanSlateBrowserAutomationService');
 
@@ -129,6 +130,16 @@ export interface ICleanSlateBrowserAnnotationChangeEvent {
 	annotations: ICleanSlateBrowserAnnotation[];
 }
 
+/** A workspace keeps ownership of native tab visibility, layout and lifetime. */
+export interface ICleanSlateBrowserTabHost {
+	readonly onDidChange: Event<void>;
+	getActiveTab(): IBrowserViewModel | undefined;
+	getTabs(): readonly IBrowserViewModel[];
+	openTab(url?: string, background?: boolean): Promise<IBrowserViewModel | undefined>;
+	selectTab(id: string): void;
+	closeTab(id: string): Promise<void>;
+}
+
 export interface ICleanSlateBrowserAutomationService {
 	readonly _serviceBrand: undefined;
 	readonly onDidChangeAnnotations: Event<ICleanSlateBrowserAnnotationChangeEvent>;
@@ -136,6 +147,10 @@ export interface ICleanSlateBrowserAutomationService {
 	open(url: string): Promise<ICleanSlateBrowserState>;
 	openInAgentManager(url: string, surface?: CleanSlateBrowserSurface): Promise<ICleanSlateBrowserState>;
 	adoptHostedBrowser(viewId: string, surface: CleanSlateBrowserSurface): Promise<void>;
+	bindWorkspaceBrowser(surface: CleanSlateBrowserSurface, host: ICleanSlateBrowserTabHost): IDisposable;
+	isWorkspaceBrowserBound(surface: CleanSlateBrowserSurface): boolean;
+	getAttachedPageContext(surface: CleanSlateBrowserSurface): Promise<string | undefined>;
+	releaseAttachedPageContext(surface: CleanSlateBrowserSurface): void;
 	revealOpenBrowser(surface?: CleanSlateBrowserSurface): Promise<ICleanSlateBrowserState | undefined>;
 	layoutOpenBrowser(bounds: ICleanSlateBrowserLayoutBounds, surface?: CleanSlateBrowserSurface): Promise<ICleanSlateBrowserState | undefined>;
 	setOpenBrowserVisible(visible: boolean, surface?: CleanSlateBrowserSurface): Promise<ICleanSlateBrowserState | undefined>;
@@ -189,6 +204,8 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 	private nextTabId = 1;
 	private readonly hostedViewIds = new Map<CleanSlateBrowserSurface, string>();
 	private readonly browserVisibilityVersions = new Map<CleanSlateBrowserSurface, number>();
+	private readonly workspaceBrowserHosts = new Map<CleanSlateBrowserSurface, ICleanSlateBrowserTabHost>();
+	private readonly workspaceRunTabs = new Map<CleanSlateBrowserSurface, IBrowserViewModel | undefined>();
 
 	constructor(
 		@IBrowserViewWorkbenchService private readonly browserViewWorkbenchService: IBrowserViewWorkbenchService,
@@ -203,6 +220,44 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 		const browserState = await this.openBrowserEditor(normalizedUrl);
 		this._onDidOpenBrowser.fire(browserState);
 		return browserState;
+	}
+
+	bindWorkspaceBrowser(surface: CleanSlateBrowserSurface, host: ICleanSlateBrowserTabHost): IDisposable {
+		this.workspaceBrowserHosts.set(surface, host);
+		this.workspaceRunTabs.delete(surface);
+		this.snapshotElements.delete(surface);
+		const listener = host.onDidChange(() => this.snapshotElements.delete(surface));
+		return toDisposable(() => {
+			listener.dispose();
+			if (this.workspaceBrowserHosts.get(surface) === host) {
+				this.workspaceBrowserHosts.delete(surface);
+				this.workspaceRunTabs.delete(surface);
+				this.snapshotElements.delete(surface);
+			}
+		});
+	}
+
+	isWorkspaceBrowserBound(surface: CleanSlateBrowserSurface): boolean {
+		return this.workspaceBrowserHosts.has(surface);
+	}
+
+	async getAttachedPageContext(surface: CleanSlateBrowserSurface): Promise<string | undefined> {
+		const host = this.workspaceBrowserHosts.get(surface);
+		if (!host) { return undefined; }
+		const model = host.getActiveTab();
+		this.workspaceRunTabs.set(surface, model);
+		this.snapshotElements.delete(surface);
+		if (!model) { return undefined; }
+		const page = await readCleanSlateBrowserPageContext(model);
+		if (this.workspaceBrowserHosts.get(surface) !== host || host.getActiveTab() !== model) {
+			throw new Error('The selected browser tab changed. Send again to use the current page.');
+		}
+		return formatCleanSlateBrowserPageContext(page);
+	}
+
+	releaseAttachedPageContext(surface: CleanSlateBrowserSurface): void {
+		this.workspaceRunTabs.delete(surface);
+		this.snapshotElements.delete(surface);
 	}
 
 	async adoptHostedBrowser(viewId: string, surface: CleanSlateBrowserSurface): Promise<void> {
@@ -236,6 +291,11 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 	}
 
 	async revealOpenBrowser(surface: CleanSlateBrowserSurface = 'ide'): Promise<ICleanSlateBrowserState | undefined> {
+		const host = this.workspaceBrowserHosts.get(surface);
+		if (host) {
+			const model = host.getActiveTab();
+			return model ? this.state(surface, model) : undefined;
+		}
 		const model = this.browserModels.get(surface)
 			?? await this.browserViewWorkbenchService.getOrCreateBrowserViewModel(this.browserViewIdForSurface(surface));
 		if (!model.url || model.url === 'about:blank') {
@@ -248,6 +308,10 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 	}
 
 	async layoutOpenBrowser(bounds: ICleanSlateBrowserLayoutBounds, surface: CleanSlateBrowserSurface = 'ide'): Promise<ICleanSlateBrowserState | undefined> {
+		if (this.workspaceBrowserHosts.has(surface)) {
+			const model = this.workspaceBrowserHosts.get(surface)?.getActiveTab();
+			return model ? this.state(surface, model) : undefined;
+		}
 		const version = this.browserVisibilityVersions.get(surface) ?? 0;
 		const model = await this.getOpenCleanSlateBrowserModel(surface);
 		if (!model || version !== (this.browserVisibilityVersions.get(surface) ?? 0)) {
@@ -266,6 +330,10 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 	}
 
 	async setOpenBrowserVisible(visible: boolean, surface: CleanSlateBrowserSurface = 'ide'): Promise<ICleanSlateBrowserState | undefined> {
+		if (this.workspaceBrowserHosts.has(surface)) {
+			const model = this.workspaceBrowserHosts.get(surface)?.getActiveTab();
+			return model ? this.state(surface, model) : undefined;
+		}
 		const version = (this.browserVisibilityVersions.get(surface) ?? 0) + 1;
 		this.browserVisibilityVersions.set(surface, version);
 		const model = await this.getOpenCleanSlateBrowserModel(surface);
@@ -313,6 +381,10 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 	async snapshot(surface: CleanSlateBrowserSurface, options?: { limit?: number }): Promise<ICleanSlateBrowserSnapshot> {
 		const model = await this.getModel(surface);
 		const snapshot = await this.snapshotVisible(surface, model, options);
+		const host = this.workspaceBrowserHosts.get(surface);
+		if (host && (!host.getTabs().includes(model) || (this.workspaceRunTabs.has(surface) ? this.workspaceRunTabs.get(surface) : host.getActiveTab()) !== model)) {
+			throw new Error('The response browser tab changed. Take a fresh browser_snapshot before acting.');
+		}
 		const snapshotElements = this.snapshotElementsFor(surface);
 		snapshotElements.clear();
 		for (const element of snapshot.elements) {
@@ -445,11 +517,20 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 	}
 
 	async listTabs(surface: CleanSlateBrowserSurface): Promise<{ success: true; tabs: ICleanSlateBrowserTab[] }> {
+		if (this.workspaceBrowserHosts.has(surface)) { return { success: true, tabs: this.tabsFor(surface) }; }
 		await this.getModel(surface);
 		return { success: true, tabs: this.tabsFor(surface) };
 	}
 
 	async newTab(surface: CleanSlateBrowserSurface, options?: { url?: string; background?: boolean }): Promise<ICleanSlateBrowserState & { tabId: string }> {
+		const host = this.workspaceBrowserHosts.get(surface);
+		if (host) {
+			const model = await host.openTab(options?.url ? this.normalizeUrl(options.url) : undefined, options?.background);
+			if (!model) { throw new Error('The workspace browser is no longer available.'); }
+			if (!options?.background && this.workspaceRunTabs.has(surface)) { this.workspaceRunTabs.set(surface, model); }
+			if (options?.url) { await this.waitForPageSettled(model); }
+			return { ...this.state(surface, model), tabId: model.id };
+		}
 		const tabId = `${this.browserViewIdForSurface(surface)}.tab.${this.nextTabId++}`;
 		const model = await this.browserViewWorkbenchService.getOrCreateBrowserViewModel(tabId, this.browserViewIdForSurface(surface));
 		this.trackBrowserModel(surface, model, !options?.background);
@@ -474,6 +555,15 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 	}
 
 	async selectTab(surface: CleanSlateBrowserSurface, tabId: string): Promise<ICleanSlateBrowserState & { tabId: string }> {
+		const host = this.workspaceBrowserHosts.get(surface);
+		if (host) {
+			const model = host.getTabs().find(tab => tab.id === tabId);
+			if (!model) { throw new Error('This workspace browser tab is no longer open.'); }
+			host.selectTab(tabId);
+			if (this.workspaceRunTabs.has(surface)) { this.workspaceRunTabs.set(surface, model); }
+			this.snapshotElements.delete(surface);
+			return { ...this.state(surface, model), tabId };
+		}
 		const model = this.browserTabs.get(surface)?.get(tabId);
 		if (!model) {
 			throw new Error(`Browser tab "${tabId}" does not exist on this CleanSlate surface.`);
@@ -487,6 +577,13 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 	}
 
 	async closeTab(surface: CleanSlateBrowserSurface, tabId: string): Promise<{ success: true; tabs: ICleanSlateBrowserTab[] }> {
+		const host = this.workspaceBrowserHosts.get(surface);
+		if (host) {
+			if (!host.getTabs().some(tab => tab.id === tabId)) { throw new Error('This workspace browser tab is no longer open.'); }
+			await host.closeTab(tabId);
+			this.snapshotElements.delete(surface);
+			return { success: true, tabs: this.tabsFor(surface) };
+		}
 		const tabs = this.browserTabs.get(surface);
 		const model = tabs?.get(tabId);
 		if (!tabs || !model) {
@@ -567,6 +664,13 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 	}
 
 	private async getModel(surface: CleanSlateBrowserSurface): Promise<IBrowserViewModel> {
+		const host = this.workspaceBrowserHosts.get(surface);
+		if (host) {
+			const model = this.workspaceRunTabs.has(surface) ? this.workspaceRunTabs.get(surface) : host.getActiveTab();
+			if (!model) { throw new Error('No browser page is open in the workspace.'); }
+			if (!host.getTabs().includes(model)) { throw new Error('The browser tab attached to this response was closed.'); }
+			return model;
+		}
 		const cachedModel = this.browserModels.get(surface);
 		if (cachedModel) {
 			return cachedModel;
@@ -582,7 +686,8 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 	}
 
 	private async getOpenCleanSlateBrowserModel(surface: CleanSlateBrowserSurface): Promise<IBrowserViewModel | undefined> {
-		const model = this.browserModels.get(surface);
+		const host = this.workspaceBrowserHosts.get(surface);
+		const model = host ? host.getActiveTab() : this.browserModels.get(surface);
 		if (model?.url && model.url !== 'about:blank') {
 			return model;
 		}
@@ -590,6 +695,8 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 	}
 
 	private async getVisibleBrowserModel(surface: CleanSlateBrowserSurface): Promise<IBrowserViewModel | undefined> {
+		const host = this.workspaceBrowserHosts.get(surface);
+		if (host) { return host.getActiveTab(); }
 		if (this.isAgentManagerSurface(surface)) {
 			return this.browserModels.get(surface);
 		}
@@ -720,8 +827,9 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 	}
 
 	private tabsFor(surface: CleanSlateBrowserSurface): ICleanSlateBrowserTab[] {
-		const active = this.browserModels.get(surface);
-		return Array.from(this.browserTabsFor(surface).values()).map(model => ({
+		const host = this.workspaceBrowserHosts.get(surface);
+		const active = host ? (this.workspaceRunTabs.has(surface) ? this.workspaceRunTabs.get(surface) : host.getActiveTab()) : this.browserModels.get(surface);
+		return Array.from(host ? host.getTabs() : this.browserTabsFor(surface).values()).map(model => ({
 			id: model.id,
 			url: model.url,
 			title: model.title,
@@ -801,6 +909,15 @@ export class CleanSlateBrowserAutomationService extends Disposable implements IC
 	}
 
 	private async openAgentManagerBrowser(normalizedUrl: string, surface: CleanSlateBrowserSurface): Promise<ICleanSlateBrowserState> {
+		const host = this.workspaceBrowserHosts.get(surface);
+		if (host) {
+			const model = this.workspaceRunTabs.has(surface) ? await this.getModel(surface) : host.getActiveTab() ?? await host.openTab(normalizedUrl);
+			if (!model) { throw new Error('The workspace browser is no longer available.'); }
+			const loadError = await this.loadUrlIfNeeded(model, normalizedUrl);
+			this.snapshotElements.delete(surface);
+			await this.waitForPageSettled(model);
+			return this.state(surface, model, loadError);
+		}
 		const model = await this.browserViewWorkbenchService.getOrCreateBrowserViewModel(this.browserViewIdForSurface(surface));
 		this.trackBrowserModel(surface, model);
 		const loadError = await this.loadUrlIfNeeded(model, normalizedUrl);
