@@ -21,9 +21,10 @@ import { ICleanSlateMainService } from '../../../../services/cleanSlate/common/c
 import { FileAccess } from '../../../../../base/common/network.js';
 import { setCleanSlateProviderLogo } from '../chat/providers/cleanSlateProviderLogos.js';
 import { CLEANSLATE_ACTION_BUTTON_STYLES, createCleanSlateActionButton } from '../cleanSlateActionButton.js';
+import { CleanSlateBrowserSettingsView, ICleanSlateBrowserSettingsServices } from './cleanSlateBrowserSettingsView.js';
 
 type FieldType = 'text' | 'password' | 'number';
-type SettingSectionId = 'general' | 'usage' | 'agents' | 'models' | 'apiKeys' | 'verification' | 'indexing';
+type SettingSectionId = 'general' | 'browser' | 'usage' | 'agents' | 'models' | 'apiKeys' | 'verification' | 'indexing';
 
 interface ITextRowOptions {
 	readonly label: string;
@@ -42,6 +43,8 @@ interface ISelectRowOption {
 }
 
 interface ICleanSlateSettingsPanelMountOptions {
+	readonly initialSection?: SettingSectionId;
+	readonly openBrowserImport?: boolean;
 	readonly saveStatusHost?: HTMLElement;
 	readonly sidebarHeader?: (parent: HTMLElement) => void;
 }
@@ -87,6 +90,8 @@ export class CleanSlateSettingsPanel {
 	private sectionRoot: HTMLElement | undefined;
 	private sidebarHeader: ((parent: HTMLElement) => void) | undefined;
 	private activeSection: SettingSectionId = 'general';
+	private browserView: CleanSlateBrowserSettingsView | undefined;
+	private openBrowserImport = false;
 	private disposed = false;
 	private saveCounter = 0;
 	private cachedConfiguration: ICleanSlateConfiguration | undefined;
@@ -106,6 +111,7 @@ export class CleanSlateSettingsPanel {
 		private readonly cleanSlateService: ICleanSlateService,
 		private readonly accountActions?: ICleanSlateSettingsAccountActions,
 		private readonly agentService?: Pick<ICleanSlateMainService, 'listExternalAgents' | 'getExternalAgentUsage' | 'registerExternalAgent'>,
+		private readonly browserServices?: ICleanSlateBrowserSettingsServices,
 	) { }
 
 	/**
@@ -113,6 +119,8 @@ export class CleanSlateSettingsPanel {
 	 * Returns the root container element.
 	 */
 	mount(parent: HTMLElement, options: ICleanSlateSettingsPanelMountOptions = {}): HTMLElement {
+		this.activeSection = options.initialSection ?? this.activeSection;
+		this.openBrowserImport = !!options.openBrowserImport;
 		this.sidebarHeader = options.sidebarHeader;
 		const shell = dom.append(parent, dom.$('.cleanSlate-settings-panel-shell'));
 		this.installSelectStyles(shell);
@@ -175,6 +183,8 @@ export class CleanSlateSettingsPanel {
 				? this.resolveManagedAccessFromResult(config, this.cachedUsage, this.usageError)
 				: undefined;
 			this.stopResetCountdown();
+			this.browserView?.dispose();
+			this.browserView = undefined;
 			dom.clearNode(this.content);
 			this.renderContent(config, managedAccess, this.cachedUsage, account);
 		};
@@ -226,6 +236,7 @@ export class CleanSlateSettingsPanel {
 
 		const sections: readonly { id: SettingSectionId; label: string; icon: ThemeIcon }[] = [
 			{ id: 'general', label: 'General', icon: Codicon.settingsGear },
+			...(this.browserServices ? [{ id: 'browser' as const, label: 'Browser', icon: Codicon.globe }] : []),
 			{ id: 'usage', label: 'Usage', icon: Codicon.graph },
 			...(this.agentService ? [{ id: 'agents' as const, label: 'Agents', icon: Codicon.hubot }] : []),
 			{ id: 'models', label: 'Models', icon: Codicon.symbolClass },
@@ -255,6 +266,9 @@ export class CleanSlateSettingsPanel {
 	private renderContent(config: ICleanSlateConfiguration, managedAccess?: CleanSlateManagedAccessState, usage?: ICleanSlateManagedEntitlements, account?: ICleanSlateManagedAccount): void {
 		switch (this.activeSection) {
 			case 'general': this.renderSection('general', 'General', () => this.renderGeneral(usage, account)); break;
+			case 'browser': this.renderSection('browser', 'Browser', () => {
+				if (this.browserServices) { this.browserView = new CleanSlateBrowserSettingsView(this.sectionRoot ?? this.content, this.browserServices, this.openBrowserImport); this.openBrowserImport = false; }
+			}); break;
 			case 'usage': this.renderSection('usage', 'Plan usage limits', () => this.renderUsage(usage)); break;
 			case 'agents': this.renderSection('agents', 'Agents', () => this.renderAgents()); break;
 			case 'models': this.renderSection('models', 'Models', () => this.renderModels(config, managedAccess)); break;
@@ -267,6 +281,7 @@ export class CleanSlateSettingsPanel {
 	dispose(): void {
 		this.disposed = true;
 		this.stopResetCountdown();
+		this.browserView?.dispose();
 	}
 
 	private renderSection(id: SettingSectionId, title: string, render: () => void): void {
@@ -294,7 +309,6 @@ export class CleanSlateSettingsPanel {
 			if (open) { fields.get('name')?.focus(); }
 		} });
 		trigger.setAttribute('aria-expanded', 'false');
-		trigger.style.cssText = 'display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;border:1px solid var(--vscode-widget-border,rgba(128,128,128,.25));background:transparent;color:var(--vscode-foreground);font:inherit;cursor:pointer';
 		custom.append(connection);
 		const configurationHelp = dom.append(connection, dom.$('p.cleanSlate-settings-description'));
 		configurationHelp.style.cssText = 'margin:0 0 18px;line-height:1.5';
@@ -315,9 +329,8 @@ export class CleanSlateSettingsPanel {
 		status.setAttribute('role', 'status');
 		const actions = dom.append(connection, dom.$('div'));
 		actions.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:16px';
-		const cancel = this.createSettingsActionButton(actions, { label: 'Cancel', variant: 'secondary', reRender: false, action: async () => { connection.style.display = 'none'; trigger.setAttribute('aria-expanded', 'false'); trigger.focus(); } });
-		cancel.style.cssText = trigger.style.cssText;
-		const save = this.createSettingsActionButton(actions, { label: 'Add agent', variant: 'primary', reRender: false, action: async () => {
+		this.createSettingsActionButton(actions, { label: 'Cancel', variant: 'secondary', reRender: false, action: async () => { connection.style.display = 'none'; trigger.setAttribute('aria-expanded', 'false'); trigger.focus(); } });
+		this.createSettingsActionButton(actions, { label: 'Add agent', variant: 'primary', reRender: false, action: async () => {
 			try {
 				const args: unknown = JSON.parse(fields.get('args')!.value);
 				if (!Array.isArray(args) || !args.every(arg => typeof arg === 'string')) { throw new Error('Arguments must be a JSON array of strings.'); }
@@ -325,7 +338,6 @@ export class CleanSlateSettingsPanel {
 				this.render();
 			} catch (error) { status.textContent = error instanceof Error ? error.message : 'Unable to connect agent.'; }
 		} });
-		save.style.cssText = 'display:inline-flex;align-items:center;padding:8px 14px;border-radius:8px;border:1px solid transparent;background:var(--vscode-button-background);color:var(--vscode-button-foreground);font:inherit;cursor:pointer';
 		void this.agentService?.listExternalAgents().then(agents => {
 			if (!group.isConnected) { return; }
 			for (const agent of agents) {
@@ -456,9 +468,10 @@ export class CleanSlateSettingsPanel {
 		dom.append(updated, dom.$('span')).textContent = `Last updated ${this.formatUpdatedAt()}`;
 		const inlineRefresh = dom.append(updated, dom.$('button.cleanSlate-usage-refresh-control')) as HTMLButtonElement;
 		inlineRefresh.type = 'button';
-		inlineRefresh.title = 'Refresh usage';
 		dom.append(inlineRefresh, dom.$('span.codicon.codicon-refresh'));
 		inlineRefresh.onclick = () => void this.refreshUsage();
+		inlineRefresh.title = 'Refresh usage';
+		inlineRefresh.setAttribute('aria-label', 'Refresh usage');
 
 		if (isManagedFreePlan) {
 			this.createUpgradeCard(dashboard, true);
@@ -536,21 +549,13 @@ export class CleanSlateSettingsPanel {
 			return;
 		}
 		const actions = dom.append(parent, dom.$('.cleanSlate-pro-actions'));
-		const button = dom.append(actions, dom.$('button.cleanSlate-pro-button.cleanSlate-usage-refresh-button.cleanSlate-usage-refresh-control')) as HTMLButtonElement;
-		button.type = 'button';
-		dom.append(button, dom.$('span.codicon.codicon-refresh'));
-		dom.append(button, dom.$('span')).textContent = 'Refresh usage';
-		button.onclick = () => void this.refreshUsage();
+		const button = createCleanSlateActionButton(actions, { label: 'Refresh usage', leadingIcon: 'refresh', variant: 'secondary', action: () => this.refreshUsage() });
+		button.classList.add('cleanSlate-usage-refresh-control');
 	}
 
 	private createUsageAccountAction(parent: HTMLElement, label: string): void {
 		const actions = dom.append(parent, dom.$('.cleanSlate-pro-actions'));
-		const button = dom.append(actions, dom.$('button.cleanSlate-pro-button')) as HTMLButtonElement;
-		button.type = 'button';
-		button.disabled = !this.accountActions?.signIn;
-		dom.append(button, dom.$('span.codicon.codicon-account'));
-		dom.append(button, dom.$('span')).textContent = label;
-		button.onclick = () => void this.accountActions?.signIn();
+		createCleanSlateActionButton(actions, { label, leadingIcon: 'account', variant: 'primary', action: this.accountActions?.signIn });
 	}
 
 	/**
@@ -725,8 +730,6 @@ export class CleanSlateSettingsPanel {
 			.cleanSlate-usage-alert .codicon { flex:0 0 auto; font-size:15px; color:var(--vscode-inputValidation-warningBorder, #cca700); }
 
 			.cleanSlate-usage-updated { display:flex; align-items:center; gap:8px; padding:0 2px; color:var(--vscode-descriptionForeground); font-size:11.5px; }
-			.cleanSlate-usage-updated button { display:inline-flex; align-items:center; justify-content:center; border:0; background:transparent; color:inherit; cursor:pointer; padding:3px; border-radius:6px; opacity:.75; transition:opacity .15s ease, background .15s ease; }
-			.cleanSlate-usage-updated button:hover { opacity:1; background:var(--cs-surface-strong); }
 
 			.cleanSlate-usage-credits { display:flex; flex-direction:column; gap:14px; padding:22px 24px; border:1px solid var(--cs-border); border-radius:16px; background:var(--cs-surface); }
 			.cleanSlate-usage-credits h3 { margin:0; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--vscode-descriptionForeground); }
@@ -738,13 +741,11 @@ export class CleanSlateSettingsPanel {
 
 			/* ── Shared ──────────────────────────────────────────────── */
 			.cleanSlate-pro-actions { display:flex; justify-content:flex-end; margin-top:4px; }
-			.cleanSlate-pro-button { display:inline-flex; align-items:center; gap:8px; padding:8px 14px; border:1px solid var(--cs-border); border-radius:9px; background:var(--cs-surface); color:var(--vscode-foreground); font:inherit; font-size:12.5px; font-weight:600; cursor:pointer; transition:background .15s ease, border-color .15s ease; }
-			.cleanSlate-usage-refresh-button { font-weight:400; }
-			.cleanSlate-usage-refresh-control.is-refreshing { opacity:.6; cursor:default; }
+			.cleanSlate-usage-updated button { display:inline-flex; align-items:center; justify-content:center; border:0; background:transparent; color:inherit; cursor:pointer; padding:3px; border-radius:6px; opacity:.75; transition:opacity .15s ease, background .15s ease; }
+			.cleanSlate-usage-updated button:hover { opacity:1; background:var(--cs-surface-strong); }
 			.cleanSlate-usage-updated button.is-refreshing:hover { background:transparent; opacity:.6; }
+			.cleanSlate-usage-refresh-control.is-refreshing { opacity:.6; cursor:default; }
 			.cleanSlate-usage-refresh-control.is-refreshing .codicon { animation:codicon-spin 1.5s steps(30) infinite; }
-			.cleanSlate-pro-button:hover:not(:disabled) { background:var(--cs-surface-strong); border-color:color-mix(in srgb, var(--vscode-foreground) 14%, transparent); }
-			.cleanSlate-pro-button:disabled { opacity:.55; cursor:default; }
 			.cleanSlate-pro-empty { display:flex; align-items:center; gap:10px; padding:16px 18px; border:1px solid color-mix(in srgb, var(--vscode-inputValidation-warningBorder, #cca700) 55%, transparent); border-radius:14px; background:color-mix(in srgb, var(--vscode-inputValidation-warningBorder, #cca700) 8%, transparent); color:var(--vscode-foreground); font-size:13px; }
 
 			/* ── Upgrade (free plan) ─────────────────────────────────── */
