@@ -6,16 +6,34 @@
   </picture>
 </p>
 <p align="center"><b>CleanSlate</b></p>
-<p align="center">The open source coding agent.</p>
+<p align="center">The open source AI workspace.</p>
 <p align="center">
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
-  <a href="https://github.com/TheWariend/CleanSlate-Releases/releases/latest"><img alt="Latest CleanSlate IDE release" src="https://img.shields.io/github/v/release/TheWariend/CleanSlate-Releases?display_name=tag&style=flat-square&label=IDE" /></a>
-  <a href="https://github.com/microsoft/vscode"><img alt="IDE built on VS Code" src="https://img.shields.io/badge/built%20on-VS%20Code-007ACC?style=flat-square" /></a>
+  <a href="https://github.com/TheWariend/CleanSlate-Releases/releases/latest"><img alt="Latest CleanSlate desktop release" src="https://img.shields.io/github/v/release/TheWariend/CleanSlate-Releases?display_name=tag&style=flat-square&label=Desktop" /></a>
+  <a href="https://github.com/microsoft/vscode"><img alt="Workspace built on VS Code" src="https://img.shields.io/badge/built%20on-VS%20Code-007ACC?style=flat-square" /></a>
   <a href="https://www.npmjs.com/package/@cleanslate/sdk"><img alt="CleanSlate SDK npm version" src="https://img.shields.io/npm/v/@cleanslate/sdk?style=flat-square&label=SDK" /></a>
   <a href="https://www.npmjs.com/package/@cleanslate/cli"><img alt="CleanSlate CLI npm version" src="https://img.shields.io/npm/v/@cleanslate/cli?style=flat-square&label=CLI" /></a>
 </p>
 
-![CleanSlate](assets/screenshot.png)
+[![CleanSlate desktop workspace demo](assets/cleanslate-desktop-preview.jpg)](assets/cleanslate-desktop.mp4)
+
+[Watch the desktop demo](assets/cleanslate-desktop.mp4) (33 seconds).
+
+CleanSlate brings AI agents, project chats, a browser, terminals, files, and
+change review into one desktop workspace built on VS Code. Work with the
+built-in agent or connect compatible external agents, keep conversations
+organized by project, and inspect the results alongside the chat.
+
+### Your AI workspace
+
+- **Projects and chats** — Keep conversations grouped by project and return to ongoing work.
+- **Agents** — Choose CleanSlate's built-in agent or a compatible external agent, import existing local chats, and hand off conversations with their visible context.
+- **Browser** — Browse in workspace tabs with bookmarks and history, and let the agent drive a real browser to check its work.
+- **Files and terminals** — Open files and run commands alongside the conversation, with the VS Code editor available for hands-on coding.
+- **Review and artifacts** — Inspect changed files and diffs, and view artifacts produced during a task without leaving the workspace.
+
+The desktop workspace is one way to use CleanSlate. The same agent runtime also
+powers the standalone CLI and SDK below.
 
 ---
 
@@ -27,7 +45,11 @@ The current release is **CleanSlate 1.1.0**. See the [release notes](https://git
 | -------- | -------- |
 | macOS (Apple Silicon) | [DMG](https://github.com/TheWariend/CleanSlate-Releases/releases/latest/download/CleanSlate-darwin-arm64.dmg) · [ZIP](https://github.com/TheWariend/CleanSlate-Releases/releases/latest/download/CleanSlate-darwin-arm64.zip) |
 
-Builds are signed and notarized.
+Signing and notarization are temporarily disabled for new macOS builds while
+our Apple Developer account is being renewed. These builds may be blocked by
+macOS Gatekeeper and require manual installation; automatic updates from an
+existing signed installation may reject them. Check the release notes for the
+signing status of a particular build.
 
 > [!NOTE]
 > Intel macOS, Windows, and Linux aren't published yet. Build from source on those platforms.
@@ -36,7 +58,7 @@ Builds are signed and notarized.
 
 ![CleanSlate CLI](assets/screenshot-cli.png)
 
-The same agent runs without the editor:
+The same agent runs from your terminal without the desktop workspace:
 
 ```sh
 npm install -g @cleanslate/cli
@@ -57,7 +79,7 @@ commands, sessions, and MCP configuration.
 
 ### Building on the runtime
 
-The engine behind both surfaces is published on its own:
+The engine behind the desktop workspace and CLI is published on its own:
 
 ```sh
 npm install @cleanslate/sdk
@@ -110,7 +132,7 @@ Or sign in to **CleanSlate Pro** for managed models, higher limits, and pay-as-y
 - Search and fetch from the web
 - Call any MCP server you configure
 
-The editor includes a bundled model for local embeddings. The CLI and SDK can use configured embedding services; remote services receive the content being embedded.
+The desktop workspace includes a bundled model for local embeddings. The CLI and SDK can use configured embedding services; remote services receive the content being embedded.
 
 ### Extensions
 
