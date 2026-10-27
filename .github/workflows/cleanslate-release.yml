@@ -1,5 +1,5 @@
 name: CleanSlate Release
-run-name: CleanSlate Release
+run-name: CleanSlate Release${{ inputs.skip_ci && ' (CI bypass)' || '' }}
 
 on:
   # Bumping VERSION and pushing the "CleanSlate Release" commit starts the build.
@@ -23,6 +23,11 @@ on:
           # - windows
           - macos
           # - all
+      skip_ci:
+        description: Bypass the separate CI regression gate for this manual release
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -43,12 +48,13 @@ env:
 jobs:
   ci:
     name: Validate before release
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_ci }}
     uses: ./.github/workflows/ci.yml
 
   build-macos:
     name: Build macOS app
     needs: ci
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'macos' || inputs.target == 'all' }}
+    if: ${{ always() && !cancelled() && (needs.ci.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.skip_ci)) && (github.event_name != 'workflow_dispatch' || inputs.target == 'macos' || inputs.target == 'all') }}
     runs-on: macos-14
     defaults:
       run:
