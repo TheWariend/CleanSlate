@@ -6,7 +6,7 @@
   </picture>
 </p>
 <p align="center"><b>CleanSlate</b></p>
-<p align="center">The open source coding agent.</p>
+<p align="center">An AI workspace with shared procedural memory as reusable skills.</p>
 
 ---
 
@@ -14,7 +14,7 @@ This directory holds the CleanSlate desktop editor and its workbench integration
 
 **Documentation lives at the repository root:**
 
-- [README](../README.md) — installation, models, tools, and what CleanSlate does
+- [README](../README.md) — installation, shared procedural memory with MuscleMemory, models, and tools
 - [CONTRIBUTING](../CONTRIBUTING.md) — development setup and pull request guidelines
 - [SECURITY](../SECURITY.md) — threat model and vulnerability reporting
 - [CODE_OF_CONDUCT](../CODE_OF_CONDUCT.md)

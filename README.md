@@ -6,7 +6,7 @@
   </picture>
 </p>
 <p align="center"><b>CleanSlate</b></p>
-<p align="center">The open source AI workspace.</p>
+<p align="center">An AI workspace with shared procedural memory as reusable skills.</p>
 <p align="center">
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
   <a href="https://github.com/TheWariend/CleanSlate-Releases/releases/latest"><img alt="Latest CleanSlate desktop release" src="https://img.shields.io/github/v/release/TheWariend/CleanSlate-Releases?display_name=tag&style=flat-square&label=Desktop" /></a>
@@ -15,25 +15,61 @@
   <a href="https://www.npmjs.com/package/@cleanslate/cli"><img alt="CleanSlate CLI npm version" src="https://img.shields.io/npm/v/@cleanslate/cli?style=flat-square&label=CLI" /></a>
 </p>
 
+[Download for macOS](https://github.com/TheWariend/CleanSlate-Releases/releases/latest) · [Shared procedural memory](#shared-procedural-memory) · [Connect MuscleMemory](#connect-musclememory) · [CLI](#in-the-terminal) · [SDK](#building-on-the-runtime)
+
 [![CleanSlate desktop workspace demo](assets/cleanslate-desktop-preview.jpg)](assets/cleanslate-desktop.mp4)
 
 [Watch the desktop demo](assets/cleanslate-desktop.mp4) (33 seconds).
 
-CleanSlate brings AI agents, project chats, a browser, terminals, files, and
-change review into one desktop workspace built on VS Code. Work with the
-built-in agent or connect compatible external agents, keep conversations
-organized by project, and inspect the results alongside the chat.
+CleanSlate is an open-source AI workspace that brings agents, project chats,
+a browser, terminals, files, and change review together. Work with the built-in
+agent or connect compatible external agents, and inspect their work alongside
+the conversation.
+
+Its procedural memory is powered by [MuscleMemory](https://github.com/TheWariend/MuscleMemory).
+When connected, MuscleMemory learns reusable skills from verified work and
+shares them with connected agents. A new chat or a different agent can start
+with the procedure that worked before: which files to change, how to check the
+result, and what to avoid.
+
+### Shared procedural memory
+
+Procedural memory keeps **how to do a task**. MuscleMemory records the steps,
+edits, test results, and failed attempts behind a coding task, then makes the
+useful procedure available as a reusable skill.
+
+1. **Work on a task.** A connected agent reads files, makes changes, and runs tests.
+2. **Learn from verified work.** A test must pass after the last code change before a session can teach a skill.
+3. **Check and approve it.** A new skill needs two separate later passing checks and your approval by default before it is recalled.
+4. **Reuse it.** A later similar task gets a short note with the relevant steps, checks, and pitfalls. Ready skills can also be exported as `SKILL.md` files for Claude Code or Codex.
+
+For example, after an agent fixes a configuration-loading bug and the tests pass,
+MuscleMemory can learn the files involved, the edits, and the test command. Once
+the skill passes its later checks and is approved, another connected agent can
+use it as a starting point for a similar fix while checking the current code.
+
+**Shared** means agents connected to the same MuscleMemory workspace can reuse
+its skills. A skill learned with Codex can be recalled by Claude Code, Cursor,
+or CleanSlate; it is not tied to the conversation that produced it. Memory is
+local by default, and a namespace controls which workspace shares it.
+
+MuscleMemory is a separate, optional service. The integration in this checkout
+supports CleanSlate's built-in desktop agent and CLI; external agents use their
+own MuscleMemory connections. See [setup below](#connect-musclememory) and the
+[learning rules and limits](https://github.com/TheWariend/MuscleMemory/blob/main/docs/how-it-works.md).
 
 ### Your AI workspace
 
+- **Reusable skills** — Connect MuscleMemory to carry verified procedures between tasks and compatible agents.
 - **Projects and chats** — Keep conversations grouped by project and return to ongoing work.
 - **Agents** — Choose CleanSlate's built-in agent or a compatible external agent, import existing local chats, and hand off conversations with their visible context.
 - **Browser** — Browse in workspace tabs with bookmarks and history, and let the agent drive a real browser to check its work.
 - **Files and terminals** — Open files and run commands alongside the conversation, with the VS Code editor available for hands-on coding.
 - **Review and artifacts** — Inspect changed files and diffs, and view artifacts produced during a task without leaving the workspace.
 
-The desktop workspace is one way to use CleanSlate. The same agent runtime also
-powers the standalone CLI and SDK below.
+The desktop workspace is built on VS Code. The same agent runtime also powers
+the standalone CLI and SDK below. Bring your own model key, or optionally use
+CleanSlate Pro for managed models.
 
 ---
 
@@ -69,6 +105,41 @@ See [Apple’s instructions for opening a blocked app](https://support.apple.com
 
 > [!NOTE]
 > Intel macOS, Windows, and Linux aren't published yet. Build from source on those platforms.
+
+### Connect MuscleMemory
+
+MuscleMemory is [open source](https://github.com/TheWariend/MuscleMemory) and runs
+as a local service by default. Install it separately, then connect the agents
+that should share its skills:
+
+```sh
+# Requires Python 3.12+ and pipx.
+pipx install thewariend-musclememory
+musclememory init
+musclememory start
+
+# Run from the project you want to connect.
+cd your-project
+musclememory connect cleanslate
+```
+
+The connect command prints the host configuration and SDK module settings.
+Follow those instructions, then launch CleanSlate from the same terminal.
+The integration uses `CLEANSLATE_MUSCLEMEMORY_CONFIG` and the MuscleMemory
+TypeScript SDK; `CLEANSLATE_MUSCLEMEMORY_NODE_MODULE` selects the SDK module.
+For the desktop integration, use a build from this checkout and launch it from
+that environment. Installing the desktop app alone
+does not enable memory.
+
+To share the same memory with external agents, run `musclememory connect codex`,
+`musclememory connect claude`, or `musclememory connect cursor` for each agent
+you use. Run `musclememory dashboard` to inspect captured activity, review
+skills, and approve them for reuse.
+
+See the [CleanSlate integration guide](https://github.com/TheWariend/MuscleMemory/blob/main/integrations/cleanslate/README.md)
+for SDK setup and launch instructions, or the
+[MuscleMemory quick start](https://github.com/TheWariend/MuscleMemory#quick-start)
+for the other agents. Memory is opt-in; CleanSlate works without it.
 
 ### In the terminal
 
