@@ -16,6 +16,13 @@ export const CLEANSLATE_SESSION_STATES = ['starting', 'running', 'detached', 'st
 
 export type CleanSlateSessionState = typeof CLEANSLATE_SESSION_STATES[number];
 
+export const CLEANSLATE_BROWSER_CHAT_WORKSPACE_ID = 'browser-chat';
+
+/** Browser conversations retain this identity in both local and persisted snapshots. */
+export function isCleanSlateBrowserChatSession(session: { readonly workspaceId?: string }): boolean {
+    return session.workspaceId === CLEANSLATE_BROWSER_CHAT_WORKSPACE_ID;
+}
+
 export function isCleanSlateSessionState(value: unknown): value is CleanSlateSessionState {
     return typeof value === 'string' && (CLEANSLATE_SESSION_STATES as readonly string[]).includes(value);
 }
