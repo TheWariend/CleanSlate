@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
+import { finishProjectSetup } from './projectSetup.mjs';
 
 const browserFavicon = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#1ba89b"/><circle cx="16" cy="16" r="8" fill="white"/><!--${'x'.repeat(26_000)}--></svg>`;
 
@@ -138,6 +139,7 @@ const test = base.extend({
 	page: async ({ app }, use) => {
 		const page = await app.firstWindow();
 		await expect(page.locator('.monaco-workbench')).toBeVisible({ timeout: 60_000 });
+		await finishProjectSetup(page);
 		await app.evaluate(({ BrowserWindow, app }) => {
 			app.focus({ steal: true });
 			BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('workbench'))?.focus();

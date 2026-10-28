@@ -9,6 +9,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
+import { URI } from '../core/uri.js';
 import { createCleanSlateNodeToolContext } from '../node/cleanSlateNodeToolContext.js';
 import { writeFileTool } from '../tools/WriteFileTool.js';
 import { submitArtifactTool } from '../tools/SubmitArtifactTool.js';
@@ -26,7 +27,7 @@ test('headless edit history uses private workspace storage instead of the reposi
 
 		assert.match(workspaceId, /^node-[a-f0-9]{32}$/);
 		assert.equal(workspaceId.includes(root), false);
-		assert.equal(context.environmentService.workspaceStorageHome.fsPath, privateHome);
+		assert.equal(context.environmentService.workspaceStorageHome.fsPath, URI.file(privateHome).fsPath);
 
 		const result = await writeFileTool.run({
 			file_path: path.join(root, 'created.txt'),

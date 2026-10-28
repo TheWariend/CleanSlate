@@ -8,6 +8,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
+import { URI } from '../core/uri.js';
 import { CleanSlateNodeIndexService } from '../node/cleanSlateNodeIndexService.js';
 
 test('Node code index ranks relevant source chunks and skips dependencies', async () => {
@@ -44,7 +45,7 @@ test('Node code index ranks relevant source chunks and skips dependencies', asyn
 		});
 		const results = await index.search('invoice amount', 5, 0.9);
 		assert.equal(results.length > 0, true);
-		assert.equal(results[0]?.uri.fsPath, path.join(root, 'invoice.ts'));
+		assert.equal(results[0]?.uri.fsPath, URI.file(path.join(root, 'invoice.ts')).fsPath);
 		assert.equal(results.some(result => result.uri.fsPath.includes('node_modules')), false);
 		assert.equal(requests.every(request => request.url === 'https://embedding.test/v1/embeddings'), true);
 		assert.equal(requests.some(request => JSON.parse(request.body || '{}').model === 'verified-embedding-model'), true);

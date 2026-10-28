@@ -13,7 +13,7 @@ import { CliConfigStore, CliCredentialStore, getCleanSlateWorkspaceStorageHome }
 test('workspace state is kept under CleanSlate private storage', () => {
 	assert.equal(
 		getCleanSlateWorkspaceStorageHome({ CLEANSLATE_HOME: '/private/cleanslate-home' }),
-		path.join('/private/cleanslate-home', 'workspaceStorage')
+		path.resolve('/private/cleanslate-home', 'workspaceStorage')
 	);
 });
 
@@ -31,7 +31,9 @@ test('configuration and global credentials persist with owner-only permissions',
 		assert.equal(credentials.remove('anthropic'), true);
 		assert.equal(credentials.get('anthropic'), undefined);
 		credentials.set('anthropic', 'secret-key');
-		assert.equal(fs.statSync(path.join(home, 'auth.json')).mode & 0o777, 0o600);
+		if (process.platform !== 'win32') {
+			assert.equal(fs.statSync(path.join(home, 'auth.json')).mode & 0o777, 0o600);
+		}
 		assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, 'auth.json'), 'utf8')), {
 			anthropic: { type: 'api', key: 'secret-key' }
 		});

@@ -31,7 +31,7 @@ import { prepareCleanSlateProject } from '../settings/cleanSlateProjectOpen.js';
 import { IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IMarkerService } from '../../../../../platform/markers/common/markers.js';
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
-import { INativeHostService } from '../../../../../platform/native/common/native.js';
+import { IBrowserIntegrationHost } from '../../../../../platform/native/common/browserIntegration.js';
 import { IOpenerService } from '../../../../../platform/opener/common/opener.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { ISecretStorageService } from '../../../../../platform/secrets/common/secrets.js';
@@ -206,6 +206,7 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 	private openWorkspaceTabIds: string[] = [];
 	private activeWorkspaceBrowserTabId: string | undefined;
 	private readonly workspaceBrowser: CleanSlateWorkspaceBrowser;
+	private readonly nativeHostService: IBrowserIntegrationHost;
 	private readonly threadContentId = `cleanSlate-thread-${generateUuid()}`;
 	private chatSurface!: HTMLElement;
 	private progressList!: HTMLElement;
@@ -357,10 +358,10 @@ export class CleanSlateAgentWorkspaceOverlay extends Disposable implements IResp
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@ITextModelService private readonly textModelService: ITextModelService,
 		@IBrowserViewWorkbenchService browserViewWorkbenchService: IBrowserViewWorkbenchService,
-		@INativeHostService private readonly nativeHostService: INativeHostService,
 		@IWebWorkerService webWorkerService: IWebWorkerService,
 	) {
 		super();
+		this.nativeHostService = browserViewWorkbenchService.browserIntegration;
 		this.workspaceBrowser = this._register(new CleanSlateWorkspaceBrowser(browserViewWorkbenchService, this.storageService, webWorkerService));
 		this._register(this.workspaceBrowser.onDidOpenTab(({ id, background }) => {
 			if (!this.openWorkspaceTabIds.includes(id)) { this.openWorkspaceTabIds.push(id); }

@@ -376,10 +376,11 @@ export class CleanSlateNodeCommandService {
 
 	private spawnShell(command: string, cwd: string): cp.ChildProcessWithoutNullStreams {
 		if (os.platform() === 'win32') {
-			return cp.spawn(process.env['ComSpec'] || 'cmd.exe', ['/d', '/s', '/c', command], {
+			return cp.spawn(process.env['ComSpec'] || 'cmd.exe', ['/d', '/s', '/c', `"${command}"`], {
 				cwd,
 				env: this.buildEnvironment(),
-				windowsHide: true
+				windowsHide: true,
+				windowsVerbatimArguments: true
 			});
 		}
 		return cp.spawn(process.env['SHELL'] || '/bin/zsh', ['-lc', command], {

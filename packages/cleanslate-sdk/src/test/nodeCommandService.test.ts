@@ -46,7 +46,7 @@ describe('CleanSlateNodeCommandService', () => {
 		const events: any[] = await new Promise(resolve => {
 			const received: any[] = [];
 			const subscription = service.executeCommandStream({
-				command: `${process.execPath} -e "process.stdout.write('hello')"`
+				command: `"${process.execPath}" -e "process.stdout.write('hello')"`
 			}, CancellationToken.None)(event => {
 				received.push(event);
 				if (event === null) {
@@ -67,7 +67,7 @@ describe('CleanSlateNodeCommandService', () => {
 	test('tracks and stops a background command', async () => {
 		const service = new CleanSlateNodeCommandService(process.cwd());
 		const result = await service.startBackgroundCommand({
-			command: `${process.execPath} -e "console.log('listening on http://localhost:4567'); setInterval(() => {}, 1000)"`,
+			command: `"${process.execPath}" -e "console.log('listening on http://localhost:4567'); setInterval(() => {}, 1000)"`,
 			readyPattern: 'listening on',
 			startupTimeoutMs: 2_000
 		});
