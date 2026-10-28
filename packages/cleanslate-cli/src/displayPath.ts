@@ -25,18 +25,12 @@ export function displayPath(target: string, home: string = os.homedir()): string
 		return target;
 	}
 
-	const normalizedHome = home.replace(/[/\\]+$/, '');
-	// Strip a trailing separator so `/home/me/` reads as `~`, not `~/`.
-	const normalizedTarget = target.length > 1 ? target.replace(/[/\\]+$/, '') : target;
-	if (normalizedTarget === normalizedHome) {
+	const relative = path.relative(home, target);
+	if (!relative) {
 		return '~';
 	}
-
-	// Only abbreviate a real path segment, so `/Users/example-old` is not
-	// mistaken for something under `/Users/example`.
-	const prefix = normalizedHome + path.sep;
-	if (normalizedTarget.startsWith(prefix)) {
-		return '~' + path.sep + normalizedTarget.slice(prefix.length);
+	if (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) {
+		return `~${path.sep}${relative}`;
 	}
 
 	return target;

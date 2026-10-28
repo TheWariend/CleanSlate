@@ -8,6 +8,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
+import { URI } from '../core/uri.js';
 import { createCleanSlateNodeToolContext } from '../node/cleanSlateNodeToolContext.js';
 import { readFileTool } from '../tools/ReadFileTool.js';
 import { listDirTool } from '../tools/ListDirTool.js';
@@ -92,11 +93,11 @@ test('grep_search with an explicit scope outside the active workspace actually c
 
 		assert.ok(Array.isArray(scoped), `expected an array of matches, got: ${JSON.stringify(scoped)}`);
 		assert.equal(scoped.length, 1, `expected exactly one file match scoped to project B, got: ${JSON.stringify(scoped)}`);
-		assert.equal(scoped[0].path, path.join(otherProjectRoot, 'needle.ts'));
+		assert.equal(scoped[0].path, URI.file(path.join(otherProjectRoot, 'needle.ts')).fsPath);
 
 		const unscoped = await grepSearchTool.run({ query: 'findMeCrossProject' }, context);
 		assert.equal(unscoped.length, 1, `unscoped search should stay limited to the active workspace, got: ${JSON.stringify(unscoped)}`);
-		assert.equal(unscoped[0].path, path.join(workspaceRoot, 'unrelated.ts'));
+		assert.equal(unscoped[0].path, URI.file(path.join(workspaceRoot, 'unrelated.ts')).fsPath);
 	} finally {
 		fs.rmSync(workspaceRoot, { recursive: true, force: true });
 		fs.rmSync(otherProjectRoot, { recursive: true, force: true });

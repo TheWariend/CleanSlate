@@ -311,13 +311,25 @@ try {
 				view.restore(history);
 				timings.push(performance.now() - start);
 				maxHeightReads = Math.max(maxHeightReads, heightReads);
-				if (view.element.querySelectorAll('.cleanSlate-chat-message').length !== history.length) {
-					throw new Error('Restoration lost or duplicated messages');
+				const visible = [...view.element.querySelectorAll('[data-clean-slate-transcript-id]')];
+				const expected = history.slice(-visible.length).map(message => message.id);
+				if (!visible.length || JSON.stringify(visible.map(row => row.dataset.cleanSlateTranscriptId)) !== JSON.stringify(expected)) {
+					throw new Error('Restoration lost, duplicated or reordered the visible messages');
+				}
+				if (version === 'current' && visible.length >= history.length) {
+					throw new Error('Restoration rendered the full large history eagerly');
 				}
 				if (Math.abs(view.element.scrollHeight - view.element.clientHeight - view.element.scrollTop) > 2) {
 					throw new Error('Restored conversation did not land at the bottom');
 				}
 				await new Promise(requestAnimationFrame);
+			}
+			while (view.element.querySelector('.cleanSlate-load-earlier-messages')) {
+				view.element.querySelector('.cleanSlate-load-earlier-messages').click();
+			}
+			const restoredIds = [...view.element.querySelectorAll('[data-clean-slate-transcript-id]')].map(row => row.dataset.cleanSlateTranscriptId);
+			if (JSON.stringify(restoredIds) !== JSON.stringify(history.map(message => message.id))) {
+				throw new Error('Loading earlier messages lost, duplicated or reordered the conversation');
 			}
 			view.addMessage('A new user message', 'user');
 			if (Math.abs(view.element.scrollHeight - view.element.clientHeight - view.element.scrollTop) > 2) {

@@ -15,6 +15,20 @@ import { InMemoryStorageService, StorageScope, StorageTarget } from '../../../..
 import { cleanSlateBrowserBookmarksKey, importCleanSlateBrowserBookmarks, readCleanSlateBrowserBookmarks } from '../../browser/agentManager/cleanSlateBrowserBookmarks.js';
 
 suite('CleanSlate browser import', () => {
+	const environmentKeys = ['XDG_CONFIG_HOME', 'LOCALAPPDATA', 'APPDATA'] as const;
+	let originalEnvironment: Array<string | undefined>;
+	setup(() => {
+		originalEnvironment = environmentKeys.map(key => process.env[key]);
+		for (const key of environmentKeys) { delete process.env[key]; }
+	});
+	teardown(() => {
+		for (const [index, key] of environmentKeys.entries()) {
+			const value = originalEnvironment[index];
+			if (value === undefined) { delete process.env[key]; }
+			else { process.env[key] = value; }
+		}
+	});
+
 	const chromium = JSON.stringify({ roots: { bookmark_bar: { type: 'folder', name: 'Bookmarks bar', children: [
 		{ type: 'folder', name: 'Research', children: [{ type: 'url', name: 'Reference', url: 'https://example.test/docs?a=1&b=2' }] },
 		{ type: 'url', name: 'Unsafe', url: 'javascript:alert(1)' }

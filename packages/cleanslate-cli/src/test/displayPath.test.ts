@@ -6,44 +6,48 @@
 import assert from 'node:assert/strict';
 import { test, describe } from 'node:test';
 import os from 'node:os';
+import path from 'node:path';
 import { displayPath } from '../displayPath.js';
 
-const HOME = '/Users/example';
+const testHome = path.resolve('test-home');
 
 describe('displayPath', () => {
 	test('abbreviates the home directory itself', () => {
-		assert.equal(displayPath(HOME, HOME), '~');
-		assert.equal(displayPath(HOME + '/', HOME), '~');
+		assert.equal(displayPath(testHome, testHome), '~');
+		assert.equal(displayPath(testHome + path.sep, testHome), '~');
 	});
 
 	test('abbreviates paths inside the home directory', () => {
-		assert.equal(displayPath('/Users/example/code/app', HOME), '~/code/app');
-		assert.equal(displayPath('/Users/example/a', HOME), '~/a');
+		assert.equal(displayPath(path.join(testHome, 'code', 'app'), testHome), path.join('~', 'code', 'app'));
+		assert.equal(displayPath(path.join(testHome, 'a'), testHome), path.join('~', 'a'));
 	});
 
 	test('does not abbreviate a sibling whose name merely starts the same', () => {
-		// The regression this guards: /Users/example-old is not inside
-		// /Users/example, and abbreviating it would be wrong as well as
-		// misleading.
-		assert.equal(displayPath('/Users/example-old/code', HOME), '/Users/example-old/code');
-		assert.equal(displayPath('/Users/exampleother', HOME), '/Users/exampleother');
+		const sibling = `${testHome}-old`;
+		assert.equal(displayPath(path.join(sibling, 'code'), testHome), path.join(sibling, 'code'));
+		assert.equal(displayPath(`${testHome}other`, testHome), `${testHome}other`);
 	});
 
 	test('leaves paths outside the home directory alone', () => {
-		assert.equal(displayPath('/tmp/scratch', HOME), '/tmp/scratch');
-		assert.equal(displayPath('/var/log', HOME), '/var/log');
+		assert.equal(displayPath('/tmp/scratch', testHome), '/tmp/scratch');
+		assert.equal(displayPath('/var/log', testHome), '/var/log');
 	});
 
 	test('leaves relative paths and empty input alone', () => {
-		assert.equal(displayPath('code/app', HOME), 'code/app');
-		assert.equal(displayPath('', HOME), '');
+		assert.equal(displayPath('code/app', testHome), 'code/app');
+		assert.equal(displayPath('', testHome), '');
+	});
+
+	test('abbreviates Windows home paths with mixed separators and drive casing', { skip: process.platform !== 'win32' }, () => {
+		assert.equal(displayPath('c:/Users/example/code/app', 'C:\\Users\\example'), '~\\code\\app');
+		assert.equal(displayPath('c:/Users/example-old/code', 'C:\\Users\\example'), 'c:/Users/example-old/code');
 	});
 
 	test('no account name survives for a real home path', () => {
 		// The point of the helper: whatever the account is called, it must not
 		// reach the screen.
 		const real = os.homedir();
-		const shown = displayPath(real + '/WARIEND/project');
+		const shown = displayPath(path.join(real, 'projects', 'app'));
 		assert.ok(shown.startsWith('~'), `expected ~ prefix, got ${shown}`);
 		assert.ok(!shown.includes(real), 'the home path leaked into the display string');
 	});

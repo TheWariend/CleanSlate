@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
+import { finishProjectSetup } from './projectSetup.mjs';
 
 const fork = fileURLToPath(new URL('../../../', import.meta.url));
 const product = JSON.parse(await readFile(join(fork, 'product.json'), 'utf8'));
@@ -53,6 +54,7 @@ test('Browser chat uses the current native page, resizes smoothly and restores s
 	let app;
 	let page;
 	let logs = '';
+	let projectPrepared = false;
 	const launch = async () => {
 		app = await _electron.launch({ executablePath, args: [fork, workspace, `--user-data-dir=${profile}`, `--extensions-dir=${join(root, 'extensions')}`, '--disable-extensions', '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--no-sandbox', '--goto', join(workspace, 'editor-secret.txt')],
 			env: { ...process.env, ELECTRON_RUN_AS_NODE: '', NODE_OPTIONS: '', VSCODE_DEV: '1', VSCODE_CLI: '1', NODE_ENV: 'development' }, timeout: 60_000 });
@@ -60,6 +62,7 @@ test('Browser chat uses the current native page, resizes smoothly and restores s
 		page = await app.firstWindow();
 		page.on('console', message => { if (/CleanSlateService|configuration/.test(message.text())) { logs = (logs + message.text() + '\n').slice(-500_000); } });
 		await expect(page.locator('.monaco-workbench')).toBeVisible({ timeout: 60_000 });
+		if (!projectPrepared) { await finishProjectSetup(page); projectPrepared = true; }
 		await app.evaluate(({ app, BrowserWindow }) => { app.focus({ steal: true }); BrowserWindow.getAllWindows()[0].setSize(1280, 800); BrowserWindow.getAllWindows()[0].focus(); });
 		const manager = page.locator('.cleanSlate-agent-manager-surface');
 		if (!await manager.waitFor({ state: 'visible', timeout: 5000 }).then(() => true, () => false)) {
@@ -71,11 +74,7 @@ test('Browser chat uses the current native page, resizes smoothly and restores s
 		}
 		await expect(manager).toBeVisible();
 		await expect(manager.locator('.cleanSlate-agent-manager-startup-loading')).toBeHidden();
-		const trust = page.getByRole('button', { name: 'Trust Folder & Continue', exact: true });
-		if (await trust.waitFor({ state: 'visible', timeout: 1500 }).then(() => true, () => false)) {
-			await trust.click();
-			await page.getByRole('button', { name: 'Not now', exact: true }).click();
-		}
+
 		return manager;
 	};
 	const openArticle = async (manager, suffix) => {

@@ -11,6 +11,7 @@ import type { ICleanSlateMainService, ICleanSlatePersistedSession } from '../../
 import {
     deriveCleanSlateTranscriptFromHistory,
     ICleanSlateSessionSnapshot,
+    isCleanSlateBrowserChatSession,
     isCleanSlateSessionState,
     normalizeCleanSlateSessionExecutionState,
     normalizeCleanSlateTranscriptOrder
@@ -408,6 +409,7 @@ export class CleanSlateChatHistoryProvider {
 
     private cloneSnapshot(snapshot: ICleanSlateSessionSnapshot | undefined, preserveVolatileState = true): ICleanSlateSessionSnapshot | undefined {
         if (!snapshot
+            || isCleanSlateBrowserChatSession(snapshot)
             || typeof snapshot.id !== 'string'
             || typeof snapshot.title !== 'string'
             || typeof snapshot.savedAt !== 'number'
