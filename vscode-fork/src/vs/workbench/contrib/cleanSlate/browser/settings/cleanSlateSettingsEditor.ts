@@ -19,7 +19,7 @@ import { ICleanSlateConfigurationService, ICleanSlateMainService, ICleanSlateSer
 import { CLEANSLATE_AUTH_ACCOUNT_STORAGE_KEY, clearCleanSlateAuthAccount, openCleanSlateAccount, openCleanSlateProCheckout, openCleanSlateSignIn } from '../auth/cleanSlateAuth.contribution.js';
 import { CleanSlateSettingsInput } from './cleanSlateSettingsInput.js';
 import { CleanSlateSettingsPanel } from './cleanSlateSettingsPanel.js';
-import { INativeHostService } from '../../../../../platform/native/common/native.js';
+import { IBrowserViewWorkbenchService } from '../../../browserView/common/browserView.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { showCleanSlateChatImport } from './cleanSlateChatImport.js';
 
@@ -46,7 +46,7 @@ export class CleanSlateSettingsEditor extends EditorPane {
 		@ICleanSlateMainService private readonly cleanSlateMainService: ICleanSlateMainService,
 		@IOpenerService private readonly openerService: IOpenerService,
 		@INotificationService private readonly notificationService: INotificationService,
-		@INativeHostService private readonly nativeHostService: INativeHostService,
+		@IBrowserViewWorkbenchService private readonly browserViewService: IBrowserViewWorkbenchService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 	) {
 		super(CleanSlateSettingsEditor.ID, group, telemetryService, themeService, storageService);
@@ -67,7 +67,7 @@ export class CleanSlateSettingsEditor extends EditorPane {
 			upgradeToPro: () => openCleanSlateProCheckout(this.openerService, this.notificationService, this.cleanSlateMainService),
 			signOut: () => clearCleanSlateAuthAccount(this.secretStorageService, this.storageService),
 			manageAccount: () => openCleanSlateAccount(this.openerService, this.notificationService, this.cleanSlateMainService)
-		}, this.cleanSlateMainService, { nativeHost: this.nativeHostService, storage: this.storageService }, () => this.instantiationService.invokeFunction(showCleanSlateChatImport));
+		}, this.cleanSlateMainService, { nativeHost: this.browserViewService.browserIntegration, storage: this.storageService }, () => this.instantiationService.invokeFunction(showCleanSlateChatImport));
 		this.panel.mount(this.body);
 
 		this.injectStyles();

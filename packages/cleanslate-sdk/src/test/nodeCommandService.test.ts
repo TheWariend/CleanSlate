@@ -9,6 +9,18 @@ import { CancellationToken } from '../core/cancellation.js';
 import { CleanSlateNodeCommandService } from '../node/cleanSlateNodeCommandService.js';
 import { executeCommandTool, startBackgroundCommandTool } from '../tools/ExecuteCommandTool.js';
 
+async function assertProcessStopped(pid: number): Promise<void> {
+	for (let attempt = 0; attempt < 50; attempt++) {
+		try { process.kill(pid, 0); }
+		catch (error) {
+			if ((error as NodeJS.ErrnoException).code === 'ESRCH') { return; }
+			throw error;
+		}
+		await new Promise(resolve => setTimeout(resolve, 100));
+	}
+	assert.fail(`Command process ${pid} survived termination`);
+}
+
 for (const tool of [executeCommandTool, startBackgroundCommandTool]) {
 	test(`${tool.name} cannot launch after Stop races with approval`, async () => {
 		const controller = new AbortController();
@@ -64,20 +76,39 @@ describe('CleanSlateNodeCommandService', () => {
 		assert.equal(events.at(-1), null);
 	});
 
-	test('tracks and stops a background command', async () => {
+	test('tracks and stops a background command and its shell child', { timeout: 15_000 }, async () => {
 		const service = new CleanSlateNodeCommandService(process.cwd());
-		const result = await service.startBackgroundCommand({
-			command: `"${process.execPath}" -e "console.log('listening on http://localhost:4567'); setInterval(() => {}, 1000)"`,
-			readyPattern: 'listening on',
-			startupTimeoutMs: 2_000
-		});
+		try {
+			const result = await service.startBackgroundCommand({
+				command: `"${process.execPath}" -e "console.log('listening on http://localhost:4567 pid=' + process.pid); setInterval(() => {}, 1000)"`,
+				readyPattern: 'listening on',
+				startupTimeoutMs: 2_000
+			});
 
-		assert.equal(result.success, true);
-		assert.equal(result.status, 'ready');
-		assert.equal(result.url, 'http://localhost:4567');
-		assert.ok(result.processId);
-		assert.equal((await service.listBackgroundCommands()).length, 1);
-		assert.equal((await service.stopBackgroundCommand(result.processId!)).stopped, true);
-		assert.equal((await service.listBackgroundCommands()).length, 0);
+			assert.equal(result.success, true);
+			assert.equal(result.status, 'ready');
+			assert.equal(result.url, 'http://localhost:4567');
+			assert.ok(result.processId);
+			assert.equal((await service.listBackgroundCommands()).length, 1);
+			assert.equal((await service.stopBackgroundCommand(result.processId!)).stopped, true);
+			assert.equal((await service.listBackgroundCommands()).length, 0);
+			const pid = Number(/pid=(\d+)/.exec(result.output ?? '')?.[1]);
+			assert.ok(Number.isInteger(pid));
+			await assertProcessStopped(pid);
+		} finally { service.dispose(); }
+	});
+
+	test('a timeout stops the shell child rather than only its parent', { timeout: 15_000 }, async () => {
+		const service = new CleanSlateNodeCommandService(process.cwd());
+		try {
+			const result = await service.executeCommand({
+				command: `"${process.execPath}" -e "console.log('pid=' + process.pid); setInterval(() => {}, 1000)"`,
+				timeoutMs: 1_000
+			});
+			assert.equal(result.timedOut, true);
+			const pid = Number(/pid=(\d+)/.exec(result.output)?.[1]);
+			assert.ok(Number.isInteger(pid));
+			await assertProcessStopped(pid);
+		} finally { service.dispose(); }
 	});
 });

@@ -411,6 +411,17 @@ export class CleanSlateNodeCommandService {
 		if (child.killed) {
 			return;
 		}
+		// cmd.exe does not forward termination to its children. Kill the whole
+		// tree so background commands cannot keep running or hold stdout open.
+		if (os.platform() === 'win32' && typeof child.pid === 'number') {
+			const taskkill = path.join(process.env['SystemRoot'] || 'C:\\Windows', 'System32', 'taskkill.exe');
+			const killer = cp.spawn(taskkill, ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+			const fallback = () => { try { child.kill(); } catch { /* The process may already be gone. */ } };
+			killer.on('error', fallback);
+			killer.on('exit', code => { if (code !== 0) { fallback(); } });
+			killer.unref();
+			return;
+		}
 		const kill = (signal: NodeJS.Signals) => {
 			if (os.platform() !== 'win32' && typeof child.pid === 'number') {
 				try {
