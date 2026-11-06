@@ -3,6 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+export interface IBrowserIntegrationHost {
+	getDefaultBrowserState(): Promise<IDefaultBrowserState>;
+	setAsDefaultBrowser(): Promise<IDefaultBrowserState>;
+	getBrowserImportSources(): Promise<IBrowserImportSource[]>;
+	importBrowserData(sourceIds: readonly string[], kinds: readonly BrowserImportKind[]): Promise<IBrowserProfileImport[]>;
+	chooseBrowserImportFolder(): Promise<IBrowserImportSource[] | undefined>;
+	importBrowserBookmarksHTML(): Promise<IBrowserBookmarkImport | undefined>;
+}
+
 export interface IBrowserBookmark {
 	readonly title: string;
 	readonly url: string;

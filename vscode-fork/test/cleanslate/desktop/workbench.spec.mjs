@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
+import { finishProjectSetup } from './projectSetup.mjs';
 
 const browserFavicon = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#1ba89b"/><circle cx="16" cy="16" r="8" fill="white"/><!--${'x'.repeat(26_000)}--></svg>`;
 
@@ -93,11 +94,14 @@ const test = base.extend({
 		}
 		const app = await _electron.launch({
 			executablePath, args: [fork, join(root, 'workspace'), `--user-data-dir=${join(root, 'profile')}`, `--extensions-dir=${join(root, 'extensions')}`,
-				'--disable-extensions', '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--no-sandbox',
+				'--disable-extensions', '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--no-sandbox', '--password-store=basic',
 				...(openBrowserAtStartup ? ['--open-url', '--', `${importOrigin}/startup?windowId=_blank&continueOn=keep`] : [])],
 			env: { ...process.env, ...(browserSetup ? { XDG_CONFIG_HOME: join(importHome, '.config'), LOCALAPPDATA: join(importHome, 'AppData/Local'), APPDATA: join(importHome, 'AppData/Roaming') } : {}), ELECTRON_RUN_AS_NODE: '', NODE_OPTIONS: '', VSCODE_DEV: '1', VSCODE_CLI: '1', NODE_ENV: 'development' },
 			timeout: 60_000,
 		});
+		// Wait for the main process bootstrap to settle before evaluating fixtures.
+		const window = await app.firstWindow();
+		await expect(window.locator('.monaco-workbench')).toBeVisible({ timeout: 60_000 });
 		if (browserSetup) {
 			await app.evaluate(({ app, dialog }, setup) => {
 				app.setPath('home', setup.home);
@@ -135,9 +139,11 @@ const test = base.extend({
 			}
 		}
 	},
-	page: async ({ app }, use) => {
+	page: async ({ app, openBrowserAtStartup }, use) => {
 		const page = await app.firstWindow();
 		await expect(page.locator('.monaco-workbench')).toBeVisible({ timeout: 60_000 });
+		// --open-url launches a browser window without an active project.
+		if (!openBrowserAtStartup) { await finishProjectSetup(page); }
 		await app.evaluate(({ BrowserWindow, app }) => {
 			app.focus({ steal: true });
 			BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('workbench'))?.focus();
@@ -450,8 +456,8 @@ test.describe('saved browser favicons', () => {
 					? new Response(icon, { headers: { 'Content-Type': 'image/svg+xml' } }) : Response.error();
 			});
 		}, browserFavicon);
-		await page.reload();
-		await expect(page.locator('.monaco-workbench')).toBeVisible();
+		await command(page, 'Developer: Reload Window');
+		await expect(page.locator('.monaco-workbench')).toBeVisible({ timeout: 60_000 });
 		const manager = await openManager(page);
 		await manager.getByRole('button', { name: 'New browser tab', exact: true }).click();
 		for (const title of ['Saved documentation', 'Cached bookmark']) {
@@ -510,18 +516,25 @@ test.describe('browser integration', () => {
 		await manager.getByRole('button', { name: 'New browser tab', exact: true }).click();
 		await manager.getByRole('button', { name: 'Import browser data…', exact: true }).click();
 		const dialog = page.getByRole('dialog', { name: 'Import browser data', exact: true });
-		await expect(dialog.getByRole('button', { name: /Example Navigator/ })).toBeVisible();
-		if (process.platform === 'darwin') { await expect.poll(() => dialog.getByRole('button', { name: /Example Navigator/ }).locator('img').evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true); }
+		await expect(dialog.getByRole('button', { name: 'Example Navigator', exact: true })).toBeVisible();
+		if (process.platform === 'darwin') { await expect.poll(() => dialog.getByRole('button', { name: 'Example Navigator', exact: true }).locator('img').evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true); }
 		await testInfo.attach('import-browser-picker', { body: await page.screenshot({ animations: 'disabled' }), contentType: 'image/png' });
-		await dialog.getByRole('button', { name: /Example Navigator/ }).click();
+		await dialog.getByRole('button', { name: 'Example Navigator', exact: true }).click();
 		await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
-		await expect(dialog.getByRole('checkbox', { name: 'Research profile', exact: true })).toBeChecked();
+		const profiles = dialog.getByRole('dialog', { name: 'Import from Example Navigator', exact: true });
+		await dialog.getByRole('button', { name: '1 profile selected', exact: true }).click();
+		await expect(profiles.getByRole('checkbox', { name: 'Research profile', exact: true })).toBeChecked();
+		await profiles.getByRole('button', { name: 'Done', exact: true }).click();
 		await expect(dialog.getByRole('checkbox', { name: /^Open tabs/ })).toBeChecked();
 		await expect(dialog.getByRole('checkbox', { name: /^Browsing history/ })).toBeChecked();
 		await expect(dialog.getByRole('checkbox', { name: /password|extension/i })).toHaveCount(0);
-		await dialog.getByRole('checkbox', { name: 'Research profile', exact: true }).uncheck();
+		await dialog.getByRole('button', { name: '1 profile selected', exact: true }).click();
+		await profiles.getByRole('checkbox', { name: 'Research profile', exact: true }).uncheck();
+		await profiles.getByRole('button', { name: 'Done', exact: true }).click();
 		await expect(dialog.getByRole('button', { name: 'Import', exact: true })).toBeDisabled();
-		await dialog.getByRole('checkbox', { name: 'Research profile', exact: true }).check();
+		await dialog.getByRole('button', { name: '0 profiles selected', exact: true }).click();
+		await profiles.getByRole('checkbox', { name: 'Research profile', exact: true }).check();
+		await profiles.getByRole('button', { name: 'Done', exact: true }).click();
 		await testInfo.attach('import-data-selection', { body: await page.screenshot({ animations: 'disabled' }), contentType: 'image/png' });
 		await dialog.getByRole('button', { name: 'Import', exact: true }).click();
 		await expect(dialog.getByRole('heading', { name: 'Your data is ready', exact: true })).toBeVisible();
@@ -529,7 +542,7 @@ test.describe('browser integration', () => {
 		for (const row of await dialog.locator('.cs-import-result').all()) { await expect(row).toContainText('1 imported'); }
 		await testInfo.attach('import-complete', { body: await page.screenshot({ animations: 'disabled' }), contentType: 'image/png' });
 		await dialog.getByRole('button', { name: 'Import another', exact: true }).click();
-		await dialog.getByRole('button', { name: /Example Navigator/ }).click();
+		await dialog.getByRole('button', { name: 'Example Navigator', exact: true }).click();
 		await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
 		await dialog.getByRole('button', { name: 'Import', exact: true }).click();
 		await expect(dialog).toContainText('3 duplicates and 1 unsupported links skipped.');
@@ -540,7 +553,7 @@ test.describe('browser integration', () => {
 		await dialog.getByRole('button', { name: 'Import another', exact: true }).click();
 		await app.evaluate(() => { globalThis.cancelBrowserImport = true; });
 		await dialog.getByRole('button', { name: 'From a bookmarks HTML file…', exact: true }).click();
-		await expect(dialog.getByRole('heading', { name: 'Your browser. Right at home.' })).toBeVisible();
+		await expect(dialog.getByRole('heading', { name: 'Import browser data', exact: true })).toBeVisible();
 		await page.keyboard.press('Escape');
 		await expect(dialog).toHaveCount(0);
 		await expect(manager.getByRole('tab', { name: 'Imported session', exact: true })).toBeVisible();
@@ -552,15 +565,17 @@ test.describe('browser integration', () => {
 		const search = manager.getByRole('combobox', { name: 'Search the web or enter a URL', exact: true });
 		await search.fill('Previously visited');
 		await expect(manager.getByRole('option').filter({ hasText: 'Previously visited page' })).toContainText('History');
-		await page.reload();
-		await expect(manager.locator('textarea.cleanSlate-chat-input').first()).toBeVisible();
+		await command(page, 'Developer: Reload Window');
+		await expect(manager).toBeVisible({ timeout: 60_000 });
+		await expect(manager.locator('.cleanSlate-agent-manager-startup-loading')).toBeHidden();
 		await manager.getByRole('button', { name: 'New browser tab', exact: true }).click();
 		await expect(manager.locator('.cleanSlate-browser-bookmarks summary').first()).toContainText('Bookmarks (2)');
 		await expect(manager.getByRole('tab', { name: 'Imported guide', exact: true })).toBeVisible();
 		await manager.getByRole('button', { name: 'Close Imported guide', exact: true }).click();
 		await expect(manager.getByRole('tab', { name: 'Imported guide', exact: true })).toHaveCount(0);
 		await command(page, 'Developer: Reload Window');
-		await expect(manager.locator('textarea.cleanSlate-chat-input').first()).toBeVisible();
+		await expect(manager).toBeVisible({ timeout: 60_000 });
+		await expect(manager.locator('.cleanSlate-agent-manager-startup-loading')).toBeHidden();
 		await manager.getByRole('button', { name: 'New browser tab', exact: true }).click();
 		await expect(manager.getByRole('tab', { name: 'Imported guide', exact: true })).toHaveCount(0);
 	});
@@ -570,15 +585,18 @@ test.describe('browser integration', () => {
 		const manager = await openManager(page);
 		await manager.getByRole('button', { name: 'New browser tab', exact: true }).click();
 		await manager.getByRole('button', { name: 'Import browser data…', exact: true }).click();
-		await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+		const dialog = page.getByRole('dialog', { name: 'Import browser data', exact: true });
+		await expect(dialog.getByRole('button', { name: 'Continue', exact: true })).toBeEnabled();
+		await dialog.getByRole('button', { name: 'Close import', exact: true }).click();
+		await expect(dialog).toHaveCount(0);
 		await manager.getByRole('button', { name: 'Settings', exact: true }).click();
 		await page.locator('.cleanSlate-settings-nav-item[data-section=browser]').click();
 		const settings = page.locator('.cleanSlate-browser-settings');
-		await expect(settings).toContainText('CleanSlate is not your default browser.');
-		await settings.getByRole('button', { name: 'Make default browser', exact: true }).click();
+		await expect(settings).toContainText('CleanSlate works best as your default browser.');
+		await settings.getByRole('button', { name: 'Set as Default', exact: true }).click();
 		await expect(settings).toContainText('CleanSlate is your default browser.');
 		expect(await app.evaluate(() => globalThis.defaultBrowserSchemes)).toEqual(['http', 'https']);
-		await expect(settings.getByRole('button', { name: 'Make default browser', exact: true })).toBeDisabled();
+		await expect(settings.getByRole('button', { name: 'Set as Default', exact: true })).toBeHidden();
 	});
 
 	test('opens external web links in browser tabs without treating web query parameters as app commands', async ({ page, app }) => {
@@ -645,14 +663,15 @@ test('provider setup, streaming, cancellation and provider error recovery work t
 		await page.locator('.cleanSlate-settings-nav-item[data-section="models"]').click();
 		await page.locator('.cleanSlate-settings-row').filter({ hasText: /^Provider/ }).locator('.cleanSlate-select').click();
 		await page.locator('.cleanSlate-select-option').filter({ hasText: 'Custom API' }).click();
+		const saveSetting = async (input, value) => {
+			await input.fill(value);
+			await input.evaluate(async input => { await input.onchange(new Event('change')); });
+		};
 		const rows = page.locator('.cleanSlate-settings-row');
-		await rows.filter({ hasText: /^Model/ }).locator('input').fill('qa-canary');
-		await rows.filter({ hasText: /^Model/ }).locator('input').blur();
-		await rows.filter({ hasText: 'Base URL' }).locator('input').fill(`http://127.0.0.1:${server.address().port}/v1`);
-		await rows.filter({ hasText: 'Base URL' }).locator('input').blur();
+		await saveSetting(rows.filter({ hasText: /^Model/ }).locator('input'), 'qa-canary');
+		await saveSetting(rows.filter({ hasText: 'Base URL' }).locator('input'), `http://127.0.0.1:${server.address().port}/v1`);
 		await page.locator('.cleanSlate-settings-nav-item[data-section="apiKeys"]').click();
-		await page.getByPlaceholder('Optional API key', { exact: true }).fill('qa-fake-key');
-		await page.getByPlaceholder('Optional API key', { exact: true }).blur();
+		await saveSetting(page.getByPlaceholder('Optional API key', { exact: true }), 'qa-fake-key');
 		await page.getByRole('button', { name: 'Back to app', exact: true }).click();
 		const input = manager.locator('textarea.cleanSlate-chat-input').first();
 		const sidebarThreads = manager.locator('button.cleanSlate-agent-manager-session');
@@ -702,14 +721,15 @@ test.describe('browser import discovery', () => {
 		await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(900, 720));
 		await manager.getByRole('button', { name: 'Import browser data…', exact: true }).click();
 		const dialog = page.getByRole('dialog', { name: 'Import browser data', exact: true });
-		await expect(dialog).toContainText('No supported profiles found');
+		await expect(dialog).toContainText('No browser profiles found');
 		await expect(dialog.getByRole('combobox')).toHaveCount(0);
 		await expect(dialog.getByRole('button', { name: 'Choose a profile folder…' })).toBeInViewport();
-		await expect(dialog.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled();
+		await expect(dialog.getByRole('button', { name: 'Continue', exact: true })).toHaveCount(0);
 		await testInfo.attach('import-empty-narrow', { body: await page.screenshot({ animations: 'disabled' }), contentType: 'image/png' });
 		await dialog.getByRole('button', { name: 'Choose a profile folder…' }).click();
-		await expect(dialog.getByRole('button', { name: /custom-profile/ })).toBeVisible();
-		await dialog.getByRole('button', { name: /custom-profile/ }).click();
+		const source = dialog.locator('.cs-import-source');
+		await expect(source).toHaveCount(1);
+		await source.click();
 		await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
 		await expect(dialog.getByRole('checkbox', { name: /^Bookmarks and folders/ })).toBeChecked();
 		await expect(dialog).toContainText('Open tabs');
@@ -727,10 +747,12 @@ test.describe('browser profiles with missing categories', () => {
 		await manager.getByRole('button', { name: 'Import browser data…', exact: true }).click();
 		const dialog = page.getByRole('dialog', { name: 'Import browser data', exact: true });
 		for (const heading of ['Your data is ready', 'Everything is already here']) {
-			await dialog.getByRole('button', { name: /Example Navigator/ }).click();
+			await dialog.getByRole('button', { name: 'Example Navigator', exact: true }).click();
 			await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
-			await dialog.locator('.cs-import-profiles summary').click();
-			await expect(dialog.getByRole('checkbox', { name: 'Personal', exact: true })).toBeChecked();
+			await dialog.getByRole('button', { name: '2 profiles selected', exact: true }).click();
+			const profiles = dialog.getByRole('dialog', { name: 'Import from Example Navigator', exact: true });
+			await expect(profiles.getByRole('checkbox', { name: 'Personal', exact: true })).toBeChecked();
+			await profiles.getByRole('button', { name: 'Done', exact: true }).click();
 			await expect(dialog).toContainText('Available in 1 of 2 selected profiles.');
 			await dialog.getByRole('button', { name: 'Import', exact: true }).click();
 			await expect(dialog.getByRole('heading', { name: heading, exact: true })).toBeVisible();

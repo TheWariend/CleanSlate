@@ -28,7 +28,7 @@ test('Node language commands return symbols, definitions and references', async 
 			URI.file(usageFile),
 			new Position(2, 18)
 		);
-		assert.equal(definitions.some(location => location.uri.fsPath === definitionFile), true);
+		assert.equal(definitions.some(location => location.uri.fsPath === URI.file(definitionFile).fsPath), true);
 
 		const references = await commands.executeCommand(
 			'_executeReferenceProvider',

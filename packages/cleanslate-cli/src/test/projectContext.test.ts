@@ -25,7 +25,7 @@ test('project context loads instructions and safe @mentioned workspace files', (
 		assert.match(value, /Always verify changes/);
 		assert.match(value, /export const app/);
 		assert.doesNotMatch(value, /secret outside context/);
-		assert.deepEqual(context.inventory('inspect @src/app.ts').mentionedFiles, ['src/app.ts']);
+		assert.deepEqual(context.inventory('inspect @src/app.ts').mentionedFiles, [path.join('src', 'app.ts')]);
 		assert.deepEqual(context.imageAttachments('inspect @screen.png').map(item => item.path), ['screen.png']);
 		assert.match(context.imageAttachments('inspect @screen.png')[0]?.dataUrl ?? '', /^data:image\/png;base64,/);
 	} finally {

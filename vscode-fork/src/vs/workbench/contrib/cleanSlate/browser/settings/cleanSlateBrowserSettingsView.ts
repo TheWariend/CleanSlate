@@ -7,15 +7,14 @@ import * as dom from '../../../../../base/browser/dom.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { Disposable, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
-import { INativeHostService } from '../../../../../platform/native/common/native.js';
-import { IBrowserImportSource, IDefaultBrowserState } from '../../../../../platform/native/common/browserIntegration.js';
+import { IBrowserImportSource, IDefaultBrowserState, IBrowserIntegrationHost } from '../../../../../platform/native/common/browserIntegration.js';
 import { IStorageService } from '../../../../../platform/storage/common/storage.js';
 import { localize } from '../../../../../nls.js';
 import { CLEANSLATE_ACTION_BUTTON_STYLES, createCleanSlateActionButton } from '../cleanSlateActionButton.js';
 import { CleanSlateBrowserImportDialog } from './cleanSlateBrowserImportDialog.js';
 
 export interface ICleanSlateBrowserSettingsServices {
-	readonly nativeHost: Pick<INativeHostService, 'getDefaultBrowserState' | 'setAsDefaultBrowser' | 'getBrowserImportSources' | 'importBrowserData' | 'chooseBrowserImportFolder' | 'importBrowserBookmarksHTML'>;
+	readonly nativeHost: IBrowserIntegrationHost;
 	readonly storage: IStorageService;
 	readonly startBrowsing?: () => void;
 }

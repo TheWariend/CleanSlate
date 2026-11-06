@@ -10,6 +10,8 @@ import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { Event } from '../../../../base/common/event.js';
+import { INativeHostService } from '../../../../platform/native/common/native.js';
+import { IBrowserIntegrationHost } from '../../../../platform/native/common/browserIntegration.js';
 
 export class BrowserViewWorkbenchService implements IBrowserViewWorkbenchService {
 	declare readonly _serviceBrand: undefined;
@@ -20,10 +22,15 @@ export class BrowserViewWorkbenchService implements IBrowserViewWorkbenchService
 	constructor(
 		@IMainProcessService mainProcessService: IMainProcessService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
-		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService
+		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
+		@INativeHostService private readonly nativeHostService: INativeHostService
 	) {
 		const channel = mainProcessService.getChannel(ipcBrowserViewChannelName);
 		this._browserViewService = ProxyChannel.toService<IBrowserViewService>(channel);
+	}
+
+	get browserIntegration(): IBrowserIntegrationHost {
+		return this.nativeHostService;
 	}
 
 	async getOrCreateBrowserViewModel(id: string, sessionGroupId?: string): Promise<IBrowserViewModel> {

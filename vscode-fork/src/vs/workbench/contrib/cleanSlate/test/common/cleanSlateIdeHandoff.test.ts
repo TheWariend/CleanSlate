@@ -286,7 +286,7 @@ function createPair() {
 		Object.assign(provider, {
 			externalHostCalls: new Map(), externalQuestions: new Map(), externalRuns: new Map(), handoffs: new Map(),
 			providerId: surface, surface, running, activeSessionId: 'chat', activeSessionRevision: 0,
-			sessions: new Map(), sideChats: new Map(), sideChatRenderers: new Map(),
+			sessions: new Map(), sideChats: new Map(), browserChats: new Map(), sideChatRenderers: new Map(),
 			hostedChildren: new Map(), hostedChildSequences: new Map(),
 			deletedSessionIds: new Set(), pendingLiveSyncSessions: new Map(),
 			pendingHostedSubmissions: new Map(), publishedRunningSessions: new Map(), hostedApprovals: new Map(), hostedUpdateVersions: new Map(),
@@ -318,7 +318,7 @@ function createPair() {
 			agent: {
 				messages: [{ role: 'assistant', content: 'Native conversation in progress' }],
 				restoreRuntimeSnapshot(snapshot: any) { this.messages = snapshot.messages; },
-				setSessionId() { }, setAgentDefinition() { }, restoreHostedArtifacts() { }
+				setSessionId() { }, setAgentDefinition() { }, restoreHostedArtifacts() { }, releaseAttachedBrowserPageContext() { }
 			},
 			controller: {
 				abortCount: 0, getIsGenerating: () => generating,

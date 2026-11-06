@@ -6,7 +6,7 @@
 import { localize } from '../../../../../nls.js';
 import { externalAgentDisplayText } from '@cleanslate/sdk/externalAgents/externalAgentPresentation.js';
 import type { ICleanSlatePersistedSession, ICleanSlatePersistedThreadMessage } from '../../../../services/cleanSlate/common/core/cleanSlateAI.js';
-import { deriveCleanSlateTranscriptFromHistory, normalizeCleanSlateSessionExecutionState, type ICleanSlateSessionMessage, type ICleanSlateSessionSnapshot, type ICleanSlateTranscriptMessage } from '../chat/types/cleanSlateChatSessionTypes.js';
+import { deriveCleanSlateTranscriptFromHistory, isCleanSlateBrowserChatSession, normalizeCleanSlateSessionExecutionState, type ICleanSlateSessionMessage, type ICleanSlateSessionSnapshot, type ICleanSlateTranscriptMessage } from '../chat/types/cleanSlateChatSessionTypes.js';
 
 export class CleanSlateAgentManagerSessionMapper {
 	/** Transcript hydration and title freshness are independent. */
@@ -21,7 +21,7 @@ export class CleanSlateAgentManagerSessionMapper {
 	}
 
 	toSessionSnapshot(session: ICleanSlatePersistedSession | undefined): ICleanSlateSessionSnapshot | undefined {
-		if (!session || typeof session.id !== 'string') {
+		if (!session || isCleanSlateBrowserChatSession(session) || typeof session.id !== 'string') {
 			return undefined;
 		}
 		const history = Array.isArray(session.history)

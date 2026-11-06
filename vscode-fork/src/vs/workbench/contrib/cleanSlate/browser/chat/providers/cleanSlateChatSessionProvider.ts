@@ -39,10 +39,12 @@ import {
 import type { ICleanSlateCommandApprovalRequest } from '../../core/cleanSlateCommandApprovalService.js';
 import { ICleanSlateCommandApprovalService } from '../../core/cleanSlateCommandApprovalService.js';
 import {
+    CLEANSLATE_BROWSER_CHAT_WORKSPACE_ID,
     CleanSlateSessionState,
     deriveCleanSlateTranscriptFromHistory,
     ICleanSlateSessionSnapshot,
     ICleanSlateTranscriptMessage,
+    isCleanSlateBrowserChatSession,
     isCleanSlateSessionState,
     normalizeCleanSlateSessionExecutionState
 } from '../types/cleanSlateChatSessionTypes.js';
@@ -521,7 +523,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 			return this.activeBrowserChatId!;
 		}
 		const session = this.createLiveSession(undefined, false, 'low', {
-			workspaceId: 'browser-chat', projectRoot: '', workDir: '', workspaceName: '', title: 'Browser chat'
+			workspaceId: CLEANSLATE_BROWSER_CHAT_WORKSPACE_ID, projectRoot: '', workDir: '', workspaceName: '', title: 'Browser chat'
 		}, undefined, true);
 		session.sideChatKind = 'browser';
 		this.browserChats.set(session.id, session);
@@ -597,7 +599,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 		if (this.browserChats.has(id)) { return; }
 		const snapshot = this.browserConversations.get(id)!.snapshot;
 		const session = this.createLiveSession(id, false, snapshot.reasoningLevel, {
-			workspaceId: 'browser-chat', projectRoot: '', workDir: '', workspaceName: '', title: snapshot.title, createdAt: snapshot.createdAt
+			workspaceId: CLEANSLATE_BROWSER_CHAT_WORKSPACE_ID, projectRoot: '', workDir: '', workspaceName: '', title: snapshot.title, createdAt: snapshot.createdAt
 		}, snapshot.externalAgent, true);
 		session.sideChatKind = 'browser';
 		// Restore only this browser conversation. Never use project snapshot fallbacks.
@@ -910,6 +912,9 @@ export class CleanSlateChatSessionProvider extends Disposable {
 	}
 
     restoreSession(session: ICleanSlateSessionSnapshot, live?: ICleanSlateThreadSessionUpdate['live']): void {
+        // Browser history is restored only through selectBrowserChat/materializeBrowserChat.
+        // Registering it here would turn it into an IDE/task runtime and persist that copy.
+        if (isCleanSlateBrowserChatSession(session)) { return; }
         this.deletedSessionIds.delete(session.id);
         let liveSession = this.sessions.get(session.id);
         if (!liveSession) {
@@ -1519,6 +1524,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
     }
 
     private applyPublishedThreadSession(update: ICleanSlateThreadSessionUpdate): void {
+        if (isCleanSlateBrowserChatSession(update.session)) { return; }
 		if (update.originId === 'external-history-import') {
 			forgetCleanSlateDeletedSessionId(this.storageService, this.deletedSessionIds, update.session.id);
 			if (this.surface !== 'agentManager') {
@@ -2480,6 +2486,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
         try {
             const parsed = JSON.parse(raw);
             if (!parsed
+                || isCleanSlateBrowserChatSession(parsed)
                 || !Array.isArray(parsed.history)
                 || typeof parsed.id !== 'string'
                 || typeof parsed.title !== 'string'
@@ -2731,6 +2738,7 @@ export class CleanSlateChatSessionProvider extends Disposable {
 
     private fromPersistedSession(session: ICleanSlatePersistedSession | undefined): ICleanSlateSessionSnapshot | undefined {
         if (!session
+            || isCleanSlateBrowserChatSession(session)
             || typeof session.id !== 'string'
             || typeof session.title !== 'string'
             || typeof session.savedAt !== 'number'

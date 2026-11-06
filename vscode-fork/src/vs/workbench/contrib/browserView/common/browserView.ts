@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { IBrowserIntegrationHost } from '../../../../platform/native/common/browserIntegration.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, IDisposable } from '../../../../base/common/lifecycle.js';
@@ -54,6 +55,7 @@ export const IBrowserViewWorkbenchService = createDecorator<IBrowserViewWorkbenc
  */
 export interface IBrowserViewWorkbenchService {
 	readonly _serviceBrand: undefined;
+	readonly browserIntegration: IBrowserIntegrationHost;
 
 	/**
 	 * Get or create a browser view model for the given ID

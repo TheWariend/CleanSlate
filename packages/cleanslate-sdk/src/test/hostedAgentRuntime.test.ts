@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { Emitter } from '../core/event.js';
 import { CleanSlateHostedAgentRuntime, type HostedAgentRuntime } from '../node/cleanSlateHostedAgentRuntime.js';
 import type { CleanSlateStreamPart } from '../agent/cleanSlateAgentTypes.js';
@@ -254,7 +254,7 @@ test('hosted projection preserves the Exploring tools disclosure UX', async () =
 		assert.equal(timeline[0].searchCount, 1);
 		assert.equal(timeline[0].fileCount, 1);
 		assert.deepEqual(timeline[0].details, ['Explored Agent', 'Read app.ts #4-8']);
-		assert.equal(timeline[0].detailMetadata[1].path, '/workspace/src/app.ts');
+		assert.equal(timeline[0].detailMetadata[1].path, resolve('/workspace', 'src/app.ts'));
 		assert.equal(timeline[0].isStreaming, false);
 	} finally { host.dispose(); }
 });
