@@ -9,6 +9,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { CancellationToken } from '../core/cancellation.js';
 import { Emitter, Event } from '../core/event.js';
+import { terminateWindowsProcessTree } from './cleanSlateNodeProcessTree.js';
 import {
 	ICleanSlateBackgroundCommandOptions,
 	ICleanSlateBackgroundCommandResult,
@@ -154,12 +155,14 @@ export class CleanSlateNodeCommandService {
 					message: `Command timed out after ${timeoutMs}ms.`,
 					durationMs: Date.now() - startedAt
 				});
-				this.terminateProcess(child);
-				hardTimeout = setTimeout(() => finish({
-					success: false,
-					status: 'timeout',
-					error: `Command timed out after ${timeoutMs}ms.`
-				}), CleanSlateNodeCommandService.FORCE_KILL_GRACE_MS);
+				void this.terminateProcess(child).then(stopped => {
+					if (resolved) { return; }
+					hardTimeout = setTimeout(() => finish({
+						success: false,
+						status: 'timeout',
+						error: `Command timed out after ${timeoutMs}ms.${stopped ? '' : ' Could not terminate its process tree.'}`
+					}), stopped ? CleanSlateNodeCommandService.FORCE_KILL_GRACE_MS : 0);
+				});
 			}, timeoutMs);
 
 			runningStatusTimer = setInterval(() => {
@@ -237,7 +240,7 @@ export class CleanSlateNodeCommandService {
 					if (resolved) {
 						return;
 					}
-					this.terminateProcess(child);
+					void this.terminateProcess(child);
 					finish({ success: false, status: 'failed', error: 'Command was cancelled.' });
 				};
 				if (signal.aborted) {
@@ -315,7 +318,9 @@ export class CleanSlateNodeCommandService {
 		if (!session) {
 			return { success: false, processId: id, stopped: false, error: `Background command "${id}" was not found.` };
 		}
-		this.terminateProcess(session.child);
+		if (!await this.terminateProcess(session.child)) {
+			return { success: false, processId: id, stopped: false, error: `Could not terminate background command ${id}. Its process tree is still tracked; retry stopping it.` };
+		}
 		this.backgroundCommands.delete(id);
 		return { success: true, processId: id, stopped: true, message: `Stopped background command ${id}.` };
 	}
@@ -345,7 +350,7 @@ export class CleanSlateNodeCommandService {
 
 	dispose(): void {
 		for (const session of this.backgroundCommands.values()) {
-			this.terminateProcess(session.child);
+			void this.terminateProcess(session.child);
 		}
 		this.backgroundCommands.clear();
 	}
@@ -407,20 +412,14 @@ export class CleanSlateNodeCommandService {
 			: combined.slice(combined.length - CleanSlateNodeCommandService.MAX_CAPTURE_CHARS);
 	}
 
-	private terminateProcess(child: cp.ChildProcessWithoutNullStreams): void {
+	private async terminateProcess(child: cp.ChildProcessWithoutNullStreams): Promise<boolean> {
 		if (child.killed) {
-			return;
+			return true;
 		}
 		// cmd.exe does not forward termination to its children. Kill the whole
 		// tree so background commands cannot keep running or hold stdout open.
 		if (os.platform() === 'win32' && typeof child.pid === 'number') {
-			const taskkill = path.join(process.env['SystemRoot'] || 'C:\\Windows', 'System32', 'taskkill.exe');
-			const killer = cp.spawn(taskkill, ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-			const fallback = () => { try { child.kill(); } catch { /* The process may already be gone. */ } };
-			killer.on('error', fallback);
-			killer.on('exit', code => { if (code !== 0) { fallback(); } });
-			killer.unref();
-			return;
+			return terminateWindowsProcessTree(child.pid);
 		}
 		const kill = (signal: NodeJS.Signals) => {
 			if (os.platform() !== 'win32' && typeof child.pid === 'number') {
@@ -445,8 +444,9 @@ export class CleanSlateNodeCommandService {
 				}
 			}, CleanSlateNodeCommandService.FORCE_KILL_GRACE_MS);
 			forceKillTimer.unref();
-		} catch {
-			// Nothing useful to do if the OS rejects the signal.
+			return true;
+		} catch (error) {
+			return (error as NodeJS.ErrnoException).code === 'ESRCH';
 		}
 	}
 
