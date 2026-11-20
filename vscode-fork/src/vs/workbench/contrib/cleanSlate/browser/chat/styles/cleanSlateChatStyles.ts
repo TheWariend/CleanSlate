@@ -5,8 +5,10 @@
 
 import { mainWindow } from '../../../../../../base/browser/window.js';
 import { CLEANSLATE_ACTION_BUTTON_STYLES } from '../../cleanSlateActionButton.js';
+import { CLEANSLATE_THEME_STYLES } from '../../cleanSlateTheme.js';
 
 export const CLEANSLATE_CHAT_STYLES = `
+
 			${CLEANSLATE_ACTION_BUTTON_STYLES}
 			/* CleanSlate Chat Styles */
 			.cleanSlate-chat-view {
@@ -143,7 +145,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 
             .cleanSlate-code-widget {
                 margin: 8px 0;
-                border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.12));
+                border: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 12%, transparent));
                 border-radius: 8px;
                 overflow: hidden;
                 background: var(--vscode-editorWidget-background, #1e1e1e);
@@ -157,8 +159,8 @@ export const CLEANSLATE_CHAT_STYLES = `
                 font-size: 11px;
                 font-family: var(--vscode-editor-font-family);
                 color: var(--vscode-descriptionForeground);
-                background: rgba(255, 255, 255, 0.04);
-                border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.12));
+                background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+                border-bottom: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 12%, transparent));
                 user-select: none;
             }
 
@@ -579,7 +581,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 				color: var(--vscode-foreground);
 				box-shadow:
 					0 4px 14px rgba(0, 0, 0, 0.18),
-					inset 0 1px 0 color-mix(in srgb, white 5%, transparent);
+					inset 0 1px 0 color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
 				-webkit-backdrop-filter: blur(12px);
 				backdrop-filter: blur(12px);
 				cursor: pointer;
@@ -609,7 +611,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 				background: color-mix(in srgb, var(--vscode-sideBar-background) 93%, var(--vscode-foreground) 7%);
 				box-shadow:
 					0 7px 18px rgba(0, 0, 0, 0.22),
-					inset 0 1px 0 color-mix(in srgb, white 7%, transparent);
+					inset 0 1px 0 color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
 				transform: translate(-50%, -2px) scale(1.035);
 			}
 
@@ -658,7 +660,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 
 				.cleanSlate-chat-input-container {
 					padding: 4px 6px 10px;
-					background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--vscode-sideBar-background) 94%, black 6%));
+					background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--vscode-sideBar-background) 94%, var(--vscode-foreground) 6%));
 					position: relative;
 					display: flex;
 				flex-direction: column;
@@ -734,8 +736,8 @@ export const CLEANSLATE_CHAT_STYLES = `
 	            }
 
 				.cleanSlate-chat-view .cleanSlate-input-box {
-					background: var(--vscode-input-background, #202020);
-					border: none !important;
+					background: var(--vscode-input-background);
+					border: 1px solid var(--vscode-input-border, var(--vscode-contrastBorder, transparent));
 				border-radius: 12px;
 				padding: 6px 14px;
 				outline: none !important;
@@ -748,13 +750,15 @@ export const CLEANSLATE_CHAT_STYLES = `
 			}
 
 			.cleanSlate-chat-view .cleanSlate-input-box:focus-within {
-				outline: none !important;
+				outline: 1px solid var(--vscode-focusBorder) !important;
 				box-shadow: none !important;
-			}
+
+                outline-offset: -1px;
+}
 
             .cleanSlate-chat-view .cleanSlate-input-box.drag-over {
                 border-color: var(--vscode-focusBorder, #3d87fb) !important;
-                background: rgba(61, 135, 251, 0.06);
+                background: color-mix(in srgb, var(--vscode-focusBorder) 8%, var(--vscode-input-background));
             }
 
             .cleanSlate-planning-question {
@@ -763,7 +767,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 gap: 10px;
                 padding: 10px 0 12px;
                 margin-bottom: 4px;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+                border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
             }
 
             .cleanSlate-planning-question.visible {
@@ -804,7 +808,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 
             .cleanSlate-planning-question-close:hover {
                 color: var(--vscode-foreground);
-                background: rgba(255, 255, 255, 0.06);
+                background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
             }
 
             .cleanSlate-planning-question-options {
@@ -832,12 +836,12 @@ export const CLEANSLATE_CHAT_STYLES = `
 
             .cleanSlate-planning-question-option:hover {
                 color: var(--vscode-foreground);
-                background: rgba(255, 255, 255, 0.05);
+                background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
             }
 
             .cleanSlate-planning-question-option.selected {
                 color: var(--vscode-foreground);
-                background: rgba(255, 255, 255, 0.08);
+                background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
             }
 
             .cleanSlate-planning-question-index {
@@ -908,10 +912,10 @@ export const CLEANSLATE_CHAT_STYLES = `
             .cleanSlate-planning-question-dismiss kbd {
                 min-width: 34px;
                 padding: 3px 8px;
-                border: 1px solid rgba(255, 255, 255, 0.1);
+                border: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
                 border-radius: 8px;
                 color: var(--vscode-foreground);
-                background: rgba(255, 255, 255, 0.08);
+                background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
                 font-family: var(--vscode-font-family);
                 font-size: 12px;
                 font-weight: 700;
@@ -935,7 +939,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 gap: 10px;
                 padding: 8px 0 10px;
                 margin-bottom: 4px;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+                border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
             }
 
             .cleanSlate-plan-approval.visible {
@@ -975,7 +979,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 
             .cleanSlate-plan-approval-close:hover {
                 color: var(--vscode-foreground);
-                background: rgba(255, 255, 255, 0.06);
+                background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
             }
 
             .cleanSlate-plan-approval-options {
@@ -1003,12 +1007,12 @@ export const CLEANSLATE_CHAT_STYLES = `
 
             .cleanSlate-plan-approval-option:hover {
                 color: var(--vscode-foreground);
-                background: rgba(255, 255, 255, 0.05);
+                background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
             }
 
             .cleanSlate-plan-approval-option.selected {
                 color: var(--vscode-foreground);
-                background: rgba(255, 255, 255, 0.08);
+                background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
             }
 
             .cleanSlate-plan-approval-index {
@@ -1063,10 +1067,10 @@ export const CLEANSLATE_CHAT_STYLES = `
             .cleanSlate-plan-approval-dismiss kbd {
                 min-width: 34px;
                 padding: 3px 8px;
-                border: 1px solid rgba(255, 255, 255, 0.1);
+                border: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
                 border-radius: 8px;
                 color: var(--vscode-foreground);
-                background: rgba(255, 255, 255, 0.08);
+                background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
                 font-family: var(--vscode-font-family);
                 font-size: 12px;
                 font-weight: 700;
@@ -1093,12 +1097,14 @@ export const CLEANSLATE_CHAT_STYLES = `
                 gap: 7px;
                 padding: 10px;
                 margin: 0 0 4px;
-                border: 1px solid rgba(255, 255, 255, 0.12);
+                border: 1px solid var(--cleanSlate-border);
                 border-radius: 12px;
-                background: #2b2b2b;
+                background: var(--cleanSlate-surface);
                 box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
                 outline: none;
-            }
+
+                color: var(--vscode-foreground);
+}
 
             .cleanSlate-command-approval.visible {
                 display: flex;
@@ -1114,7 +1120,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 
             .cleanSlate-command-approval-title {
                 min-width: 0;
-                color: #f4f4f4;
+                color: var(--vscode-foreground);
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
@@ -1132,7 +1138,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 padding: 8px 70px 8px 10px;
                 border: none;
                 border-radius: 8px;
-                background: #252525;
+                background: var(--cleanSlate-terminal-background);
                 box-sizing: border-box;
                 overflow: hidden;
             }
@@ -1149,14 +1155,14 @@ export const CLEANSLATE_CHAT_STYLES = `
                 height: 100%;
                 overflow: auto;
                 overflow-wrap: anywhere;
-                color: #a9a9a9;
+                color: var(--cleanSlate-terminal-foreground);
                 background: transparent;
                 font-family: var(--vscode-editor-font-family);
                 font-size: 12px;
                 line-height: 1.35;
                 white-space: pre-wrap;
                 scrollbar-width: thin;
-                scrollbar-color: rgba(122, 122, 122, 0.65) #0b0b0b;
+                scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
             }
 
             .cleanSlate-command-approval-command-text::-webkit-scrollbar {
@@ -1165,17 +1171,17 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             .cleanSlate-command-approval-command-text::-webkit-scrollbar-track {
-                background: #0b0b0b;
+                background: transparent;
             }
 
             .cleanSlate-command-approval-command-text::-webkit-scrollbar-thumb {
-                background: rgba(122, 122, 122, 0.65);
-                border: 2px solid #0b0b0b;
+                background: var(--vscode-scrollbarSlider-background);
+                border: 2px solid var(--cleanSlate-terminal-background);
                 border-radius: 999px;
             }
 
             .cleanSlate-command-approval-command-text::-webkit-scrollbar-thumb:hover {
-                background: rgba(150, 150, 150, 0.78);
+                background: var(--vscode-scrollbarSlider-hoverBackground);
             }
 
             .cleanSlate-command-approval-expand {
@@ -1184,7 +1190,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 bottom: 8px;
                 padding: 0;
                 border: none;
-                color: #a5a5a5;
+                color: var(--cleanSlate-muted);
                 background: transparent;
                 font-family: var(--vscode-font-family);
                 font-size: 12px;
@@ -1194,7 +1200,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             .cleanSlate-command-approval-expand:hover {
-                color: #f4f4f4;
+                color: var(--vscode-foreground);
             }
 
             .cleanSlate-command-approval-cwd {
@@ -1202,7 +1208,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
-                color: #a0a0a0;
+                color: var(--cleanSlate-muted);
                 font-size: 11px;
                 line-height: 1.2;
                 margin-top: -3px;
@@ -1228,7 +1234,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 padding: 0 8px 0 4px;
                 border: none;
                 border-radius: 14px;
-                color: #a0a0a0;
+                color: var(--cleanSlate-muted);
                 background: transparent;
                 font-family: var(--vscode-font-family);
                 text-align: left;
@@ -1236,13 +1242,13 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             .cleanSlate-command-approval-option:hover {
-                color: #f4f4f4;
-                background: rgba(255, 255, 255, 0.05);
+                color: var(--vscode-foreground);
+                background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
             }
 
             .cleanSlate-command-approval-option.selected {
-                color: #ffffff;
-                background: #3a3a3a;
+                color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+                background: var(--vscode-list-activeSelectionBackground, var(--vscode-editor-background));
             }
 
             .cleanSlate-command-approval-index {
@@ -1251,18 +1257,18 @@ export const CLEANSLATE_CHAT_STYLES = `
                 justify-content: center;
                 width: 19px;
                 height: 19px;
-                border: 1px solid rgba(255, 255, 255, 0.14);
+                border: 1px solid color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
                 border-radius: 50%;
-                color: #8f8f8f;
+                color: var(--cleanSlate-muted);
                 font-size: 11px;
                 font-variant-numeric: tabular-nums;
                 box-sizing: border-box;
             }
 
             .cleanSlate-command-approval-option.selected .cleanSlate-command-approval-index {
-                border-color: #ffffff;
-                color: #2b2b2b;
-                background: #ffffff;
+                border-color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+                color: var(--vscode-list-activeSelectionBackground, var(--vscode-editor-background));
+                background: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
             }
 
             .cleanSlate-command-approval-label {
@@ -1280,7 +1286,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 gap: 2px;
                 min-width: 24px;
                 justify-content: flex-end;
-                color: #8e8e8e;
+                color: var(--cleanSlate-muted);
                 opacity: 0;
             }
 
@@ -1289,19 +1295,24 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             .cleanSlate-command-approval-option[data-choice="cancel"] {
-                color: #9f9f9f;
+                color: var(--cleanSlate-muted);
+            }
+
+            .cleanSlate-command-approval-option[data-choice="cancel"].selected,
+            .cleanSlate-command-approval-option.selected .cleanSlate-command-approval-indicator {
+                color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
             }
 
             .cleanSlate-command-approval-option[data-choice="cancel"] .cleanSlate-command-approval-index {
-                border-color: rgba(255, 255, 255, 0.12);
-                color: #8e8e8e;
-                background: rgba(255, 255, 255, 0.04);
+                border-color: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+                color: var(--cleanSlate-muted);
+                background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
             }
 
             .cleanSlate-command-approval-option[data-choice="cancel"].selected .cleanSlate-command-approval-index {
-                border-color: #ffffff;
-                color: #2b2b2b;
-                background: #ffffff;
+                border-color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+                color: var(--vscode-list-activeSelectionBackground, var(--vscode-editor-background));
+                background: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
             }
 
             .cleanSlate-command-approval-footer {
@@ -1326,17 +1337,21 @@ export const CLEANSLATE_CHAT_STYLES = `
                 font-weight: 500;
                 cursor: pointer;
                 white-space: nowrap;
-            }
+
+                color: var(--vscode-button-foreground);
+
+                background: var(--vscode-button-background);
+}
 
             .cleanSlate-command-approval-submit {
-                color: #2c2c2c;
-                background: #f7f7f7;
+                color: var(--vscode-button-foreground);
+                background: var(--vscode-button-background);
                 min-height: 26px;
                 padding: 0 6px 0 11px;
             }
 
             .cleanSlate-command-approval-submit:hover {
-                background: #ffffff;
+                background: var(--vscode-button-hoverBackground);
             }
 
             .cleanSlate-command-approval-submit .cleanSlate-command-approval-return {
@@ -1347,8 +1362,8 @@ export const CLEANSLATE_CHAT_STYLES = `
                 height: 19px;
                 padding: 0 6px;
                 border-radius: 999px;
-                color: #4b4b4b;
-                background: #e6e6e6;
+                color: var(--vscode-button-foreground);
+                background: color-mix(in srgb, var(--vscode-button-foreground) 14%, transparent);
                 font-size: 10px;
                 line-height: 1;
             }
@@ -1386,10 +1401,6 @@ export const CLEANSLATE_CHAT_STYLES = `
 				outline: none !important;
 				border: none !important;
 				box-shadow: none !important;
-			}
-
-			.cleanSlate-chat-view *:focus {
-				outline: none !important;
 			}
 
 			.cleanSlate-input-footer {
@@ -1555,7 +1566,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             .cleanSlate-edit-mode-chip.full-access,
             .cleanSlate-edit-mode-overlay .edit-mode-option.full-access,
             .cleanSlate-edit-mode-overlay .edit-mode-option.full-access .edit-mode-option-label,
-            .cleanSlate-edit-mode-overlay .edit-mode-option.full-access .edit-mode-option-description { color: #f58a45; }
+            .cleanSlate-edit-mode-overlay .edit-mode-option.full-access .edit-mode-option-description { color: var(--cleanSlate-warning); }
             .cleanSlate-edit-mode-chip:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
             .cleanSlate-edit-mode-chip .approval-mode-icon { font-size: 15px; flex: 0 0 auto; }
             @container (max-width: 560px) {
@@ -1592,7 +1603,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 
             .cleanSlate-dropdown.photo-button:hover {
                 opacity: 1;
-                background: rgba(255, 255, 255, 0.05);
+                background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
             }
 
             .cleanSlate-context-window-button {
@@ -1618,7 +1629,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 border-radius: 50%;
                 background: conic-gradient(
                     var(--vscode-progressBar-background, var(--vscode-focusBorder)) var(--cleanSlate-context-window-used),
-                    var(--vscode-disabledForeground, rgba(255, 255, 255, 0.28)) 0
+                    var(--vscode-disabledForeground, color-mix(in srgb, var(--vscode-foreground) 28%, transparent)) 0
                 );
                 opacity: 0.92;
             }
@@ -1755,7 +1766,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 			.cleanSlate-send-button {
 				width: 28px;
 				height: 28px;
-				background: rgba(255, 255, 255, 0.06);
+				background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
 				color: var(--vscode-foreground);
 				border-radius: 50%;
 				cursor: pointer;
@@ -1777,11 +1788,11 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
 			.cleanSlate-send-button:hover {
-				background: rgba(255, 255, 255, 0.12);
+				background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
 			}
 
             .cleanSlate-send-button:active {
-                background: rgba(255, 255, 255, 0.16);
+                background: color-mix(in srgb, var(--vscode-foreground) 16%, transparent);
             }
 
             .cleanSlate-primary-button.approve-btn {
@@ -1820,13 +1831,13 @@ export const CLEANSLATE_CHAT_STYLES = `
 			.cleanSlate-primary-button:hover {
 				background: var(--vscode-button-hoverBackground);
 			}
-			
+
 			.cleanSlate-primary-button.premium-blue {
 				background: var(--vscode-button-background, #0078D4);
 				color: var(--vscode-button-foreground, #ffffff);
 				border: none;
 			}
-			
+
 			.cleanSlate-primary-button.premium-blue:hover {
 				background: var(--vscode-button-hoverBackground, #106ebe);
 			}
@@ -1834,7 +1845,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 			.cleanSlate-text-button {
 				background: transparent;
 				color: var(--vscode-descriptionForeground);
-				border: 1px solid rgba(255, 255, 255, 0.1);
+				border: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
 				border-radius: 4px;
 				padding: 4px 10px;
 				cursor: pointer;
@@ -1843,28 +1854,28 @@ export const CLEANSLATE_CHAT_STYLES = `
 			}
 
 			.cleanSlate-text-button:hover {
-				background: rgba(255, 255, 255, 0.05);
+				background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
 				color: var(--vscode-foreground);
 			}
 
             .cleanSlate-primary-button.apply-btn, .cleanSlate-primary-button.accept-btn {
-                background: linear-gradient(135deg, #34A853, #2E7D32);
-                color: white;
+                background: var(--vscode-button-background);
+                color: var(--vscode-button-foreground);
             }
 
             .cleanSlate-primary-button.apply-btn:hover, .cleanSlate-primary-button.accept-btn:hover {
-                background: linear-gradient(135deg, #3dbd5e, #34A853);
+                background: var(--vscode-button-hoverBackground);
             }
 
             .cleanSlate-primary-button.reject-btn {
-                background: rgba(255, 255, 255, 0.05);
-                color: rgba(255, 255, 255, 0.8);
-                border: 1px solid rgba(255, 255, 255, 0.1);
+                background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+                color: color-mix(in srgb, var(--vscode-foreground) 80%, transparent);
+                border: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
             }
 
             .cleanSlate-primary-button.reject-btn:hover {
-                background: rgba(255, 255, 255, 0.1);
-                color: #fff;
+                background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+                color: var(--vscode-foreground);
             }
 
 			.cleanSlate-chat-message-row {
@@ -1970,8 +1981,8 @@ export const CLEANSLATE_CHAT_STYLES = `
 			}
 
             .cleanSlate-quota-card {
-                background-color: rgba(30, 30, 30, 0.4);
-                border: 1px solid rgba(255, 255, 255, 0.08);
+                background-color: var(--cleanSlate-surface);
+                border: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
                 border-radius: 10px;
                 width: 100%;
                 max-width: 760px;
@@ -1988,18 +1999,18 @@ export const CLEANSLATE_CHAT_STYLES = `
                 display: flex;
                 align-items: center;
                 gap: 8px;
-                color: #fff;
+                color: var(--vscode-foreground);
                 font-weight: 600;
                 font-size: 13px;
             }
 
             .cleanSlate-quota-header i {
-                color: rgba(255, 255, 255, 0.85);
+                color: color-mix(in srgb, var(--vscode-foreground) 85%, transparent);
                 font-size: 14px;
             }
 
             .cleanSlate-quota-body {
-                color: rgba(255, 255, 255, 0.6);
+                color: color-mix(in srgb, var(--vscode-foreground) 60%, transparent);
                 font-size: 12px;
                 line-height: 1.4;
             }
@@ -2092,16 +2103,16 @@ export const CLEANSLATE_CHAT_STYLES = `
 				justify-content: space-between;
 				align-items: center;
 				padding: 8px 14px;
-				background: rgba(255, 255, 255, 0.03);
-				border: 1px solid rgba(255, 255, 255, 0.07);
+				background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
+				border: 1px solid color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
 				border-radius: 8px;
 				margin-bottom: 6px;
 				transition: background 0.2s, border-color 0.2s;
 			}
 
 			.cleanSlate-file-row:hover {
-				background: rgba(255, 255, 255, 0.06);
-				border-color: rgba(255, 255, 255, 0.15);
+				background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+				border-color: color-mix(in srgb, var(--vscode-foreground) 15%, transparent);
 			}
 
 			.file-status-group {
@@ -2166,11 +2177,11 @@ export const CLEANSLATE_CHAT_STYLES = `
 			}
 
 			.stat-added {
-				color: #4CAF50;
+				color: var(--cleanSlate-success);
 			}
 
 			.stat-deleted {
-				color: #F44336;
+				color: var(--cleanSlate-error);
 			}
 
 			.file-markers {
@@ -2183,8 +2194,8 @@ export const CLEANSLATE_CHAT_STYLES = `
 
 			.cleanSlate-code-block {
 				margin-top: 12px;
-				background-color: #1e1e1e;
-				border: 1px solid #333;
+				background-color: var(--cleanSlate-surface);
+				border: 1px solid var(--cleanSlate-border);
 				border-radius: 6px;
 				padding: 12px;
 				overflow-x: auto;
@@ -2225,7 +2236,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 			}
 
 			.cleanSlate-finish-changes-card {
-				border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.12));
+				border: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 12%, transparent));
 				border-radius: 8px;
 				overflow: hidden;
 				background: var(--vscode-editorWidget-background);
@@ -2243,8 +2254,8 @@ export const CLEANSLATE_CHAT_STYLES = `
 				color: var(--vscode-foreground);
 				user-select: none;
 				list-style: none;
-				border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.12));
-				background: rgba(255, 255, 255, 0.03);
+				border-bottom: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 12%, transparent));
+				background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
 			}
 
 			.cleanSlate-finish-changes-title {
@@ -2268,7 +2279,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 			}
 
 			.cleanSlate-finish-file-diff {
-				border-top: 1px solid rgba(255, 255, 255, 0.06);
+				border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
 			}
 
 			.cleanSlate-finish-file-diff:first-child {
@@ -2296,7 +2307,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 			}
 
 			.cleanSlate-finish-file-row:hover {
-				background: rgba(255, 255, 255, 0.03);
+				background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
 			}
 
 			.cleanSlate-finish-file-row:disabled {
@@ -2333,7 +2344,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             .cleanSlate-file-diff-editor {
 				width: 100%;
 				background: var(--vscode-editor-background);
-				border-top: 1px solid rgba(255, 255, 255, 0.06);
+				border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
 				overflow: hidden;
 			}
 
@@ -2372,7 +2383,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 
 			.cleanSlate-finish-more-row:hover {
 				color: var(--vscode-foreground);
-				background: rgba(255, 255, 255, 0.03);
+				background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
 			}
 
 			.cleanSlate-timeline-file {
@@ -2380,15 +2391,15 @@ export const CLEANSLATE_CHAT_STYLES = `
 				align-items: center;
 				gap: 10px;
 				padding: 8px 12px;
-				background: rgba(255, 255, 255, 0.03);
-				border: 1px solid rgba(255, 255, 255, 0.07);
+				background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
+				border: 1px solid color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
 				border-radius: 8px;
 				font-size: 13px;
 				transition: background 0.2s;
 			}
 
 			.cleanSlate-timeline-file:hover {
-				background: rgba(255, 255, 255, 0.06);
+				background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
 			}
 
 			.cleanSlate-timeline-file .file-icon {
@@ -2412,8 +2423,8 @@ export const CLEANSLATE_CHAT_STYLES = `
 				text-transform: uppercase;
 				padding: 1px 4px;
 				border-radius: 3px;
-				background: rgba(255, 255, 255, 0.05);
-				color: rgba(255, 255, 255, 0.6);
+				background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+				color: color-mix(in srgb, var(--vscode-foreground) 60%, transparent);
 			}
 
 			.cleanSlate-timeline-file .file-stats {
@@ -2545,7 +2556,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 				box-sizing: border-box;
 				min-width: 0;
 				background: var(--cleanSlate-terminal-surface);
-				border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.18));
+				border: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 18%, transparent));
 				border-radius: 10px;
 				margin: 8px 0 0;
 				display: flex;
@@ -2736,7 +2747,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 			}
 
 			.cleanSlate-tool-activity-status {
-				color: var(--vscode-disabledForeground, rgba(255, 255, 255, 0.38));
+				color: var(--vscode-disabledForeground, color-mix(in srgb, var(--vscode-foreground) 38%, transparent));
 				font-size: inherit;
 				line-height: inherit;
 				align-self: center;
@@ -2802,7 +2813,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 				font-weight: 600;
 				padding: 1px 5px;
 				border-radius: 4px;
-				border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+				border: 1px solid var(--cleanSlate-border);
 			}
 
 			.cleanSlate-message-content .rendered-markdown {
@@ -2932,7 +2943,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 background: var(--vscode-menu-background, rgba(24, 24, 24, 0.96));
                 backdrop-filter: blur(28px) saturate(180%);
                 -webkit-backdrop-filter: blur(28px) saturate(180%);
-                border: 1px solid var(--vscode-widget-border, var(--vscode-menu-border, rgba(255, 255, 255, 0.14)));
+                border: 1px solid var(--vscode-widget-border, var(--vscode-menu-border, color-mix(in srgb, var(--vscode-foreground) 14%, transparent)));
                 border-radius: 9px;
                 box-shadow: 0 18px 48px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.45));
                 color: var(--vscode-menu-foreground, var(--vscode-foreground));
@@ -3006,13 +3017,13 @@ export const CLEANSLATE_CHAT_STYLES = `
                 background: transparent;
             }
             .cleanSlate-history-list::-webkit-scrollbar-thumb {
-                background: #000000;
+                background: var(--vscode-scrollbarSlider-background);
                 border: 3px solid transparent;
                 background-clip: padding-box;
                 border-radius: 10px;
             }
             .cleanSlate-history-list::-webkit-scrollbar-thumb:hover {
-                background: #111111;
+                background: var(--vscode-scrollbarSlider-hoverBackground);
             }
 
             .cleanSlate-history-section {
@@ -3042,11 +3053,11 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             .cleanSlate-history-item:hover {
-                background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08));
+                background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--vscode-foreground) 8%, transparent));
             }
 
             .cleanSlate-history-item.active {
-                background: var(--vscode-list-activeSelectionBackground, rgba(255, 255, 255, 0.13));
+                background: var(--vscode-list-activeSelectionBackground, color-mix(in srgb, var(--vscode-foreground) 13%, transparent));
             }
 
             .cleanSlate-history-active-indicator {
@@ -3109,8 +3120,8 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             .cleanSlate-history-delete-btn:hover {
-                background: rgba(239, 68, 68, 0.22);
-                color: #EF4444;
+                background: color-mix(in srgb, var(--cleanSlate-error) 15%, transparent);
+                color: var(--cleanSlate-error);
             }
 
             .cleanSlate-history-delete-btn i {
@@ -3298,9 +3309,9 @@ export const CLEANSLATE_CHAT_STYLES = `
                 max-width: 100%;
                 height: 24px;
                 padding: 3px 8px;
-                border: 1px solid var(--vscode-input-border, rgba(255,255,255,.16));
+                border: 1px solid var(--vscode-input-border, color-mix(in srgb, var(--vscode-foreground) 16%, transparent));
                 border-radius: 6px;
-                background: color-mix(in srgb, var(--vscode-button-secondaryBackground, rgba(255,255,255,.08)) 86%, transparent);
+                background: color-mix(in srgb, var(--vscode-button-secondaryBackground, color-mix(in srgb, var(--vscode-foreground) 8%, transparent)) 86%, transparent);
                 color: var(--vscode-foreground);
                 font-size: 12px;
                 line-height: 16px;
@@ -3549,7 +3560,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 left: 0;
                 right: 0;
                 bottom: 0;
-                background: rgba(30, 30, 30, 0.7);
+                background: var(--cleanSlate-surface);
                 backdrop-filter: blur(12px);
                 -webkit-backdrop-filter: blur(12px);
                 display: none;
@@ -3576,7 +3587,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             .loading-spinner {
                 width: 40px;
                 height: 40px;
-                border: 3px solid rgba(255, 255, 255, 0.1);
+                border: 3px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
                 border-top-color: var(--vscode-progressBar-background, #0078d4);
                 border-radius: 50%;
                 animation: cleanSlate-spin 1s cubic-bezier(0.5, 0.1, 0.4, 0.9) infinite;
@@ -3585,13 +3596,13 @@ export const CLEANSLATE_CHAT_STYLES = `
             .loading-text {
                 font-size: 18px;
                 font-weight: 600;
-                color: #fff;
+                color: var(--vscode-foreground);
                 letter-spacing: -0.02em;
             }
 
             .loading-subtext {
                 font-size: 13px;
-                color: rgba(255, 255, 255, 0.5);
+                color: color-mix(in srgb, var(--vscode-foreground) 50%, transparent);
                 max-width: 240px;
                 line-height: 1.5;
             }
@@ -3717,7 +3728,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 max-width: 760px;
                 margin: 8px 0;
                 padding: 1px;
-                background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
+                background: linear-gradient(135deg, color-mix(in srgb, var(--vscode-foreground) 8%, transparent), color-mix(in srgb, var(--vscode-foreground) 4%, transparent));
                 border-radius: 2px;
                 position: relative;
                 overflow: hidden;
@@ -3728,7 +3739,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             .cleanSlate-system-confirmation-inner {
-                background: rgba(25, 25, 25, 0.85);
+                background: var(--cleanSlate-surface);
                 backdrop-filter: blur(20px);
                 -webkit-backdrop-filter: blur(20px);
                 border-radius: 1px;
@@ -3736,7 +3747,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 display: flex;
                 flex-direction: column;
                 gap: 8px;
-                border: 1px solid rgba(255, 255, 255, 0.06);
+                border: 1px solid color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
             }
 
             .cleanSlate-system-confirmation-header {
@@ -3751,21 +3762,21 @@ export const CLEANSLATE_CHAT_STYLES = `
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                color: #4EC9B0;
+                color: var(--cleanSlate-success);
                 font-size: 14px;
             }
 
             .cleanSlate-system-confirmation-title {
                 font-size: 13px;
                 font-weight: 600;
-                color: #fff;
+                color: var(--vscode-foreground);
                 letter-spacing: -0.01em;
             }
 
             .cleanSlate-system-confirmation-body {
                 font-size: 12px;
                 line-height: 1.5;
-                color: rgba(255, 255, 255, 0.7);
+                color: color-mix(in srgb, var(--vscode-foreground) 70%, transparent);
             }
 
             .cleanSlate-system-confirmation-glow {
@@ -3893,7 +3904,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             .cleanSlate-primary-button.premium-blue:hover {
-                background: #106ebe;
+                background: var(--vscode-button-hoverBackground);
             }
             .cleanSlate-primary-button.premium-blue:active { transform: scale(0.98); }
 
@@ -3904,7 +3915,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             .file-diff-icon {
-                color: #D18435;
+                color: var(--cleanSlate-warning);
                 font-size: 11px;
                 opacity: 0.9;
             }
@@ -3917,8 +3928,8 @@ export const CLEANSLATE_CHAT_STYLES = `
                 font-weight: 700;
             }
 
-            .stat-added { color: #4EC9B0; }
-            .stat-deleted { color: #F44747; }
+            .stat-added { color: var(--cleanSlate-success); }
+            .stat-deleted { color: var(--cleanSlate-error); }
 
             .file-diff-name {
                 color: var(--vscode-foreground);
@@ -3948,7 +3959,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 
             .cleanSlate-file-row:hover {
                 background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
-                border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+                border: 1px solid var(--cleanSlate-border);
             }
 
             .cleanSlate-file-row .cleanSlate-file-icon {
@@ -4090,7 +4101,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 z-index: 40;
                 min-width: 180px;
                 padding: 4px;
-                border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
+                border: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 10%, transparent));
                 border-radius: 10px;
                 background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
                 color: var(--vscode-menu-foreground, var(--vscode-foreground));
@@ -4440,11 +4451,11 @@ export const CLEANSLATE_CHAT_STYLES = `
                 align-items: center;
                 gap: 3px;
                 margin-left: 7px;
-                color: #D18435;
+                color: var(--cleanSlate-warning);
                 font-size: 10px;
                 font-weight: 400;
                 padding: 0 4px;
-                background: rgba(209, 132, 53, 0.1);
+                background: color-mix(in srgb, var(--cleanSlate-warning) 10%, transparent);
                 border-radius: 4px;
             }
 
@@ -4785,11 +4796,11 @@ export const CLEANSLATE_CHAT_STYLES = `
 
             /* The visual card — unified border so header + body share one outline */
             .cleanSlate-plan-dropup-card {
-                border: 1px solid rgba(255, 255, 255, 0.09);
+                border: 1px solid color-mix(in srgb, var(--vscode-foreground) 9%, transparent);
                 border-radius: 10px;
                 overflow: hidden;
                 box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
-                background: #1a1a1a;
+                background: var(--cleanSlate-surface);
             }
 
             .cleanSlate-plan-dropup.visible {
@@ -4810,18 +4821,18 @@ export const CLEANSLATE_CHAT_STYLES = `
                 background: transparent;
                 cursor: pointer;
                 user-select: none;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+                border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
                 transition: background 0.15s;
                 min-width: 0;
             }
 
             .cleanSlate-plan-dropup-header:hover {
-                background: #222;
+                background: var(--cleanSlate-surface);
             }
 
             .cleanSlate-plan-dropup-header.all-done {
-                background: rgba(52, 168, 83, 0.08);
-                border-color: rgba(52, 168, 83, 0.18);
+                background: color-mix(in srgb, var(--cleanSlate-success) 8%, transparent);
+                border-color: color-mix(in srgb, var(--cleanSlate-success) 30%, transparent);
             }
 
             .plan-dropup-header-left {
@@ -4841,7 +4852,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             .plan-dropup-title {
                 font-size: 12px;
                 font-weight: 600;
-                color: rgba(255, 255, 255, 0.85);
+                color: color-mix(in srgb, var(--vscode-foreground) 85%, transparent);
                 white-space: nowrap;
                 letter-spacing: 0.01em;
             }
@@ -4850,7 +4861,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             .plan-dropup-progress-track {
                 flex: 1;
                 height: 4px;
-                background: rgba(255, 255, 255, 0.08);
+                background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
                 border-radius: 999px;
                 overflow: hidden;
                 min-width: 40px;
@@ -4873,7 +4884,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 background: transparent;
                 border: none;
                 cursor: pointer;
-                color: rgba(255, 255, 255, 0.4);
+                color: color-mix(in srgb, var(--vscode-foreground) 40%, transparent);
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -4883,7 +4894,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             .plan-dropup-chevron:hover {
-                color: rgba(255, 255, 255, 0.8);
+                color: color-mix(in srgb, var(--vscode-foreground) 80%, transparent);
             }
 
             .plan-dropup-chevron .codicon {
@@ -4930,17 +4941,17 @@ export const CLEANSLATE_CHAT_STYLES = `
                 gap: 10px;
                 padding: 5px 14px;
                 font-size: 12.5px;
-                color: rgba(255, 255, 255, 0.75);
+                color: color-mix(in srgb, var(--vscode-foreground) 75%, transparent);
                 transition: background 0.12s;
                 min-width: 0;
             }
 
             .plan-dropup-item:hover {
-                background: rgba(255, 255, 255, 0.03);
+                background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
             }
 
             .plan-dropup-item.active {
-                background: rgba(0, 120, 212, 0.06);
+                background: color-mix(in srgb, var(--vscode-focusBorder) 8%, transparent);
             }
 
             .plan-dropup-item.done {
@@ -5007,7 +5018,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
-                color: var(--vscode-disabledForeground, rgba(255, 255, 255, 0.38));
+                color: var(--vscode-disabledForeground, color-mix(in srgb, var(--vscode-foreground) 38%, transparent));
                 font-size: 12px;
                 transition: opacity 0.18s ease;
             }
@@ -5021,7 +5032,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 overflow: hidden;
                 height: 1px;
                 margin: 0 0 12px;
-                background: var(--vscode-widget-border, rgba(255, 255, 255, 0.16));
+                background: var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 16%, transparent));
             }
 
             .cleanSlate-web-activity.is-running .cleanSlate-web-activity-rule::after {
@@ -5111,7 +5122,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
-                color: var(--vscode-disabledForeground, rgba(255, 255, 255, 0.38));
+                color: var(--vscode-disabledForeground, color-mix(in srgb, var(--vscode-foreground) 38%, transparent));
                 font-size: 12px;
                 transition: opacity 0.18s ease;
             }
@@ -5124,7 +5135,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 height: 22px;
                 border-radius: 50%;
                 overflow: hidden;
-                border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+                border: 1px solid var(--cleanSlate-border);
                 background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
                 color: var(--vscode-descriptionForeground);
                 font-size: 11px;
@@ -5219,7 +5230,7 @@ export const CLEANSLATE_CHAT_STYLES = `
 
             .cleanSlate-browser-block {
                 border: none;
-                border-top: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.08));
+                border-top: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 8%, transparent));
                 background: transparent;
                 border-radius: 0;
                 overflow: hidden;
@@ -5262,7 +5273,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             .cleanSlate-browser-group {
-                border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.12));
+                border: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 12%, transparent));
                 background: color-mix(in srgb, var(--vscode-editorWidget-background, #252526) 76%, transparent);
                 border-radius: 8px;
                 overflow: hidden;
@@ -5344,7 +5355,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             .cleanSlate-browser-group-body {
-                border-top: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.08));
+                border-top: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 8%, transparent));
                 padding: 0;
             }
 
@@ -5440,7 +5451,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             .cleanSlate-browser-block[open] .cleanSlate-browser-header {
-                border-bottom-color: var(--vscode-widget-border, rgba(255, 255, 255, 0.08));
+                border-bottom-color: var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 8%, transparent));
             }
 
             .cleanSlate-browser-body {
@@ -5479,7 +5490,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             .cleanSlate-browser-dom-index {
-                color: var(--vscode-disabledForeground, rgba(255, 255, 255, 0.36));
+                color: var(--vscode-disabledForeground, color-mix(in srgb, var(--vscode-foreground) 36%, transparent));
                 font-family: var(--vscode-editor-font-family, monospace);
                 font-size: 11px;
                 line-height: 18px;
@@ -5490,7 +5501,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             .cleanSlate-browser-dom-tag {
                 min-width: 42px;
                 padding: 1px 6px;
-                border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+                border: 1px solid var(--cleanSlate-border);
                 border-radius: 5px;
                 color: color-mix(in srgb, var(--vscode-foreground) 76%, transparent);
                 background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
@@ -5512,7 +5523,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             .cleanSlate-browser-dom-text .is-empty {
-                color: var(--vscode-disabledForeground, rgba(255, 255, 255, 0.36));
+                color: var(--vscode-disabledForeground, color-mix(in srgb, var(--vscode-foreground) 36%, transparent));
                 font-style: italic;
             }
 
@@ -5567,7 +5578,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             .cleanSlate-browser-shot {
                 margin: 0;
                 min-width: 0;
-                border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.08));
+                border: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 8%, transparent));
                 border-radius: 6px;
                 overflow: hidden;
                 background: var(--vscode-editor-background);
@@ -5578,7 +5589,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 width: 100%;
                 height: 128px;
                 object-fit: contain;
-                background: #111;
+                background: var(--cleanSlate-surface);
             }
 
             .cleanSlate-browser-shot-unavailable {
@@ -5589,7 +5600,7 @@ export const CLEANSLATE_CHAT_STYLES = `
                 padding: 12px;
                 box-sizing: border-box;
                 color: var(--vscode-descriptionForeground);
-                background: #111;
+                background: var(--cleanSlate-surface);
                 font-size: 12px;
                 text-align: center;
             }
@@ -5652,6 +5663,8 @@ export const CLEANSLATE_CHAT_STYLES = `
             .cleanSlate-message-content .rendered-markdown h2 { font-size: 1.3em; }
             .cleanSlate-message-content .rendered-markdown h3 { font-size: 1.12em; }
             .cleanSlate-message-content .rendered-markdown h4 { font-size: 1em; }
+
+		${CLEANSLATE_THEME_STYLES}
 `;
 
 export function ensureCleanSlateChatStyles(container: HTMLElement): void {

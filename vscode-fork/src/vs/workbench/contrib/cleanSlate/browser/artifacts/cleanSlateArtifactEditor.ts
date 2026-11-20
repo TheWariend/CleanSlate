@@ -17,6 +17,7 @@ import { IMarkdownRendererService } from '../../../../../platform/markdown/brows
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { IDisposable, dispose } from '../../../../../base/common/lifecycle.js';
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
+import { CLEANSLATE_THEME_STYLES } from '../cleanSlateTheme.js';
 
 export class CleanSlateArtifactEditor extends EditorPane {
 
@@ -78,6 +79,7 @@ export class CleanSlateArtifactEditor extends EditorPane {
     private injectStyles(): void {
         const style = dom.$('style');
         style.textContent = `
+            ${CLEANSLATE_THEME_STYLES}
             .cleanSlate-artifact-editor {
                 color: var(--vscode-editor-foreground, var(--vscode-foreground));
             }
@@ -267,29 +269,29 @@ export class CleanSlateArtifactEditor extends EditorPane {
                 color: inherit !important;
             }
             .artifact-alert-important {
-                background: rgba(186, 58, 58, 0.1);
-                border-color: rgba(186, 58, 58, 0.2);
-                color: #ff8a8a;
+                background: color-mix(in srgb, var(--cleanSlate-error) 8%, var(--vscode-editor-background));
+                border-color: var(--vscode-contrastBorder, var(--cleanSlate-error));
+                color: var(--cleanSlate-error);
             }
             .artifact-alert-note {
-                background: rgba(58, 134, 255, 0.1);
-                border-color: rgba(58, 134, 255, 0.2);
-                color: #8ac2ff;
+                background: color-mix(in srgb, var(--cleanSlate-info) 8%, var(--vscode-editor-background));
+                border-color: var(--vscode-contrastBorder, var(--cleanSlate-info));
+                color: var(--cleanSlate-info);
             }
             .artifact-alert-warning {
-                background: rgba(255, 186, 58, 0.1);
-                border-color: rgba(255, 186, 58, 0.2);
-                color: #ffd98a;
+                background: color-mix(in srgb, var(--cleanSlate-warning) 8%, var(--vscode-editor-background));
+                border-color: var(--vscode-contrastBorder, var(--cleanSlate-warning));
+                color: var(--cleanSlate-warning);
             }
             .artifact-alert-tip {
-                background: rgba(58, 255, 134, 0.1);
-                border-color: rgba(58, 255, 134, 0.2);
-                color: #8affad;
+                background: color-mix(in srgb, var(--cleanSlate-success) 8%, var(--vscode-editor-background));
+                border-color: var(--vscode-contrastBorder, var(--cleanSlate-success));
+                color: var(--cleanSlate-success);
             }
             .artifact-alert-caution {
-                background: rgba(255, 58, 58, 0.15);
-                border-color: rgba(255, 58, 58, 0.3);
-                color: #ff7070;
+                background: color-mix(in srgb, var(--cleanSlate-error) 8%, var(--vscode-editor-background));
+                border-color: var(--vscode-contrastBorder, var(--cleanSlate-error));
+                color: var(--cleanSlate-error);
             }
             .cleanSlate-artifact-editor pre {
                 background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background));

@@ -59,6 +59,9 @@ export class InlineCleanSlateWidget extends Disposable implements IOverlayWidget
 		container.style.boxShadow = 'none';
 		container.style.padding = '0';
 
+		const focusStyle = dom.append(this.domNode, dom.$('style'));
+		focusStyle.textContent = '.cleanSlate-preview-widget-overlay button:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }';
+
 		const styleButton = (btn: HTMLElement, type: 'accept' | 'reject') => {
 			btn.style.padding = '4px 12px';
 			btn.style.height = '26px';
@@ -73,32 +76,19 @@ export class InlineCleanSlateWidget extends Disposable implements IOverlayWidget
 			btn.style.border = 'none';
 			btn.style.transition = 'background 0.15s ease, opacity 0.15s ease';
 
-			if (type === 'accept') {
-				btn.style.background = '#2ea043';
-				btn.style.color = '#ffffff';
-			} else {
-				btn.style.background = 'rgba(248, 81, 73, 0.12)';
-				btn.style.color = '#f85149';
-				btn.style.border = '1px solid rgba(248, 81, 73, 0.3)';
-			}
+			const background = type === 'accept' ? 'var(--vscode-button-background)' : 'var(--vscode-button-secondaryBackground)';
+			const hoverBackground = type === 'accept' ? 'var(--vscode-button-hoverBackground)' : 'var(--vscode-button-secondaryHoverBackground)';
+			btn.style.background = background;
+			btn.style.color = type === 'accept' ? 'var(--vscode-button-foreground)' : 'var(--vscode-button-secondaryForeground)';
+			btn.style.border = '1px solid var(--vscode-contrastBorder, var(--vscode-button-border, transparent))';
 
-			btn.addEventListener('mouseenter', () => {
-				if (type === 'accept') {
-					btn.style.background = '#3fb950';
-				} else {
-					btn.style.background = 'rgba(248, 81, 73, 0.15)';
-					btn.style.color = '#f85149';
-				}
-			});
+			this._register(dom.addDisposableListener(btn, 'mouseenter', () => {
+				btn.style.background = hoverBackground;
+			}));
+			this._register(dom.addDisposableListener(btn, 'mouseleave', () => {
+				btn.style.background = background;
+			}));
 
-			btn.addEventListener('mouseleave', () => {
-				if (type === 'accept') {
-					btn.style.background = '#2ea043';
-				} else {
-					btn.style.background = 'rgba(248, 81, 73, 0.12)';
-					btn.style.color = '#f85149';
-				}
-			});
 		};
 
 		// Accept Changes

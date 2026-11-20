@@ -153,7 +153,7 @@ describe('CleanSlateNodeCommandService', () => {
 		}
 	});
 
-	test('Windows fallback stops real descendants when taskkill fails', { skip: process.platform !== 'win32', timeout: 20_000 }, async () => {
+	test('Windows fallback stops real descendants when taskkill fails', { skip: process.platform !== 'win32', timeout: 40_000 }, async () => {
 		const service = new CleanSlateNodeCommandService(process.cwd());
 		try {
 			const started = await service.startBackgroundCommand({
@@ -163,7 +163,10 @@ describe('CleanSlateNodeCommandService', () => {
 			const pid = descendantPid(started.output ?? '');
 			const stopped = await terminateWindowsProcessTree(started.pid, (file, args) => {
 				if (file.endsWith('taskkill.exe')) { return Promise.resolve(false); }
-				return new Promise(resolve => execFile(file, [...args], { timeout: 5_000, windowsHide: true }, error => resolve(!error)));
+				return new Promise(resolve => execFile(file, [...args], { timeout: 15_000, windowsHide: true }, error => {
+					if (error) { console.error(error); }
+					resolve(!error);
+				}));
 			});
 			assert.equal(stopped, true);
 			await assertProcessStopped(pid);

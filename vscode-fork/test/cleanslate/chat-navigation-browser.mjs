@@ -313,7 +313,7 @@ try {
 				timings.push(performance.now() - start);
 				maxHeightReads = Math.max(maxHeightReads, heightReads);
 				const visible = [...view.element.querySelectorAll('[data-clean-slate-transcript-id]')];
-				const expectedCount = version === 'current' ? 60 : history.length;
+				const expectedCount = version === 'current' ? Math.min(60, history.length) : history.length;
 				const expected = history.slice(-expectedCount).map(message => message.id);
 				if (visible.length !== expectedCount || JSON.stringify(visible.map(row => row.dataset.cleanSlateTranscriptId)) !== JSON.stringify(expected)) {
 					throw new Error('Restoration lost, duplicated or reordered the visible messages');

@@ -372,14 +372,14 @@ export class CleanSlateComposerView {
 			imageEl.style.height = '60px';
 			imageEl.style.objectFit = 'cover';
 			imageEl.style.borderRadius = '6px';
-			imageEl.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+			imageEl.style.border = '1px solid var(--cleanSlate-border)';
 
 			const removeBtn = dom.append(wrapper, dom.$('.cleanSlate-image-remove'));
 			removeBtn.style.position = 'absolute';
 			removeBtn.style.top = '-4px';
 			removeBtn.style.right = '-4px';
-			removeBtn.style.background = 'var(--vscode-editorError-foreground)';
-			removeBtn.style.color = '#fff';
+			removeBtn.style.background = 'var(--vscode-button-secondaryBackground)';
+			removeBtn.style.color = 'var(--vscode-button-secondaryForeground)';
 			removeBtn.style.borderRadius = '50%';
 			removeBtn.style.width = '16px';
 			removeBtn.style.height = '16px';
@@ -446,8 +446,8 @@ export class CleanSlateComposerView {
 			.slice(0, 5)
 			.map((annotation, index) => `@${index + 1}: ${[annotation.text, annotation.label].filter(Boolean).join(' - ')}`)
 			.join('\n');
-		chip.style.border = '1px solid var(--vscode-input-border, rgba(255,255,255,.16))';
-		chip.style.background = 'var(--vscode-button-secondaryBackground, rgba(255,255,255,.08))';
+		chip.style.border = '1px solid var(--vscode-input-border, var(--cleanSlate-border))';
+		chip.style.background = 'var(--vscode-button-secondaryBackground, var(--cleanSlate-subtle-background))';
 		chip.style.color = 'var(--vscode-button-secondaryForeground, var(--vscode-foreground))';
 		chip.style.borderRadius = '999px';
 		chip.style.padding = '4px 10px';

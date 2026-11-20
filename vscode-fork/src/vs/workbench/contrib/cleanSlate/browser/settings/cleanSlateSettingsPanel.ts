@@ -21,6 +21,7 @@ import { ICleanSlateMainService } from '../../../../services/cleanSlate/common/c
 import { FileAccess } from '../../../../../base/common/network.js';
 import { setCleanSlateProviderLogo } from '../chat/providers/cleanSlateProviderLogos.js';
 import { CLEANSLATE_ACTION_BUTTON_STYLES, createCleanSlateActionButton } from '../cleanSlateActionButton.js';
+import { CLEANSLATE_THEME_STYLES } from '../cleanSlateTheme.js';
 import { CleanSlateBrowserSettingsView, ICleanSlateBrowserSettingsServices } from './cleanSlateBrowserSettingsView.js';
 
 type FieldType = 'text' | 'password' | 'number';
@@ -143,6 +144,7 @@ export class CleanSlateSettingsPanel {
 			.cleanSlate-select { box-sizing:border-box; width:100%; height:28px; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:0 9px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, transparent); border-radius:5px; font:inherit; font-size:12px; cursor:pointer; outline:none; text-align:left; }
 			.cleanSlate-select:hover:not(.disabled) { border-color:color-mix(in srgb, var(--vscode-foreground) 22%, var(--vscode-input-border, transparent)); }
 			.cleanSlate-select.open { border-color:var(--vscode-focusBorder); }
+			.cleanSlate-select:focus-visible, .cleanSlate-select-option:focus-visible { outline:2px solid var(--vscode-focusBorder); outline-offset:-2px; }
 			.cleanSlate-select.disabled { opacity:.6; cursor:default; }
 			.cleanSlate-select-label { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 			.cleanSlate-select-chevron { flex:0 0 auto; font-size:15px; color:var(--vscode-descriptionForeground); transition:transform .15s ease; }
@@ -151,7 +153,7 @@ export class CleanSlateSettingsPanel {
 			.cleanSlate-select-option { box-sizing:border-box; width:100%; display:flex; align-items:center; gap:8px; padding:7px 9px; border:0; border-radius:7px; background:transparent; color:var(--vscode-foreground); font:inherit; font-size:13px; text-align:left; cursor:pointer; }
 			.cleanSlate-select-option + .cleanSlate-select-option { margin-top:1px; }
 			.cleanSlate-select-option:hover { background:color-mix(in srgb, var(--vscode-foreground) 9%, transparent); }
-			.cleanSlate-select-option.selected { background:color-mix(in srgb, var(--cs-accent) 18%, transparent); }
+			.cleanSlate-select-option.selected { background:var(--vscode-list-inactiveSelectionBackground); color:var(--vscode-list-inactiveSelectionForeground, var(--vscode-foreground)); outline:1px solid var(--vscode-contrastActiveBorder, transparent); outline-offset:-1px; }
 			.cleanSlate-select-option.is-credits-locked { color:var(--vscode-disabledForeground, var(--vscode-descriptionForeground)); cursor:default; }
 			.cleanSlate-select-option.is-credits-locked:hover { background:transparent; }
 			.cleanSlate-select-check { flex:0 0 auto; font-size:13px; color:var(--cs-accent); }
@@ -701,6 +703,7 @@ export class CleanSlateSettingsPanel {
 	private installAccountStyles(shell: HTMLElement): void {
 		const style = dom.append(shell, dom.$('style'));
 		style.textContent = `
+			${CLEANSLATE_THEME_STYLES}
 			${CLEANSLATE_ACTION_BUTTON_STYLES}
 			.cleanSlate-settings-panel-shell {
 				--cs-surface: color-mix(in srgb, var(--vscode-foreground) 3.5%, transparent);

@@ -152,7 +152,7 @@ export function renderCleanSlateEnvironment(body: HTMLElement, options: ICleanSl
 				loading.remove();
 				if (result) {
 					const link = row(host, result.state === 'MERGED' ? Codicon.gitMerge : result.state === 'CLOSED' ? Codicon.gitPullRequestClosed : Codicon.gitPullRequest, result.title, () => options.onOpenUrl(result.url), result.state);
-					if (result.state === 'MERGED') { link.button.style.color = '#a78bfa'; }
+					if (result.state === 'MERGED') { link.button.style.color = 'var(--vscode-charts-purple, var(--vscode-foreground))'; }
 				}
 				else { message(host, 'No pull request for this branch.'); }
 			});

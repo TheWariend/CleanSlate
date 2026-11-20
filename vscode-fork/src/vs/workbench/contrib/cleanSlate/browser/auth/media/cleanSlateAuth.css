@@ -30,7 +30,7 @@
 }
 
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-right > .action-toolbar-container .monaco-action-bar .cleanSlate-auth-titlebar-account-avatar.has-image {
-	box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+	box-shadow: inset 0 0 0 1px var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-titleBar-activeForeground) 18%, transparent));
 }
 
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-right > .action-toolbar-container .monaco-action-bar .cleanSlate-auth-titlebar-account-chevron.codicon {

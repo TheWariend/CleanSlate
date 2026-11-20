@@ -5,12 +5,14 @@
 
 import { registerThemingParticipant } from '../../../../../platform/theme/common/themeService.js';
 import { editorBackground, quickInputBackground } from '../../../../../platform/theme/common/colorRegistry.js';
+import { CLEANSLATE_THEME_STYLES } from '../cleanSlateTheme.js';
 
 registerThemingParticipant((_theme, collector) => {
 	const editorColor = _theme.getColor(editorBackground);
 	const pickerColor = _theme.getColor(quickInputBackground);
-	const pickerBackground = pickerColor && editorColor ? pickerColor.makeOpaque(editorColor).toString() : 'var(--vscode-editor-background, #252526)';
+	const pickerBackground = pickerColor && editorColor ? pickerColor.makeOpaque(editorColor).toString() : 'var(--vscode-editor-background)';
 	collector.addRule(`
+
 		.monaco-workbench {
 			--cleanSlate-workspace-canvas-radius: 12px;
 			--cleanSlate-sidebar-background: var(--vscode-sideBar-background);
@@ -37,9 +39,9 @@ registerThemingParticipant((_theme, collector) => {
 		   when the surrounding macOS workbench uses native transparent material. */
 		.monaco-workbench .quick-input-widget {
 			background-color: ${pickerBackground} !important;
-			border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, #7775));
+			border: 1px solid var(--cleanSlate-border);
 			border-radius: 12px;
-			box-shadow: 0 16px 48px rgba(0, 0, 0, .35);
+			box-shadow: 0 16px 48px var(--vscode-widget-shadow);
 			overflow: hidden;
 		}
 
@@ -86,7 +88,7 @@ registerThemingParticipant((_theme, collector) => {
 				--cleanSlate-agent-manager-row-border: var(--vscode-contrastBorder, var(--vscode-panel-border));
 				--cleanSlate-agent-manager-subtle-bg: var(--vscode-toolbar-hoverBackground);
 				--cleanSlate-agent-manager-hover-bg: var(--vscode-list-hoverBackground);
-				--cleanSlate-agent-manager-border: var(--vscode-panel-border);
+				--cleanSlate-agent-manager-border: var(--cleanSlate-border);
 					--cleanSlate-agent-manager-border-strong: var(--vscode-focusBorder);
 					--cleanSlate-agent-manager-text: var(--vscode-foreground);
 					/* Actually softer than full foreground — chat titles sit one tier
@@ -111,37 +113,6 @@ registerThemingParticipant((_theme, collector) => {
 				overflow: hidden;
 			}
 
-		/* Reveal the native macOS sidebar material through every covering layer. */
-		body:has(.monaco-workbench.mac:not(.web)),
-		.monaco-workbench.mac:not(.web) {
-			background: transparent !important;
-		}
-
-		.monaco-workbench.mac:not(.web) {
-			--cleanSlate-sidebar-background: color-mix(in srgb, var(--vscode-sideBar-background) 20%, transparent);
-		}
-
-		.monaco-workbench.mac:not(.web).cleanSlate-agent-manager-host-active > .cleanSlate-agent-manager-surface {
-			background: transparent;
-		}
-
-		.monaco-workbench.mac:not(.web) .part.sidebar,
-		.monaco-workbench.mac:not(.web) .part.activitybar,
-		.monaco-workbench.mac:not(.web) .part.titlebar {
-			/* These parts also apply opaque theme colors as inline styles. */
-			background-color: var(--cleanSlate-sidebar-background) !important;
-		}
-
-		.monaco-workbench.mac:not(.web).cleanSlate-agent-manager-host-active .cleanSlate-agent-manager-integrated-titlebar-main {
-			background: transparent;
-		}
-
-		@media (prefers-reduced-transparency: reduce) {
-			.monaco-workbench.mac:not(.web) {
-				--cleanSlate-sidebar-background: var(--vscode-sideBar-background);
-			}
-		}
-
 		.cleanSlate-agent-manager-surface:focus,
 		.cleanSlate-agent-manager-surface:focus-visible {
 			outline: none !important;
@@ -155,8 +126,15 @@ registerThemingParticipant((_theme, collector) => {
 		.cleanSlate-agent-manager-surface button:focus-visible,
 		.cleanSlate-agent-manager-surface [role="button"]:focus,
 		.cleanSlate-agent-manager-surface [role="button"]:focus-visible {
-			outline: none !important;
 			box-shadow: none !important;
+		}
+
+		.cleanSlate-agent-manager-host-active button:focus-visible,
+		.cleanSlate-agent-manager-host-active [role="button"]:focus-visible,
+		.cleanSlate-agent-manager-surface button:focus-visible,
+		.cleanSlate-agent-manager-surface [role="button"]:focus-visible {
+			outline: 2px solid var(--vscode-focusBorder) !important;
+			outline-offset: -2px;
 		}
 
 		.cleanSlate-agent-manager-surface.integrated-titlebar {
@@ -2151,7 +2129,7 @@ registerThemingParticipant((_theme, collector) => {
 			border: 1px solid color-mix(in srgb, var(--cleanSlate-agent-manager-text) 10%, transparent);
 			border-radius: 22px;
 			background: var(--cleanSlate-agent-manager-card-bg);
-			box-shadow: 0 12px 40px #00000008, 0 2px 4px #00000005;
+			box-shadow: 0 12px 40px var(--vscode-widget-shadow);
 		}
 
 		.cleanSlate-browser-start-search:focus-within {
@@ -3397,7 +3375,7 @@ registerThemingParticipant((_theme, collector) => {
 		.agent-carousel-item[aria-selected='true'] {
 			opacity: 1;
 			transform: scale(1);
-			filter: drop-shadow(0 8px 13px rgba(0, 0, 0, .45));
+			filter: drop-shadow(0 8px 13px var(--vscode-widget-shadow));
 		}
 
 		.agent-carousel-item:disabled {
@@ -3610,5 +3588,7 @@ registerThemingParticipant((_theme, collector) => {
 				padding: 0 16px 16px;
 			}
 		}
+
+		${CLEANSLATE_THEME_STYLES}
 	`);
 });

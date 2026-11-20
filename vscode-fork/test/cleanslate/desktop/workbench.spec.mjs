@@ -185,41 +185,28 @@ test('first launch, settings navigation and returning to the chat retain the com
 	await expect(input).toHaveValue('Draft that must survive settings');
 });
 
-test('macOS sidebar exposes native material through theme changes and keeps the canvas opaque', async ({ page, app }) => {
-	test.skip(process.platform !== 'darwin', 'Native sidebar material is macOS-specific.');
-	const manager = await openManager(page);
-	await expect(manager.locator('.cleanSlate-agent-manager-startup-loading')).toBeHidden();
-	const nativeBackground = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()
-		.find(window => window.webContents.getURL().includes('workbench'))?.getBackgroundColor());
-	const layerAlphas = () => page.evaluate(() => {
-		const canvas = document.createElement('canvas');
-		canvas.width = canvas.height = 1;
-		const context = canvas.getContext('2d');
-		return Object.fromEntries(Object.entries({
-			body: 'body', workbench: '.monaco-workbench', surface: '.cleanSlate-agent-manager-surface',
-			sidebar: '.cleanSlate-agent-manager-nav', canvas: '.cleanSlate-agent-manager-main',
-		}).map(([name, selector]) => {
-			context.clearRect(0, 0, 1, 1);
-			context.fillStyle = getComputedStyle(document.querySelector(selector)).backgroundColor;
-			context.fillRect(0, 0, 1, 1);
-			return [name, context.getImageData(0, 0, 1, 1).data[3]];
-		}));
-	});
-	const expectNativeSidebar = async () => {
-		// Electron omits alpha here; renderer layers below verify their transparency.
-		await expect.poll(nativeBackground).toBe('#000000');
-		await expect.poll(layerAlphas).toEqual({ body: 0, workbench: 0, surface: 0, sidebar: 51, canvas: 255 });
-	};
-	await expectNativeSidebar();
+test('native workbench and Agent Manager surfaces follow light, dark and high contrast themes', async ({ page, app }) => {
 	const settingsPath = join(await app.evaluate(({ app }) => app.getPath('userData')), 'User/settings.json');
 	const settings = JSON.parse(await (await import('node:fs/promises')).readFile(settingsPath, 'utf8'));
-	await writeFile(settingsPath, JSON.stringify({ ...settings, 'workbench.colorTheme': 'Default Light Modern' }));
-	await expect(page.locator('.monaco-workbench')).toHaveClass(/(?:^|\s)vs(?:\s|$)/);
-	await expectNativeSidebar();
-	await page.reload();
-	await openManager(page);
-	await expect(manager.locator('.cleanSlate-agent-manager-startup-loading')).toBeHidden();
-	await expectNativeSidebar();
+	const token = id => page.locator('.monaco-workbench').evaluate((element, id) => {
+		const probe = element.appendChild(document.createElement('span'));
+		probe.style.color = `var(--vscode-${id.replaceAll('.', '-')})`;
+		const color = getComputedStyle(probe).color;
+		probe.remove();
+		return color;
+	}, id);
+	for (const [name, kind] of [['Default Dark Modern', 'vs-dark'], ['Default Light Modern', 'vs'], ['Default High Contrast', 'hc-black'], ['Default High Contrast Light', 'hc-light']]) {
+		await writeFile(settingsPath, JSON.stringify({ ...settings, 'workbench.colorTheme': name }));
+		await expect(page.locator('.monaco-workbench')).toHaveClass(new RegExp(`(?:^|\\s)${kind}(?:\\s|$)`));
+		const manager = await openManager(page);
+		await expect(manager.locator('.cleanSlate-agent-manager-startup-loading')).toBeHidden();
+		await expect(manager.locator('.cleanSlate-agent-manager-nav')).toHaveCSS('background-color', await token('sideBar.background'));
+		await expect(manager.locator('.cleanSlate-agent-manager-main')).toHaveCSS('background-color', await token('editor.background'));
+		await page.locator('.cleanSlate-agent-manager-exit').click();
+		await expect(manager).toBeHidden();
+		await expect(page.locator('.part.sidebar')).toHaveCSS('background-color', await token('sideBar.background'));
+		await expect(page.locator('.part.activitybar')).toHaveCSS('background-color', await token('activityBar.background'));
+	}
 });
 
 test('Agent Manager can return to the editor, open a file, and come back', async ({ page }, testInfo) => {
@@ -442,11 +429,19 @@ test.describe('saved browser favicons', () => {
 
 	test('older pins recover site icons and cached icons work without a network request', async ({ page, app }, testInfo) => {
 		const profile = await app.evaluate(({ app }) => app.getPath('userData'));
-		const database = new DatabaseSync(join(profile, 'User/globalStorage/state.vscdb'), { readOnly: true });
-		try {
-			const row = database.prepare('SELECT value FROM ItemTable WHERE key = ?').get('cleanSlate.browser.pinnedSites');
-			expect(row && JSON.parse(String(row.value)).length).toBe(3);
-		} finally { database.close(); }
+		// The running IDE may still hold its startup write transaction. Retry only
+		// SQLite contention; malformed data and other database failures must fail.
+		await expect.poll(() => {
+			const database = new DatabaseSync(join(profile, 'User/globalStorage/state.vscdb'), { readOnly: true });
+			try {
+				database.exec('PRAGMA busy_timeout = 1000');
+				const row = database.prepare('SELECT value FROM ItemTable WHERE key = ?').get('cleanSlate.browser.pinnedSites');
+				return row && JSON.parse(String(row.value)).length;
+			} catch (error) {
+				if (error.errcode === 5) { return undefined; } // SQLITE_BUSY
+				throw error;
+			} finally { database.close(); }
+		}, { timeout: 10_000 }).toBe(3);
 		await app.evaluate(({ BrowserWindow }, icon) => {
 			globalThis.faviconRequests = [];
 			const session = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('workbench')).webContents.session;
@@ -456,8 +451,8 @@ test.describe('saved browser favicons', () => {
 					? new Response(icon, { headers: { 'Content-Type': 'image/svg+xml' } }) : Response.error();
 			});
 		}, browserFavicon);
-		await command(page, 'Developer: Reload Window');
-		await expect(page.locator('.monaco-workbench')).toBeVisible({ timeout: 60_000 });
+		await Promise.all([page.waitForEvent('domcontentloaded'), command(page, 'Developer: Reload Window')]);
+		await expect(page.locator('.cleanSlate-agent-manager-surface')).toBeAttached({ timeout: 60_000 });
 		const manager = await openManager(page);
 		await manager.getByRole('button', { name: 'New browser tab', exact: true }).click();
 		for (const title of ['Saved documentation', 'Cached bookmark']) {

@@ -494,7 +494,7 @@ MenuRegistry.appendMenuItem(MenuId.GlobalActivity, {
 registerThemingParticipant((_theme: IColorTheme, collector: ICssStyleCollector) => {
 	collector.addRule(`
 		.monaco-editor .cleanSlate-preview-original {
-			background-color: rgba(255, 0, 0, 0.2);
+			background-color: var(--vscode-diffEditor-removedTextBackground);
 			text-decoration: line-through;
 			opacity: 0.6;
 			border-radius: 2px;
@@ -502,7 +502,7 @@ registerThemingParticipant((_theme: IColorTheme, collector: ICssStyleCollector) 
 
 		/* New Text (Insertion) - Subtle Green background */
 		.monaco-editor .cleanSlate-inline-preview {
-			background-color: rgba(0, 255, 0, 0.2);
+			background-color: var(--vscode-diffEditor-insertedTextBackground);
 			color: var(--vscode-editor-foreground);
 			border-radius: 2px;
 		}

@@ -18,10 +18,10 @@ export const CLEANSLATE_ACTION_BUTTON_STYLES = `
 	.cleanSlate-action-button { display:inline-flex; align-items:center; justify-content:center; gap:4px; padding:3px 6px; font:inherit; font-size:12px; line-height:16px; cursor:pointer; white-space:nowrap; transition:background .12s ease, border-color .12s ease, opacity .12s ease; }
 	.cleanSlate-action-button .codicon { font-size:14px; }
 	.cleanSlate-action-button:disabled { opacity:.5; cursor:default; }
-	.cleanSlate-action-button.secondary { border:1px solid color-mix(in srgb, var(--vscode-foreground) 16%, transparent); border-radius:6px; background:transparent; color:var(--vscode-foreground); }
+	.cleanSlate-action-button.secondary { border:1px solid var(--vscode-button-border, var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 16%, transparent))); border-radius:6px; background:transparent; color:var(--vscode-foreground); }
 	.cleanSlate-action-button.secondary:hover:not(:disabled) { background:color-mix(in srgb, var(--vscode-foreground) 6%, transparent); }
 	.cleanSlate-action-button.secondary .codicon { color:var(--vscode-descriptionForeground); }
-	.cleanSlate-action-button.primary { border:0; border-radius:5px; background:var(--vscode-button-background); color:var(--vscode-button-foreground); }
+	.cleanSlate-action-button.primary { border:1px solid var(--vscode-button-border, transparent); border-radius:5px; background:var(--vscode-button-background); color:var(--vscode-button-foreground); }
 	.cleanSlate-action-button.primary:hover:not(:disabled) { background:var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
 	.cleanSlate-action-button.primary .codicon { color:var(--vscode-button-foreground); }
 `;

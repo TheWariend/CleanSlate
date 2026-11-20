@@ -182,9 +182,6 @@ export function defaultBrowserWindowOptions(accessor: ServicesAccessor, windowSt
 
 	if (isMacintosh) {
 		options.acceptFirstMouse = true; // enabled by default
-		// Native material shows through the transparent navigation surface.
-		options.vibrancy = 'sidebar';
-		options.backgroundColor = '#00000000';
 
 		if (windowSettings?.clickThroughInactive === false) {
 			options.acceptFirstMouse = false;

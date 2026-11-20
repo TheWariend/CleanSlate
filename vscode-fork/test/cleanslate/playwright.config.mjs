@@ -26,8 +26,9 @@ export default defineConfig({
 	},
 	expect: { timeout: 5000, toHaveScreenshot: { animations: 'disabled', maxDiffPixelRatio: 0.002 } },
 	projects: [
-		{ name: 'dark', testIgnore: /legacy\.spec/, use: { colorScheme: 'dark', viewport: { width: 1280, height: 800 } } },
-		{ name: 'light', testIgnore: /legacy\.spec/, use: { colorScheme: 'light', viewport: { width: 1280, height: 800 } } },
+		{ name: 'dark', testIgnore: /(?:legacy|themes)\.spec/, use: { colorScheme: 'dark', viewport: { width: 1280, height: 800 } } },
+		{ name: 'light', testIgnore: /(?:legacy|themes)\.spec/, use: { colorScheme: 'light', viewport: { width: 1280, height: 800 } } },
+		{ name: 'themes', testMatch: /themes\.spec/, use: { viewport: { width: 1280, height: 900 } } },
 		{ name: 'narrow', testMatch: /composer\.spec/, use: { colorScheme: 'dark', viewport: { width: 420, height: 760 } } },
 		{ name: 'legacy', testMatch: /legacy\.spec/, use: { viewport: { width: 1280, height: 800 } } },
 	],

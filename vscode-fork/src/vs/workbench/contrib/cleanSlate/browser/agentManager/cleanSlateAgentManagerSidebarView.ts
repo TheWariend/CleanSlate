@@ -63,7 +63,7 @@ export class CleanSlateAgentManagerSidebarView {
 			badge.title = `Pull request ${state.toLowerCase()}`;
 			badge.setAttribute('aria-label', badge.title);
 			badge.style.cssText = 'flex:0 0 14px;font-size:14px';
-			badge.style.color = state === 'MERGED' ? '#a78bfa' : 'var(--vscode-descriptionForeground)';
+			badge.style.color = state === 'MERGED' ? 'var(--vscode-charts-purple, var(--vscode-foreground))' : 'var(--vscode-descriptionForeground)';
 			chat.insertBefore(badge, chat.querySelector('.cleanSlate-agent-manager-session-running'));
 		}
 	}
