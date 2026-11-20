@@ -3904,7 +3904,7 @@ export const CLEANSLATE_CHAT_STYLES = `
             }
 
             .cleanSlate-primary-button.premium-blue:hover {
-                background: var(--cleanSlate-surface);
+                background: var(--vscode-button-hoverBackground);
             }
             .cleanSlate-primary-button.premium-blue:active { transform: scale(0.98); }
 

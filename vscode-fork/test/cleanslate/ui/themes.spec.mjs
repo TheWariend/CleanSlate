@@ -79,10 +79,10 @@ for (const palette of palettes) {
 		await expect(submit).toHaveCSS('color', await token('button.foreground'));
 		await expect(submit).toHaveCSS('background-color', await token('button.background'));
 		await expect(page.locator('.cleanSlate-command-approval-option.selected')).toHaveCSS('background-color', await token('list.activeSelectionBackground', 'editor.background'));
-		await expect(page.locator('.cleanSlate-command-approval-option.selected')).toHaveCSS('color', await token('list.activeSelectionForeground'));
+		await expect(page.locator('.cleanSlate-command-approval-option.selected')).toHaveCSS('color', await token('list.activeSelectionForeground', 'foreground'));
 		for (const choice of ['cancel', 'approve']) {
 			await page.locator(`.cleanSlate-command-approval-option[data-choice="${choice}"]`).click();
-			await expect(page.locator('.cleanSlate-command-approval-option.selected')).toHaveCSS('color', await token('list.activeSelectionForeground'));
+			await expect(page.locator('.cleanSlate-command-approval-option.selected')).toHaveCSS('color', await token('list.activeSelectionForeground', 'foreground'));
 			await expect(page.locator('.cleanSlate-command-approval-option.selected .cleanSlate-command-approval-index')).toHaveCSS('color', await token('list.activeSelectionBackground', 'editor.background'));
 		}
 		await submit.focus();
