@@ -155,7 +155,8 @@ try {
 		restoredView.restore([submitted, ...liveCheckpoint(liveReasoning)], undefined, true);
 		const entering = container.querySelector('.cleanSlate-timeline-block.is-entering');
 		if (!entering || getComputedStyle(entering).animationName !== 'cleanSlateBlockIn') { throw new Error('First live block skipped its entrance animation'); }
-		await new Promise(resolve => setTimeout(resolve, 250));
+		await Promise.all(entering.getAnimations().map(animation => animation.finished));
+		await new Promise(requestAnimationFrame);
 		restoredView.restore([submitted, ...liveCheckpoint(liveReasoning)], undefined, true);
 		if (container.querySelector('.cleanSlate-timeline-block') !== entering || entering.classList.contains('is-entering')) { throw new Error(`Streaming update restarted the block entrance: ${JSON.stringify({ sameNode: container.querySelector('.cleanSlate-timeline-block') === entering, animations: entering.getAnimations().map(a => ({ name: a.animationName, state: a.playState, time: a.currentTime })) })}`); }
 		restoredView.clear();
@@ -313,6 +314,7 @@ try {
 				maxHeightReads = Math.max(maxHeightReads, heightReads);
 				const visible = [...view.element.querySelectorAll('[data-clean-slate-transcript-id]')];
 				const expectedCount = version === 'current' ? Math.min(60, history.length) : history.length;
+
 				const expected = history.slice(-expectedCount).map(message => message.id);
 				if (visible.length !== expectedCount || JSON.stringify(visible.map(row => row.dataset.cleanSlateTranscriptId)) !== JSON.stringify(expected)) {
 					throw new Error('Restoration lost, duplicated or reordered the visible messages');

@@ -56,7 +56,7 @@ test('Browser chat uses the current native page, resizes smoothly and restores s
 	let logs = '';
 	let projectPrepared = false;
 	const launch = async () => {
-		app = await _electron.launch({ executablePath, args: [fork, workspace, `--user-data-dir=${profile}`, `--extensions-dir=${join(root, 'extensions')}`, '--disable-extensions', '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--no-sandbox', '--goto', join(workspace, 'editor-secret.txt')],
+		app = await _electron.launch({ executablePath, args: [fork, workspace, `--user-data-dir=${profile}`, `--extensions-dir=${join(root, 'extensions')}`, '--disable-extensions', '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--no-sandbox', '--password-store=basic', '--goto', join(workspace, 'editor-secret.txt')],
 			env: { ...process.env, ELECTRON_RUN_AS_NODE: '', NODE_OPTIONS: '', VSCODE_DEV: '1', VSCODE_CLI: '1', NODE_ENV: 'development' }, timeout: 60_000 });
 		for (const stream of [app.process().stdout, app.process().stderr]) { stream?.on('data', chunk => { logs = (logs + chunk.toString()).slice(-500_000); }); }
 		page = await app.firstWindow();
