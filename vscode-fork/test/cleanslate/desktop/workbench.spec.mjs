@@ -429,11 +429,19 @@ test.describe('saved browser favicons', () => {
 
 	test('older pins recover site icons and cached icons work without a network request', async ({ page, app }, testInfo) => {
 		const profile = await app.evaluate(({ app }) => app.getPath('userData'));
-		const database = new DatabaseSync(join(profile, 'User/globalStorage/state.vscdb'), { readOnly: true });
-		try {
-			const row = database.prepare('SELECT value FROM ItemTable WHERE key = ?').get('cleanSlate.browser.pinnedSites');
-			expect(row && JSON.parse(String(row.value)).length).toBe(3);
-		} finally { database.close(); }
+		// The running IDE may still hold its startup write transaction. Retry only
+		// SQLite contention; malformed data and other database failures must fail.
+		await expect.poll(() => {
+			const database = new DatabaseSync(join(profile, 'User/globalStorage/state.vscdb'), { readOnly: true });
+			try {
+				database.exec('PRAGMA busy_timeout = 1000');
+				const row = database.prepare('SELECT value FROM ItemTable WHERE key = ?').get('cleanSlate.browser.pinnedSites');
+				return row && JSON.parse(String(row.value)).length;
+			} catch (error) {
+				if (error.errcode === 5) { return undefined; } // SQLITE_BUSY
+				throw error;
+			} finally { database.close(); }
+		}, { timeout: 10_000 }).toBe(3);
 		await app.evaluate(({ BrowserWindow }, icon) => {
 			globalThis.faviconRequests = [];
 			const session = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('workbench')).webContents.session;
@@ -443,8 +451,8 @@ test.describe('saved browser favicons', () => {
 					? new Response(icon, { headers: { 'Content-Type': 'image/svg+xml' } }) : Response.error();
 			});
 		}, browserFavicon);
-		await command(page, 'Developer: Reload Window');
-		await expect(page.locator('.monaco-workbench')).toBeVisible({ timeout: 60_000 });
+		await Promise.all([page.waitForEvent('domcontentloaded'), command(page, 'Developer: Reload Window')]);
+		await expect(page.locator('.cleanSlate-agent-manager-surface')).toBeAttached({ timeout: 60_000 });
 		const manager = await openManager(page);
 		await manager.getByRole('button', { name: 'New browser tab', exact: true }).click();
 		for (const title of ['Saved documentation', 'Cached bookmark']) {
