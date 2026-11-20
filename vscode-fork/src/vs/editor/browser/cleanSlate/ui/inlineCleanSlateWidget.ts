@@ -59,6 +59,9 @@ export class InlineCleanSlateWidget extends Disposable implements IOverlayWidget
 		container.style.boxShadow = 'none';
 		container.style.padding = '0';
 
+		const focusStyle = dom.append(this.domNode, dom.$('style'));
+		focusStyle.textContent = '.cleanSlate-preview-widget-overlay button:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }';
+
 		const styleButton = (btn: HTMLElement, type: 'accept' | 'reject') => {
 			btn.style.padding = '4px 12px';
 			btn.style.height = '26px';
@@ -85,14 +88,7 @@ export class InlineCleanSlateWidget extends Disposable implements IOverlayWidget
 			this._register(dom.addDisposableListener(btn, 'mouseleave', () => {
 				btn.style.background = background;
 			}));
-			this._register(dom.addDisposableListener(btn, 'focus', () => {
-				btn.style.outline = '2px solid var(--vscode-focusBorder)';
-				btn.style.outlineOffset = '2px';
-			}));
-			this._register(dom.addDisposableListener(btn, 'blur', () => {
-				btn.style.outline = '';
-				btn.style.outlineOffset = '';
-			}));
+
 		};
 
 		// Accept Changes

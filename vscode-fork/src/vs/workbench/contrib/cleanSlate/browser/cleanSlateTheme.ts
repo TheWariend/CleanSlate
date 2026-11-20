@@ -5,7 +5,7 @@
 
 /** Shared semantic colors; resolve again automatically whenever the workbench theme changes. */
 export const CLEANSLATE_THEME_STYLES = `
-	:root {
+	.monaco-workbench {
 		--cleanSlate-surface: var(--vscode-editorWidget-background, var(--vscode-editor-background));
 		--cleanSlate-border: var(--vscode-contrastBorder, var(--vscode-widget-border, var(--vscode-panel-border, color-mix(in srgb, var(--vscode-foreground) 18%, transparent))));
 		--cleanSlate-subtle-background: var(--vscode-toolbar-hoverBackground, color-mix(in srgb, var(--vscode-foreground) 6%, transparent));
@@ -60,7 +60,7 @@ export const CLEANSLATE_THEME_STYLES = `
 
 	:is(.hc-black, .hc-light) :is(.cleanSlate-chat-view, .cleanSlate-agent-manager-surface, .cleanSlate-settings-panel-shell)
 		:is([aria-pressed="true"], [aria-selected="true"]) {
-		outline: 1px solid var(--vscode-activeContrastBorder, var(--vscode-focusBorder));
+		outline: 1px solid var(--vscode-contrastActiveBorder, var(--vscode-focusBorder));
 		outline-offset: -1px;
 	}
 `;

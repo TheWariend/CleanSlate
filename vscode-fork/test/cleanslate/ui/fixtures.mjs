@@ -34,7 +34,7 @@ export const test = base.extend({
 					}
 					html,body,#fixture { margin:0; width:100%; height:100%; font:13px Arial,sans-serif; background:var(--vscode-editor-background); color:var(--vscode-foreground); }
 					button,input,textarea { font:inherit; } * { box-sizing:border-box; }
-					</style></head><body><div id="fixture"></div></body></html>` });
+					</style></head><body class="monaco-workbench ${colorScheme === 'light' ? 'vs' : 'vs-dark'}"><div id="fixture"></div></body></html>` });
 				return;
 			}
 			let file;

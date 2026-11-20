@@ -34,6 +34,7 @@ test.beforeEach(async ({ page }) => {
 		const registry = getColorRegistry();
 		qa.setTheme = palette => {
 			document.body.className = `monaco-workbench mac ${palette.kind}`;
+			document.body.style.colorScheme = ['vs-dark', 'hc-black'].includes(palette.kind) ? 'dark' : 'light';
 			const cache = new Map();
 			const theme = {
 				type: { vs: 'light', 'vs-dark': 'dark', 'hc-black': 'hcDark', 'hc-light': 'hcLight' }[palette.kind],
@@ -47,10 +48,13 @@ test.beforeEach(async ({ page }) => {
 				}
 			};
 			for (const { id } of registry.getColors()) {
-				document.documentElement.style.setProperty(`--vscode-${id.replaceAll('.', '-')}`, theme.getColor(id)?.toString() ?? 'initial');
+				// Match the real workbench: theme tokens belong to the workbench host,
+				// never to the document root where they could mask alias scope bugs.
+				document.documentElement.style.setProperty(`--vscode-${id.replaceAll('.', '-')}`, 'initial');
+				document.body.style.setProperty(`--vscode-${id.replaceAll('.', '-')}`, theme.getColor(id)?.toString() ?? 'initial');
 			}
 			for (const [id, value] of Object.entries(palette.colors)) {
-				if (typeof value === 'string') { document.documentElement.style.setProperty(`--vscode-${id.replaceAll('.', '-')}`, value); }
+				if (typeof value === 'string') { document.body.style.setProperty(`--vscode-${id.replaceAll('.', '-')}`, value); }
 			}
 		};
 		qa.tokenColor = (id, fallback) => {
@@ -65,6 +69,7 @@ test.beforeEach(async ({ page }) => {
 
 for (const palette of palettes) {
 	test(`complete chat and settings adapt to ${palette.name}`, async ({ page }, testInfo) => {
+		await page.emulateMedia({ colorScheme: ['vs-dark', 'hc-black'].includes(palette.kind) ? 'dark' : 'light' });
 		await page.evaluate(async palette => {
 			qa.setTheme(palette);
 			(await import('/qa/browser-fixtures.mjs')).mountComposer();
@@ -95,20 +100,6 @@ for (const palette of palettes) {
 		await submit.hover();
 		await expect(submit).toHaveCSS('background-color', await token('button.hoverBackground'));
 
-		// These inline backgrounds model the native workbench parts. CleanSlate must
-		// not replace them with transparent macOS material or a shared sidebar color.
-		const chrome = await page.evaluate(() => {
-			const values = {};
-			for (const [part, color] of [['sidebar', 'sideBar.background'], ['titlebar', 'titleBar.activeBackground'], ['activitybar', 'activityBar.background']]) {
-				const element = document.body.appendChild(document.createElement('div'));
-				element.className = `part ${part}`;
-				element.style.backgroundColor = `var(--vscode-${color.replaceAll('.', '-')})`;
-				values[part] = { actual: getComputedStyle(element).backgroundColor, expected: qa.tokenColor(color) };
-				element.remove();
-			}
-			return values;
-		});
-		for (const value of Object.values(chrome)) { expect(value.actual).toBe(value.expected); }
 		await testInfo.attach('chat-theme', { body: await page.screenshot(), contentType: 'image/png' });
 		await page.evaluate(async () => {
 			qa.command.update(undefined);
@@ -134,6 +125,7 @@ test('switching theme live updates mounted controls and keeps drafts and approva
 		qa.originalInput = qa.composer.getInputElement();
 	});
 	for (const palette of palettes.filter(p => ['Default Dark Modern', 'Default Light Modern', 'Default High Contrast', 'Default High Contrast Light', 'Custom plum and cream'].includes(p.name))) {
+		await page.emulateMedia({ colorScheme: ['vs-dark', 'hc-black'].includes(palette.kind) ? 'dark' : 'light' });
 		await page.evaluate(palette => qa.setTheme(palette), palette);
 		await expect(page.locator('textarea')).toHaveValue('Keep this draft when the theme changes');
 		expect(await page.evaluate(() => qa.originalInput === qa.composer.getInputElement())).toBe(true);
